@@ -6,6 +6,7 @@ import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
 import { validateInvoice } from '../../services/invoice-validation.js';
 import { initiateRedemption } from '../../services/redemption.js';
 import { requireConsumerAuth } from '../middleware/auth.js';
+import { sendWhatsAppOTP } from '../../services/whatsapp.js';
 
 export default async function consumerRoutes(app: FastifyInstance) {
 
@@ -24,9 +25,11 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     const otp = await generateOTP(phoneNumber);
 
-    // In production: send OTP via Evolution API WhatsApp
-    // For now: return it in response (dev mode only)
-    return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV === 'development' ? otp : undefined };
+    // Send OTP via WhatsApp (Evolution API)
+    await sendWhatsAppOTP(phoneNumber, otp);
+
+    // Only expose OTP in dev mode for testing
+    return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV !== 'production' ? otp : undefined };
   });
 
   // ---- AUTH: Verify OTP ----

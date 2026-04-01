@@ -167,6 +167,33 @@ export async function getAccountBalance(
   return result[0].balance;
 }
 
+/**
+ * Computes an account's balance at a specific point in time.
+ * Replays all events up to the given timestamp.
+ * This fulfills the event sourcing requirement: any historical state is reconstructable.
+ */
+export async function getAccountBalanceAtTime(
+  accountId: string,
+  assetTypeId: string,
+  tenantId: string,
+  asOf: Date
+): Promise<string> {
+  const result = await prisma.$queryRaw<[{ balance: string }]>`
+    SELECT COALESCE(
+      SUM(CASE WHEN entry_type = 'CREDIT' AND status != 'reversed' THEN amount ELSE 0 END) -
+      SUM(CASE WHEN entry_type = 'DEBIT' AND status != 'reversed' THEN amount ELSE 0 END),
+      0
+    )::text AS balance
+    FROM ledger_entries
+    WHERE account_id = ${accountId}::uuid
+      AND asset_type_id = ${assetTypeId}::uuid
+      AND tenant_id = ${tenantId}::uuid
+      AND created_at <= ${asOf}
+  `;
+
+  return result[0].balance;
+}
+
 // ============================================================
 // HISTORY
 // ============================================================

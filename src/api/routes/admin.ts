@@ -4,6 +4,8 @@ import prisma from '../../db/client.js';
 import { authenticateAdmin, issueAdminTokens } from '../../services/auth.js';
 import { writeDoubleEntry, verifyHashChain, getAccountBalance } from '../../services/ledger.js';
 import { createSystemAccounts } from '../../services/accounts.js';
+import { sendTenantCredentials } from '../../services/email.js';
+import { generateMerchantQR } from '../../services/merchant-qr.js';
 
 // Admin auth middleware
 async function requireAdminAuth(request: any, reply: any) {
@@ -66,6 +68,12 @@ export default async function adminRoutes(app: FastifyInstance) {
       });
     }
 
+    // Generate static merchant QR code
+    await generateMerchantQR(tenant.id);
+
+    // Send credentials to owner via email
+    await sendTenantCredentials(ownerEmail, ownerName, name, ownerPassword, slug);
+
     // Audit
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
@@ -75,6 +83,16 @@ export default async function adminRoutes(app: FastifyInstance) {
     `;
 
     return { success: true, tenant };
+  });
+
+  // ---- GENERATE/REGENERATE MERCHANT QR ----
+  app.post('/api/admin/tenants/:id/generate-qr', { preHandler: [requireAdminAuth] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const tenant = await prisma.tenant.findUnique({ where: { id } });
+    if (!tenant) return reply.status(404).send({ error: 'Tenant not found' });
+
+    const result = await generateMerchantQR(id);
+    return { success: true, deepLink: result.deepLink, qrCodeUrl: result.qrCodeUrl };
   });
 
   app.patch('/api/admin/tenants/:id/deactivate', { preHandler: [requireAdminAuth] }, async (request, reply) => {

@@ -3,10 +3,12 @@ import bcrypt from 'bcryptjs';
 import prisma from '../../db/client.js';
 import { authenticateStaff, issueStaffTokens } from '../../services/auth.js';
 import { processCSV } from '../../services/csv-upload.js';
+import { enqueueCsvJob } from '../../services/workers.js';
 import { processRedemption } from '../../services/redemption.js';
 import { upgradeToVerified } from '../../services/accounts.js';
 import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
 import { requireStaffAuth, requireOwnerRole } from '../middleware/auth.js';
+import { verifyAndResolveLedgerEntry } from '../../services/qr-token.js';
 
 export default async function merchantRoutes(app: FastifyInstance) {
 
@@ -37,12 +39,47 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- CSV UPLOAD (Owner only) ----
   app.post('/api/merchant/csv-upload', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
-    const { csvContent } = request.body as { csvContent: string };
+    const { csvContent, async: useAsync } = request.body as { csvContent: string; async?: boolean };
 
     if (!csvContent) return reply.status(400).send({ error: 'csvContent is required' });
 
+    // If async=true and Redis is configured, queue the job
+    if (useAsync && process.env.REDIS_URL) {
+      const jobId = await enqueueCsvJob(csvContent, tenantId, staffId);
+      return { success: true, jobId, status: 'queued', message: 'CSV processing queued' };
+    }
+
+    // Otherwise process synchronously
     const result = await processCSV(csvContent, tenantId, staffId);
+
+    // Audit log
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'CSV_UPLOAD', 'success',
+        ${JSON.stringify({ batchId: result.batchId, rowsLoaded: result.rowsLoaded, rowsSkipped: result.rowsSkipped, rowsErrored: result.rowsErrored })}::jsonb, now())
+    `;
+
     return result;
+  });
+
+  // ---- CSV UPLOAD STATUS (Owner only) ----
+  app.get('/api/merchant/csv-upload/:batchId', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { batchId } = request.params as { batchId: string };
+
+    const batch = await prisma.uploadBatch.findFirst({ where: { id: batchId, tenantId } });
+    if (!batch) return reply.status(404).send({ error: 'Batch not found' });
+
+    return {
+      batchId: batch.id,
+      status: batch.status,
+      rowsLoaded: batch.rowsLoaded,
+      rowsSkipped: batch.rowsSkipped,
+      rowsErrored: batch.rowsErrored,
+      errorDetails: batch.errorDetails,
+      createdAt: batch.createdAt,
+      completedAt: batch.completedAt,
+    };
   });
 
   // ---- CATALOG MANAGEMENT (Owner only) ----
@@ -150,6 +187,38 @@ export default async function merchantRoutes(app: FastifyInstance) {
     }
 
     return result;
+  });
+
+  // ---- VERIFY OUTPUT TOKEN (Merchant confirms a validation event) ----
+  app.post('/api/merchant/verify-token', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { token } = request.body as { token: string };
+
+    if (!token) return reply.status(400).send({ error: 'token is required' });
+
+    const result = await verifyAndResolveLedgerEntry(token);
+
+    if (!result.valid) {
+      return reply.status(400).send({ valid: false, reason: result.reason });
+    }
+
+    // Ensure the token belongs to this merchant's tenant
+    if (result.payload!.tenantId !== tenantId) {
+      return reply.status(403).send({ valid: false, reason: 'Token belongs to a different merchant' });
+    }
+
+    return {
+      valid: true,
+      ledgerEntry: {
+        id: result.ledgerEntry!.id,
+        eventType: result.ledgerEntry!.eventType,
+        amount: result.ledgerEntry!.amount.toString(),
+        referenceId: result.ledgerEntry!.referenceId,
+        createdAt: result.ledgerEntry!.createdAt,
+        status: result.ledgerEntry!.status,
+      },
+      payload: result.payload,
+    };
   });
 
   // ---- CUSTOMER LOOKUP (Cashier + Owner) ----

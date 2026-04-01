@@ -117,7 +117,27 @@ export async function processCSV(
       const transactionDate = dateCol !== -1 && fields[dateCol] ? new Date(fields[dateCol]) : null;
       const customerPhone = phoneCol !== -1 && fields[phoneCol] ? fields[phoneCol] : null;
 
-      // Use raw upsert to handle ON CONFLICT DO NOTHING
+      // Check if a pending_validation invoice already exists for this number
+      // (consumer submitted photo before CSV was uploaded — reconciliation case)
+      const existingPending = await prisma.invoice.findFirst({
+        where: { tenantId, invoiceNumber, status: 'pending_validation' },
+      });
+
+      if (existingPending) {
+        // Confirm the pending invoice — the CSV proves it's real
+        const tolerance = parseFloat(process.env.INVOICE_AMOUNT_TOLERANCE || '0.05');
+        const amountDiff = Math.abs(Number(existingPending.amount) - amount);
+        if (amountDiff <= tolerance * amount) {
+          await prisma.invoice.update({
+            where: { id: existingPending.id },
+            data: { status: 'claimed' },
+          });
+        }
+        rowsSkipped++; // Still count as skipped (no new record created)
+        continue;
+      }
+
+      // Insert new invoice, skip if already exists
       const result = await prisma.$executeRaw`
         INSERT INTO invoices (id, tenant_id, invoice_number, amount, transaction_date, customer_phone, status, source, upload_batch_id, created_at, updated_at)
         VALUES (gen_random_uuid(), ${tenantId}::uuid, ${invoiceNumber}, ${amount}, ${transactionDate}::timestamptz, ${customerPhone}, 'available', 'csv_upload', ${batch.id}::uuid, now(), now())

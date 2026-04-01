@@ -37,37 +37,12 @@ export async function runReconciliation(): Promise<{
       },
     });
 
-    // If not found as a separate record, check if a completed upload batch
-    // for this tenant was uploaded after the pending invoice and had skipped rows
-    // (meaning the CSV contained this invoice but it was skipped because the
-    // photo_submission record already holds the invoice_number).
-    if (!csvInvoice) {
-      const recentBatch = await prisma.uploadBatch.findFirst({
-        where: {
-          tenantId: pending.tenantId,
-          status: 'completed',
-          completedAt: { gte: pending.createdAt },
-          rowsSkipped: { gt: 0 },
-        },
-        orderBy: { completedAt: 'desc' },
-      });
-
-      if (recentBatch) {
-        // Verify: the batch skipped at least one row AND there's no separate
-        // csv_upload invoice for this number (meaning our pending invoice was the skip)
-        const existsSeparate = await prisma.invoice.findFirst({
-          where: {
-            tenantId: pending.tenantId,
-            invoiceNumber: pending.invoiceNumber,
-            source: 'csv_upload',
-          },
-        });
-        // If no separate CSV record exists, the skip was our invoice
-        if (!existsSeparate) {
-          csvInvoice = pending as any;
-        }
-      }
-    }
+    // If not found as a separate CSV record, the invoice cannot be
+    // auto-confirmed. The CSV upload skips duplicates silently (ON CONFLICT
+    // DO NOTHING), so we can't determine from batch data which specific
+    // invoices were skipped. The pending invoice must wait for either:
+    // - The CSV to be re-processed with the photo_submission record removed
+    // - Manual confirmation by the merchant or admin
 
     if (csvInvoice) {
       // Match found — confirm

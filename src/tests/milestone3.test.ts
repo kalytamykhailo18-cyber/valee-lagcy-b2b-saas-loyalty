@@ -332,12 +332,13 @@ async function testStep3_4() {
   const recon1 = await runReconciliation();
   assert(recon1.stillPending === 1, `1 still pending (got: ${recon1.stillPending})`);
 
-  // Upload CSV with matching invoice
-  console.log('\nTest: Upload CSV then reconcile');
+  // Upload CSV with matching invoice — CSV upload confirms pending invoices directly
+  console.log('\nTest: Upload CSV → pending invoice confirmed directly');
   await processCSV(`invoice_number,total\nRECON-001,300.00`, tenant.id, staff.id);
 
+  // Reconciliation has nothing left — CSV already confirmed it
   const recon2 = await runReconciliation();
-  assert(recon2.confirmed === 1, `1 confirmed (got: ${recon2.confirmed})`);
+  assert(recon2.stillPending === 0, `0 still pending (got: ${recon2.stillPending})`);
 
   // Check invoice status
   const invoice = await prisma.invoice.findFirst({

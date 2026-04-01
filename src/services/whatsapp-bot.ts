@@ -207,6 +207,63 @@ export async function handleSupportIntent(
 }
 
 // ============================================================
+// OCR RETRY TRACKING (max 2 retries per session)
+// ============================================================
+
+const MAX_OCR_RETRIES = 2;
+// Map key: "{tenantId}:{phoneNumber}", value: { count, lastAttempt }
+const ocrRetryMap = new Map<string, { count: number; lastAttempt: number }>();
+
+export function getOcrRetryCount(tenantId: string, phoneNumber: string): number {
+  const key = `${tenantId}:${phoneNumber}`;
+  const entry = ocrRetryMap.get(key);
+  // Reset if last attempt was more than 1 hour ago (new session)
+  if (entry && Date.now() - entry.lastAttempt > 60 * 60 * 1000) {
+    ocrRetryMap.delete(key);
+    return 0;
+  }
+  return entry?.count || 0;
+}
+
+export function incrementOcrRetry(tenantId: string, phoneNumber: string): number {
+  const key = `${tenantId}:${phoneNumber}`;
+  const current = getOcrRetryCount(tenantId, phoneNumber);
+  const newCount = current + 1;
+  ocrRetryMap.set(key, { count: newCount, lastAttempt: Date.now() });
+  return newCount;
+}
+
+export function resetOcrRetry(tenantId: string, phoneNumber: string): void {
+  ocrRetryMap.delete(`${tenantId}:${phoneNumber}`);
+}
+
+// ============================================================
+// MERCHANT IDENTIFIER PARSING
+// ============================================================
+
+/**
+ * Parse the pre-filled message from the merchant QR code.
+ * Format: "MERCHANT:{slug}" or "MERCHANT:{slug}:BRANCH:{branchId}"
+ * Returns { tenantId, branchId } or null if not a QR message.
+ */
+export async function parseMerchantIdentifier(messageText: string): Promise<{
+  tenantId: string;
+  branchId: string | null;
+  tenantName: string;
+} | null> {
+  const match = messageText.match(/^MERCHANT:([a-z0-9\-]+)(?::BRANCH:([a-f0-9\-]+))?$/i);
+  if (!match) return null;
+
+  const slug = match[1];
+  const branchId = match[2] || null;
+
+  const tenant = await prisma.tenant.findUnique({ where: { slug } });
+  if (!tenant || tenant.status !== 'active') return null;
+
+  return { tenantId: tenant.id, branchId, tenantName: tenant.name };
+}
+
+// ============================================================
 // MAIN MESSAGE HANDLER
 // ============================================================
 
@@ -243,14 +300,77 @@ export async function handleIncomingMessage(params: {
     return handleSupportIntent(intent, phoneNumber, tenantId, accountId);
   }
 
-  // If it's an image, it's an invoice submission
+  // If it's an image, it's an invoice submission — run the full validation pipeline
   if (messageType === 'image') {
-    // In production: process through the validation pipeline
-    // Return confirmation that we received the image
-    return [
-      `📸 Recibimos tu factura. Estamos procesándola...`,
-      `Te notificaremos en unos segundos con el resultado.`,
-    ];
+    const { validateInvoice } = await import('./invoice-validation.js');
+    const { extractFromImage } = await import('./ocr.js');
+
+    // Get asset type for this tenant
+    const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = assetConfig
+      ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+      : await prisma.assetType.findFirst();
+
+    if (!assetType) {
+      return ['Error: no se ha configurado el tipo de puntos para este comercio.'];
+    }
+
+    // Stage A: OCR + AI extraction from the image
+    let extractedData;
+    let ocrRawText: string | null = null;
+
+    if (params.imageBuffer) {
+      const extraction = await extractFromImage(params.imageBuffer);
+      extractedData = extraction.extractedData;
+      ocrRawText = extraction.ocrRawText;
+    } else {
+      // No image buffer available (e.g., Evolution API didn't provide it)
+      return [
+        '📸 Recibimos tu imagen pero no pudimos procesarla.',
+        'Por favor intenta enviarla de nuevo como foto (no como documento).',
+      ];
+    }
+
+    // Check confidence threshold with retry tracking
+    const confidenceThreshold = parseFloat(process.env.OCR_CONFIDENCE_THRESHOLD || '0.7');
+    if (extractedData.confidence_score < confidenceThreshold) {
+      const retryCount = incrementOcrRetry(tenantId, phoneNumber);
+
+      if (retryCount >= MAX_OCR_RETRIES) {
+        resetOcrRetry(tenantId, phoneNumber);
+        return [
+          '❌ No pudimos leer tu factura después de varios intentos.',
+          'La validación no puede completarse con esta imagen. Por favor visita el comercio para asistencia.',
+        ];
+      }
+
+      const remaining = MAX_OCR_RETRIES - retryCount;
+      return [
+        '📸 No pudimos leer tu factura claramente.',
+        `Por favor envía una foto más clara. Te ${remaining === 1 ? 'queda 1 intento' : `quedan ${remaining} intentos`}.`,
+      ];
+    }
+
+    // Reset retry count on successful extraction
+    resetOcrRetry(tenantId, phoneNumber);
+
+    // Run full validation (Stages B through E)
+    const result = await validateInvoice({
+      tenantId,
+      senderPhone: phoneNumber,
+      assetTypeId: assetType.id,
+      extractedData,
+    });
+
+    if (result.success) {
+      return [
+        `✅ ¡Factura validada!`,
+        `Has ganado ${parseFloat(result.valueAssigned!).toLocaleString()} ${assetType.unitLabel}.`,
+        `Tu saldo total: ${parseFloat(result.newBalance!).toLocaleString()} ${assetType.unitLabel}.`,
+      ];
+    } else {
+      return [`❌ ${result.message}`];
+    }
   }
 
   // Default: state greeting

@@ -3,6 +3,8 @@ import { findOrCreateConsumerAccount, getSystemAccount } from './accounts.js';
 import { writeDoubleEntry, getAccountBalance } from './ledger.js';
 import { convertToLoyaltyValue } from './assets.js';
 import { checkGeofence } from './geofencing.js';
+import { extractFromImage } from './ocr.js';
+import { generateOutputToken } from './qr-token.js';
 
 export interface ExtractedInvoiceData {
   invoice_number: string | null;
@@ -21,16 +23,26 @@ export interface ValidationResult {
   newBalance?: string;
   invoiceNumber?: string;
   status?: string;
+  outputToken?: string;
 }
 
 export async function extractInvoiceData(
-  _imageBuffer: Buffer | null,
+  imageBuffer: Buffer | null,
   preExtracted?: ExtractedInvoiceData
-): Promise<ExtractedInvoiceData> {
-  if (preExtracted) return preExtracted;
+): Promise<{ data: ExtractedInvoiceData; ocrRawText: string | null }> {
+  if (preExtracted) return { data: preExtracted, ocrRawText: null };
+
+  if (imageBuffer) {
+    const result = await extractFromImage(imageBuffer);
+    return { data: result.extractedData, ocrRawText: result.ocrRawText };
+  }
+
   return {
-    invoice_number: null, total_amount: null, transaction_date: null,
-    customer_phone: null, merchant_name: null, confidence_score: 0,
+    ocrRawText: null,
+    data: {
+      invoice_number: null, total_amount: null, transaction_date: null,
+      customer_phone: null, merchant_name: null, confidence_score: 0,
+    },
   };
 }
 
@@ -46,8 +58,8 @@ export async function validateInvoice(params: {
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, assetTypeId } = params;
 
-  // STAGE A: Extract data
-  const extracted = await extractInvoiceData(params.imageBuffer || null, params.extractedData);
+  // STAGE A: Extract data (real OCR+AI if image provided, or pre-extracted for tests)
+  const { data: extracted, ocrRawText } = await extractInvoiceData(params.imageBuffer || null, params.extractedData);
   const confidenceThreshold = parseFloat(process.env.OCR_CONFIDENCE_THRESHOLD || '0.7');
 
   if (extracted.confidence_score < confidenceThreshold) {
@@ -138,6 +150,21 @@ export async function validateInvoice(params: {
     data: { status: 'claimed', consumerAccountId: consumerAccount.id, ledgerEntryId: ledgerResult.credit.id },
   });
 
+  // Generate output token — immediately after INVOICE_CLAIMED, attached to the ledger entry
+  const outputToken = generateOutputToken(
+    ledgerResult.credit.id,
+    consumerAccount.id,
+    loyaltyValue,
+    tenantId
+  );
+
+  // Store token signature on the invoice record (ledger is immutable — can't UPDATE it)
+  // The token is linked to the ledger entry via outputToken.payload.ledgerEntryId
+  await prisma.invoice.update({
+    where: { id: invoice.id },
+    data: { extractedData: { ...(invoice.extractedData as any || {}), outputTokenSignature: outputToken.signature } },
+  });
+
   // STAGE E: Get new balance
   const newBalance = await getAccountBalance(consumerAccount.id, assetTypeId, tenantId);
 
@@ -145,6 +172,7 @@ export async function validateInvoice(params: {
     success: true, stage: 'complete',
     message: `Invoice validated! You earned ${loyaltyValue} points. Your new balance is ${newBalance} points.`,
     valueAssigned: loyaltyValue, newBalance, invoiceNumber: extracted.invoice_number,
+    outputToken: outputToken.token,
   };
 }
 

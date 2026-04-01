@@ -25,9 +25,10 @@ export async function storeIdempotencyKey(
   key: string,
   resourceType: string,
   result: any,
-  ttlHours: number = 24
+  ttlHours?: number
 ): Promise<void> {
-  const expiresAt = new Date(Date.now() + ttlHours * 60 * 60 * 1000);
+  const defaultTTL = parseInt(process.env.OFFLINE_QUEUE_TTL_HOURS || '24');
+  const expiresAt = new Date(Date.now() + (ttlHours ?? defaultTTL) * 60 * 60 * 1000);
 
   await prisma.idempotencyKey.upsert({
     where: { key },

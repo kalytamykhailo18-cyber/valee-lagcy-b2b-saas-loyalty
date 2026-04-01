@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import prisma from '../db/client.js';
 import { writeDoubleEntry, getAccountBalance } from './ledger.js';
 import { getSystemAccount } from './accounts.js';
+import { enqueueExpiryJob } from './workers.js';
 
 // ============================================================
 // TYPES
@@ -114,6 +115,13 @@ export async function initiateRedemption(params: {
       ledgerPendingEntryId: ledgerResult.debit.id,
     },
   });
+
+  // Schedule automatic expiry via background worker
+  if (process.env.REDIS_URL) {
+    await enqueueExpiryJob(tokenId, ttlMinutes * 60 * 1000).catch(err => {
+      console.error('[Redemption] Failed to enqueue expiry job:', err);
+    });
+  }
 
   return {
     success: true,

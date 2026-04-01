@@ -159,6 +159,8 @@ model Tenant {
   disputes          Dispute[]
   tenantAssetConfig TenantAssetConfig[]
   redemptionTokens  RedemptionToken[]
+  idempotencyKeys   IdempotencyKey[]
+  otpSessions       OtpSession[]
 
   @@map("tenants")
 }
@@ -265,7 +267,7 @@ model LedgerEntry {
   eventType     LedgerEventType     @map("event_type")
   entryType     LedgerEntryType     @map("entry_type")
   accountId     String              @map("account_id") @db.Uuid
-  pairedEntryId String?             @map("paired_entry_id") @db.Uuid
+  pairedEntryId String?             @map("paired_entry_id") @db.Uuid // FK managed in custom SQL (DEFERRABLE INITIALLY DEFERRED)
   amount        Decimal             @db.Decimal(18, 8)
   assetTypeId   String              @map("asset_type_id") @db.Uuid
   referenceId   String              @map("reference_id") @db.VarChar(255)
@@ -285,8 +287,8 @@ model LedgerEntry {
   assetType AssetType @relation(fields: [assetTypeId], references: [id])
   branch    Branch?   @relation(fields: [branchId], references: [id])
 
-  pairedEntry      LedgerEntry?      @relation("PairedEntries", fields: [pairedEntryId], references: [id])
-  pairedByEntries  LedgerEntry[]     @relation("PairedEntries")
+  // pairedEntry relation removed — FK is DEFERRABLE INITIALLY DEFERRED (custom SQL)
+  // Use pairedEntryId field directly for queries
 
   invoices         Invoice[]
   redemptionTokens RedemptionToken[]
@@ -522,11 +524,14 @@ model Dispute {
 
 model IdempotencyKey {
   id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String?  @map("tenant_id") @db.Uuid
   key          String   @unique @db.VarChar(255)
   resourceType String   @map("resource_type") @db.VarChar(100)
   result       Json
   expiresAt    DateTime @map("expires_at") @db.Timestamptz
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([expiresAt])
   @@map("idempotency_keys")
@@ -538,11 +543,14 @@ model IdempotencyKey {
 
 model OtpSession {
   id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String?  @map("tenant_id") @db.Uuid
   phoneNumber String   @map("phone_number") @db.VarChar(30)
   otpHash     String   @map("otp_hash") @db.VarChar(255)
   expiresAt   DateTime @map("expires_at") @db.Timestamptz
   used        Boolean  @default(false)
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant    Tenant?  @relation(fields: [tenantId], references: [id])
 
   @@index([phoneNumber, used, expiresAt])
   @@map("otp_sessions")

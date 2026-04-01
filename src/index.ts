@@ -6,6 +6,7 @@ import cors from '@fastify/cors';
 import consumerRoutes from './api/routes/consumer.js';
 import merchantRoutes from './api/routes/merchant.js';
 import adminRoutes from './api/routes/admin.js';
+import webhookRoutes from './api/routes/webhook.js';
 
 const app = Fastify({ logger: true });
 
@@ -15,9 +16,16 @@ async function start() {
   await app.register(consumerRoutes);
   await app.register(merchantRoutes);
   await app.register(adminRoutes);
+  await app.register(webhookRoutes);
 
   // Health check
   app.get('/api/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }));
+
+  // Start background workers if Redis is configured
+  if (process.env.REDIS_URL) {
+    const { startWorkers } = await import('./services/workers.js');
+    startWorkers();
+  }
 
   const port = parseInt(process.env.PORT || '3000');
   const host = process.env.HOST || '0.0.0.0';
