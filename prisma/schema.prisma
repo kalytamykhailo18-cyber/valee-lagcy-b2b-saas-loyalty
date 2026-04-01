@@ -1,0 +1,549 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum TenantStatus {
+  active
+  inactive
+}
+
+enum AccountType {
+  shadow
+  verified
+  system
+}
+
+enum SystemAccountType {
+  issued_value_pool
+  redemption_holding
+}
+
+enum LedgerEventType {
+  INVOICE_CLAIMED
+  REDEMPTION_PENDING
+  REDEMPTION_CONFIRMED
+  REDEMPTION_EXPIRED
+  REVERSAL
+  ADJUSTMENT_MANUAL
+  TRANSFER_P2P
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum LedgerReferenceType {
+  invoice
+  redemption_token
+  manual_adjustment
+  transfer
+  system
+}
+
+enum LedgerStatus {
+  confirmed
+  provisional
+  reversed
+}
+
+enum InvoiceStatus {
+  available
+  claimed
+  pending_validation
+  rejected
+  manual_review
+}
+
+enum InvoiceSource {
+  csv_upload
+  photo_submission
+}
+
+enum UploadBatchStatus {
+  queued
+  processing
+  completed
+  failed
+}
+
+enum RedemptionTokenStatus {
+  pending
+  used
+  expired
+}
+
+enum StaffRole {
+  owner
+  cashier
+}
+
+enum AuditActorType {
+  staff
+  admin
+}
+
+enum AuditActorRole {
+  owner
+  cashier
+  admin
+}
+
+enum AuditActionType {
+  QR_SCAN_SUCCESS
+  QR_SCAN_FAILURE
+  IDENTITY_UPGRADE
+  CUSTOMER_LOOKUP
+  CSV_UPLOAD
+  PRODUCT_CREATED
+  PRODUCT_UPDATED
+  PRODUCT_TOGGLED
+  STAFF_CREATED
+  STAFF_DEACTIVATED
+  MANUAL_ADJUSTMENT
+  DISPUTE_APPROVED
+  DISPUTE_REJECTED
+  DISPUTE_ESCALATED
+  TENANT_CREATED
+  TENANT_DEACTIVATED
+}
+
+enum AuditOutcome {
+  success
+  failure
+}
+
+enum DisputeStatus {
+  open
+  approved
+  rejected
+  escalated
+}
+
+enum DisputeResolverType {
+  staff
+  admin
+}
+
+// ============================================================
+// 1. TENANTS
+// ============================================================
+
+model Tenant {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @db.VarChar(255)
+  slug       String       @unique @db.VarChar(100)
+  status     TenantStatus @default(active)
+  ownerEmail String       @map("owner_email") @db.VarChar(255)
+  qrCodeUrl  String?      @map("qr_code_url")
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  branches          Branch[]
+  accounts          Account[]
+  ledgerEntries     LedgerEntry[]
+  invoices          Invoice[]
+  uploadBatches     UploadBatch[]
+  products          Product[]
+  staff             Staff[]
+  auditLogs         AuditLog[]
+  disputes          Dispute[]
+  tenantAssetConfig TenantAssetConfig[]
+  redemptionTokens  RedemptionToken[]
+
+  @@map("tenants")
+}
+
+// ============================================================
+// 2. BRANCHES
+// ============================================================
+
+model Branch {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  name      String   @db.VarChar(255)
+  address   String?
+  latitude  Decimal? @db.Decimal(10, 7)
+  longitude Decimal? @db.Decimal(10, 7)
+  qrCodeUrl String?  @map("qr_code_url")
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  ledgerEntries    LedgerEntry[]
+  invoices         Invoice[]
+  redemptionTokens RedemptionToken[]
+  staff            Staff[]
+
+  @@index([tenantId])
+  @@index([tenantId, active])
+  @@map("branches")
+}
+
+// ============================================================
+// 3. ASSET_TYPES (global)
+// ============================================================
+
+model AssetType {
+  id                    String  @id @default(uuid()) @db.Uuid
+  name                  String  @unique @db.VarChar(100)
+  unitLabel             String  @map("unit_label") @db.VarChar(50)
+  defaultConversionRate Decimal @map("default_conversion_rate") @db.Decimal(18, 8)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenantAssetConfigs TenantAssetConfig[]
+  ledgerEntries      LedgerEntry[]
+  products           Product[]
+  redemptionTokens   RedemptionToken[]
+
+  @@map("asset_types")
+}
+
+// ============================================================
+// 4. TENANT_ASSET_CONFIG
+// ============================================================
+
+model TenantAssetConfig {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  assetTypeId    String   @map("asset_type_id") @db.Uuid
+  conversionRate Decimal  @map("conversion_rate") @db.Decimal(18, 8)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  assetType AssetType @relation(fields: [assetTypeId], references: [id])
+
+  @@unique([tenantId, assetTypeId])
+  @@map("tenant_asset_config")
+}
+
+// ============================================================
+// 5. ACCOUNTS
+// ============================================================
+
+model Account {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  phoneNumber       String?            @map("phone_number") @db.VarChar(30)
+  cedula            String?            @db.VarChar(20)
+  accountType       AccountType        @map("account_type")
+  systemAccountType SystemAccountType? @map("system_account_type")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  ledgerEntries    LedgerEntry[]
+  invoices         Invoice[]
+  redemptionTokens RedemptionToken[]
+  auditLogs        AuditLog[]
+  disputes         Dispute[]
+
+  @@unique([tenantId, phoneNumber])
+  @@unique([tenantId, cedula])
+  @@unique([tenantId, systemAccountType])
+  @@index([tenantId, accountType])
+  @@map("accounts")
+}
+
+// ============================================================
+// 6. LEDGER_ENTRIES (APPEND-ONLY, IMMUTABLE)
+// ============================================================
+
+model LedgerEntry {
+  id            String              @id @default(uuid()) @db.Uuid
+  tenantId      String              @map("tenant_id") @db.Uuid
+  eventType     LedgerEventType     @map("event_type")
+  entryType     LedgerEntryType     @map("entry_type")
+  accountId     String              @map("account_id") @db.Uuid
+  pairedEntryId String?             @map("paired_entry_id") @db.Uuid
+  amount        Decimal             @db.Decimal(18, 8)
+  assetTypeId   String              @map("asset_type_id") @db.Uuid
+  referenceId   String              @map("reference_id") @db.VarChar(255)
+  referenceType LedgerReferenceType @map("reference_type")
+  branchId      String?             @map("branch_id") @db.Uuid
+  latitude      Decimal?            @db.Decimal(10, 7)
+  longitude     Decimal?            @db.Decimal(10, 7)
+  deviceId      String?             @map("device_id") @db.VarChar(255)
+  status        LedgerStatus        @default(confirmed)
+  prevHash      String?             @map("prev_hash") @db.VarChar(64)
+  hash          String              @db.VarChar(64)
+  metadata      Json?
+  createdAt     DateTime            @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  account   Account   @relation(fields: [accountId], references: [id])
+  assetType AssetType @relation(fields: [assetTypeId], references: [id])
+  branch    Branch?   @relation(fields: [branchId], references: [id])
+
+  pairedEntry      LedgerEntry?      @relation("PairedEntries", fields: [pairedEntryId], references: [id])
+  pairedByEntries  LedgerEntry[]     @relation("PairedEntries")
+
+  invoices         Invoice[]
+  redemptionTokens RedemptionToken[]
+  disputes         Dispute[]
+
+  @@unique([tenantId, referenceId, entryType])
+  @@index([tenantId, accountId])
+  @@index([tenantId, eventType])
+  @@index([tenantId, referenceId])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@map("ledger_entries")
+}
+
+// ============================================================
+// 7. INVOICES
+// ============================================================
+
+model Invoice {
+  id                 String        @id @default(uuid()) @db.Uuid
+  tenantId           String        @map("tenant_id") @db.Uuid
+  branchId           String?       @map("branch_id") @db.Uuid
+  invoiceNumber      String        @map("invoice_number") @db.VarChar(255)
+  amount             Decimal       @db.Decimal(18, 2)
+  transactionDate    DateTime?     @map("transaction_date") @db.Timestamptz
+  customerPhone      String?       @map("customer_phone") @db.VarChar(30)
+  status             InvoiceStatus @default(available)
+  source             InvoiceSource
+  uploadBatchId      String?       @map("upload_batch_id") @db.Uuid
+  consumerAccountId  String?       @map("consumer_account_id") @db.Uuid
+  ledgerEntryId      String?       @map("ledger_entry_id") @db.Uuid
+  ocrRawText         String?       @map("ocr_raw_text")
+  extractedData      Json?         @map("extracted_data")
+  confidenceScore    Decimal?      @map("confidence_score") @db.Decimal(4, 3)
+  submittedLatitude  Decimal?      @map("submitted_latitude") @db.Decimal(10, 7)
+  submittedLongitude Decimal?      @map("submitted_longitude") @db.Decimal(10, 7)
+  rejectionReason    String?       @map("rejection_reason")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt          DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  branch          Branch?      @relation(fields: [branchId], references: [id])
+  uploadBatch     UploadBatch? @relation(fields: [uploadBatchId], references: [id])
+  consumerAccount Account?     @relation(fields: [consumerAccountId], references: [id])
+  ledgerEntry     LedgerEntry? @relation(fields: [ledgerEntryId], references: [id])
+
+  @@unique([tenantId, invoiceNumber])
+  @@index([tenantId, status])
+  @@index([tenantId, customerPhone])
+  @@index([tenantId, uploadBatchId])
+  @@map("invoices")
+}
+
+// ============================================================
+// 8. UPLOAD_BATCHES
+// ============================================================
+
+model UploadBatch {
+  id               String            @id @default(uuid()) @db.Uuid
+  tenantId         String            @map("tenant_id") @db.Uuid
+  filename         String            @db.VarChar(255)
+  fileUrl          String?           @map("file_url")
+  status           UploadBatchStatus @default(queued)
+  rowsLoaded       Int?              @map("rows_loaded")
+  rowsSkipped      Int?              @map("rows_skipped")
+  rowsErrored      Int?              @map("rows_errored")
+  errorDetails     Json?             @map("error_details")
+  uploadedByStaffId String           @map("uploaded_by_staff_id") @db.Uuid
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  completedAt      DateTime?         @map("completed_at") @db.Timestamptz
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  staff     Staff     @relation(fields: [uploadedByStaffId], references: [id])
+  invoices  Invoice[]
+
+  @@map("upload_batches")
+}
+
+// ============================================================
+// 9. REDEMPTION_TOKENS
+// ============================================================
+
+model RedemptionToken {
+  id                   String                @id @default(uuid()) @db.Uuid
+  tenantId             String                @map("tenant_id") @db.Uuid
+  consumerAccountId    String                @map("consumer_account_id") @db.Uuid
+  productId            String                @map("product_id") @db.Uuid
+  amount               Decimal               @db.Decimal(18, 8)
+  assetTypeId          String                @map("asset_type_id") @db.Uuid
+  status               RedemptionTokenStatus @default(pending)
+  tokenSignature       String                @map("token_signature") @db.VarChar(64)
+  expiresAt            DateTime              @map("expires_at") @db.Timestamptz
+  usedAt               DateTime?             @map("used_at") @db.Timestamptz
+  usedByStaffId        String?               @map("used_by_staff_id") @db.Uuid
+  branchId             String?               @map("branch_id") @db.Uuid
+  ledgerPendingEntryId String                @map("ledger_pending_entry_id") @db.Uuid
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  consumerAccount Account     @relation(fields: [consumerAccountId], references: [id])
+  product         Product     @relation(fields: [productId], references: [id])
+  assetType       AssetType   @relation(fields: [assetTypeId], references: [id])
+  usedByStaff     Staff?      @relation("RedemptionUsedBy", fields: [usedByStaffId], references: [id])
+  branch          Branch?     @relation(fields: [branchId], references: [id])
+  ledgerEntry     LedgerEntry @relation(fields: [ledgerPendingEntryId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([consumerAccountId])
+  @@index([tokenSignature])
+  @@map("redemption_tokens")
+}
+
+// ============================================================
+// 10. PRODUCTS
+// ============================================================
+
+model Product {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  name           String    @db.VarChar(255)
+  description    String?
+  photoUrl       String?   @map("photo_url")
+  redemptionCost Decimal   @map("redemption_cost") @db.Decimal(18, 8)
+  assetTypeId    String    @map("asset_type_id") @db.Uuid
+  stock          Int       @default(0)
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  assetType        AssetType         @relation(fields: [assetTypeId], references: [id])
+  redemptionTokens RedemptionToken[]
+
+  @@index([tenantId, active])
+  @@index([tenantId, active, stock])
+  @@map("products")
+}
+
+// ============================================================
+// 11. STAFF
+// ============================================================
+
+model Staff {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  branchId     String?   @map("branch_id") @db.Uuid
+  name         String    @db.VarChar(255)
+  email        String    @db.VarChar(255)
+  passwordHash String    @map("password_hash") @db.VarChar(255)
+  role         StaffRole
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id])
+  branch        Branch?           @relation(fields: [branchId], references: [id])
+  uploadBatches UploadBatch[]
+  redemptions   RedemptionToken[] @relation("RedemptionUsedBy")
+
+  @@unique([tenantId, email])
+  @@map("staff")
+}
+
+// ============================================================
+// 12. ADMIN_USERS
+// ============================================================
+
+model AdminUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  name         String   @db.VarChar(255)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("admin_users")
+}
+
+// ============================================================
+// 13. AUDIT_LOG (APPEND-ONLY, IMMUTABLE)
+// ============================================================
+
+model AuditLog {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String?         @map("tenant_id") @db.Uuid
+  actorId           String          @map("actor_id") @db.Uuid
+  actorType         AuditActorType  @map("actor_type")
+  actorRole         AuditActorRole  @map("actor_role")
+  actionType        AuditActionType @map("action_type")
+  consumerAccountId String?         @map("consumer_account_id") @db.Uuid
+  amount            Decimal?        @db.Decimal(18, 8)
+  outcome           AuditOutcome
+  failureReason     String?         @map("failure_reason")
+  metadata          Json?
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant          Tenant?  @relation(fields: [tenantId], references: [id])
+  consumerAccount Account? @relation(fields: [consumerAccountId], references: [id])
+
+  @@map("audit_log")
+}
+
+// ============================================================
+// 14. DISPUTES
+// ============================================================
+
+model Dispute {
+  id                       String              @id @default(uuid()) @db.Uuid
+  tenantId                 String              @map("tenant_id") @db.Uuid
+  consumerAccountId        String              @map("consumer_account_id") @db.Uuid
+  description              String
+  screenshotUrl            String?             @map("screenshot_url")
+  status                   DisputeStatus       @default(open)
+  resolverId               String?             @map("resolver_id") @db.Uuid
+  resolverType             DisputeResolverType? @map("resolver_type")
+  resolutionReason         String?             @map("resolution_reason")
+  ledgerAdjustmentEntryId  String?             @map("ledger_adjustment_entry_id") @db.Uuid
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz
+  resolvedAt               DateTime?           @map("resolved_at") @db.Timestamptz
+
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  consumerAccount Account      @relation(fields: [consumerAccountId], references: [id])
+  ledgerEntry     LedgerEntry? @relation(fields: [ledgerAdjustmentEntryId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([consumerAccountId])
+  @@map("disputes")
+}
+
+// ============================================================
+// 15. IDEMPOTENCY_KEYS
+// ============================================================
+
+model IdempotencyKey {
+  id           String   @id @default(uuid()) @db.Uuid
+  key          String   @unique @db.VarChar(255)
+  resourceType String   @map("resource_type") @db.VarChar(100)
+  result       Json
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+// ============================================================
+// 16. OTP_SESSIONS
+// ============================================================
+
+model OtpSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  phoneNumber String   @map("phone_number") @db.VarChar(30)
+  otpHash     String   @map("otp_hash") @db.VarChar(255)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz
+  used        Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([phoneNumber, used, expiresAt])
+  @@map("otp_sessions")
+}
