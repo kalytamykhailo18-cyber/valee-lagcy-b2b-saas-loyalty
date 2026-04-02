@@ -160,7 +160,9 @@ model Tenant {
   tenantAssetConfig TenantAssetConfig[]
   redemptionTokens  RedemptionToken[]
   idempotencyKeys   IdempotencyKey[]
-  otpSessions       OtpSession[]
+  otpSessions            OtpSession[]
+  recurrenceRules        RecurrenceRule[]
+  recurrenceNotifications RecurrenceNotification[]
 
   @@map("tenants")
 }
@@ -238,17 +240,20 @@ model Account {
   tenantId          String             @map("tenant_id") @db.Uuid
   phoneNumber       String?            @map("phone_number") @db.VarChar(30)
   cedula            String?            @db.VarChar(20)
-  accountType       AccountType        @map("account_type")
-  systemAccountType SystemAccountType? @map("system_account_type")
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt         DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  accountType          AccountType        @map("account_type")
+  systemAccountType    SystemAccountType? @map("system_account_type")
+  level                Int                @default(1)
+  welcomeBonusGranted  Boolean            @default(false) @map("welcome_bonus_granted")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   tenant           Tenant            @relation(fields: [tenantId], references: [id])
   ledgerEntries    LedgerEntry[]
   invoices         Invoice[]
-  redemptionTokens RedemptionToken[]
-  auditLogs        AuditLog[]
-  disputes         Dispute[]
+  redemptionTokens        RedemptionToken[]
+  auditLogs               AuditLog[]
+  disputes                Dispute[]
+  recurrenceNotifications RecurrenceNotification[]
 
   @@unique([tenantId, phoneNumber])
   @@unique([tenantId, cedula])
@@ -290,9 +295,10 @@ model LedgerEntry {
   // pairedEntry relation removed — FK is DEFERRABLE INITIALLY DEFERRED (custom SQL)
   // Use pairedEntryId field directly for queries
 
-  invoices         Invoice[]
-  redemptionTokens RedemptionToken[]
-  disputes         Dispute[]
+  invoices                Invoice[]
+  redemptionTokens        RedemptionToken[]
+  disputes                Dispute[]
+  recurrenceNotifications RecurrenceNotification[]
 
   @@unique([tenantId, referenceId, entryType])
   @@index([tenantId, accountId])
@@ -322,6 +328,7 @@ model Invoice {
   ledgerEntryId      String?       @map("ledger_entry_id") @db.Uuid
   ocrRawText         String?       @map("ocr_raw_text")
   extractedData      Json?         @map("extracted_data")
+  orderDetails       Json?         @map("order_details")
   confidenceScore    Decimal?      @map("confidence_score") @db.Decimal(4, 3)
   submittedLatitude  Decimal?      @map("submitted_latitude") @db.Decimal(10, 7)
   submittedLongitude Decimal?      @map("submitted_longitude") @db.Decimal(10, 7)
@@ -414,6 +421,7 @@ model Product {
   redemptionCost Decimal   @map("redemption_cost") @db.Decimal(18, 8)
   assetTypeId    String    @map("asset_type_id") @db.Uuid
   stock          Int       @default(0)
+  minLevel       Int       @default(1) @map("min_level")
   active         Boolean   @default(true)
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
@@ -554,4 +562,54 @@ model OtpSession {
 
   @@index([phoneNumber, used, expiresAt])
   @@map("otp_sessions")
+}
+
+// ============================================================
+// 17. RECURRENCE_RULES
+// ============================================================
+
+model RecurrenceRule {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  name            String    @db.VarChar(255)
+  intervalDays    Int       @map("interval_days")
+  graceDays       Int       @default(1) @map("grace_days")
+  messageTemplate String    @map("message_template")
+  bonusAmount     Decimal?  @map("bonus_amount") @db.Decimal(18, 8)
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id])
+  notifications RecurrenceNotification[]
+
+  @@index([tenantId, active])
+  @@map("recurrence_rules")
+}
+
+// ============================================================
+// 18. RECURRENCE_NOTIFICATIONS
+// ============================================================
+
+model RecurrenceNotification {
+  id                 String   @id @default(uuid()) @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
+  ruleId             String   @map("rule_id") @db.Uuid
+  consumerAccountId  String   @map("consumer_account_id") @db.Uuid
+  lastVisitAt        DateTime @map("last_visit_at") @db.Timestamptz
+  daysSinceVisit     Int      @map("days_since_visit")
+  messageSent        String   @map("message_sent")
+  bonusGranted       Boolean  @default(false) @map("bonus_granted")
+  ledgerEntryId      String?  @map("ledger_entry_id") @db.Uuid
+  sentAt             DateTime @default(now()) @map("sent_at") @db.Timestamptz
+
+  tenant          Tenant         @relation(fields: [tenantId], references: [id])
+  rule            RecurrenceRule @relation(fields: [ruleId], references: [id])
+  consumerAccount Account        @relation(fields: [consumerAccountId], references: [id])
+  ledgerEntry     LedgerEntry?   @relation(fields: [ledgerEntryId], references: [id])
+
+  @@unique([tenantId, ruleId, consumerAccountId, lastVisitAt])
+  @@index([tenantId, consumerAccountId])
+  @@index([tenantId, sentAt])
+  @@map("recurrence_notifications")
 }

@@ -32,6 +32,29 @@ export default function MerchantDashboard() {
     router.push('/merchant/login')
   }
 
+  const [multiplier, setMultiplier] = useState<any>(null)
+  const [newMultiplier, setNewMultiplier] = useState('')
+  const [multiplierMsg, setMultiplierMsg] = useState('')
+
+  useEffect(() => {
+    if (role === 'owner') loadMultiplier()
+  }, [role])
+
+  async function loadMultiplier() {
+    try { setMultiplier(await api.getMultiplier()) } catch {}
+  }
+
+  async function handleSetMultiplier() {
+    if (!newMultiplier || !multiplier?.assetTypeId) return
+    setMultiplierMsg('')
+    try {
+      await api.setMultiplier(newMultiplier, multiplier.assetTypeId)
+      setMultiplierMsg(`Multiplicador actualizado a ${newMultiplier}x`)
+      setNewMultiplier('')
+      loadMultiplier()
+    } catch { setMultiplierMsg('Error al actualizar') }
+  }
+
   if (role === 'cashier') return null
 
   return (
@@ -43,6 +66,31 @@ export default function MerchantDashboard() {
         </div>
         <button onClick={logout} className="text-sm text-emerald-200 hover:text-white">Salir</button>
       </div>
+
+      {/* Multiplier Control */}
+      {multiplier && (
+        <div className="mx-4 mt-4 bg-white rounded-xl p-4 shadow-sm">
+          <p className="text-sm font-medium text-slate-700">Multiplicador de puntos</p>
+          <p className="text-2xl font-bold text-emerald-700 mt-1">{parseFloat(multiplier.currentRate)}x</p>
+          <div className="flex gap-2 mt-3">
+            {['1', '1.5', '2', '3'].map(m => (
+              <button key={m} onClick={() => setNewMultiplier(m)}
+                className={`px-3 py-1 rounded-lg text-sm font-medium ${newMultiplier === m ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'}`}>
+                {m}x
+              </button>
+            ))}
+            <input type="number" step="0.1" min="0.1" placeholder="Otro" value={!['1','1.5','2','3'].includes(newMultiplier) ? newMultiplier : ''}
+              onChange={e => setNewMultiplier(e.target.value)}
+              className="w-16 px-2 py-1 rounded-lg border text-sm" />
+          </div>
+          {newMultiplier && (
+            <button onClick={handleSetMultiplier} className="mt-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium w-full">
+              Aplicar {newMultiplier}x
+            </button>
+          )}
+          {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
+        </div>
+      )}
 
       {/* Metrics Cards */}
       {analytics && (
@@ -83,6 +131,10 @@ export default function MerchantDashboard() {
         <Link href="/merchant/disputes" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
           <p className="font-medium">📋 Disputas</p>
           <p className="text-xs text-slate-500">Resolver reclamos de clientes</p>
+        </Link>
+        <Link href="/merchant/recurrence" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
+          <p className="font-medium">🔄 Recurrencia</p>
+          <p className="text-xs text-slate-500">Reglas de retencion automatica por WhatsApp</p>
         </Link>
       </div>
     </div>

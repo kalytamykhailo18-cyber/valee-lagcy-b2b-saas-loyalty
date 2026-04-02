@@ -156,11 +156,23 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // ---- PRODUCT CATALOG ----
   app.get('/api/consumer/catalog', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { accountId, tenantId } = request.consumer!;
+    const { limit = '20', offset = '0' } = request.query as { limit?: string; offset?: string };
 
+    // Get consumer's level for reward filtering
+    const account = await prisma.account.findUnique({ where: { id: accountId } });
+    const consumerLevel = account?.level || 1;
+
+    const where = { tenantId, active: true, stock: { gt: 0 } as any, minLevel: { lte: consumerLevel } };
+
+    // Paginated product list for infinite scroll
     const products = await prisma.product.findMany({
-      where: { tenantId, active: true, stock: { gt: 0 } },
+      where,
       orderBy: { name: 'asc' },
+      take: parseInt(limit),
+      skip: parseInt(offset),
     });
+
+    const total = await prisma.product.count({ where });
 
     // Get consumer balance
     const assetType = await prisma.assetType.findFirst();
@@ -176,9 +188,12 @@ export default async function consumerRoutes(app: FastifyInstance) {
         photoUrl: p.photoUrl,
         redemptionCost: p.redemptionCost.toString(),
         stock: p.stock,
+        minLevel: p.minLevel,
         canAfford: parseFloat(balance) >= Number(p.redemptionCost),
       })),
+      total,
       balance,
+      consumerLevel,
     };
   });
 

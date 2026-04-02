@@ -25,6 +25,8 @@ async function cleanAll() {
   await prisma.$executeRaw`ALTER TABLE audit_log DISABLE TRIGGER trg_audit_no_delete`;
   await prisma.$executeRaw`ALTER TABLE audit_log DISABLE TRIGGER trg_audit_no_update`;
 
+  await prisma.recurrenceNotification.deleteMany();
+  await prisma.recurrenceRule.deleteMany();
   await prisma.dispute.deleteMany();
   await prisma.redemptionToken.deleteMany();
   await prisma.invoice.deleteMany();

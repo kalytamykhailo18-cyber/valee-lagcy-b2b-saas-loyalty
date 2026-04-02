@@ -213,6 +213,37 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { success: true, newBalance, ledgerEntryId: ledgerResult.credit.id };
   });
 
+  // ---- ADMIN: UNLINK CEDULA (downgrade verified → shadow) ----
+  app.post('/api/admin/unlink-cedula', { preHandler: [requireAdminAuth] }, async (request, reply) => {
+    const { accountId, tenantId, reason } = request.body as any;
+
+    if (!accountId || !tenantId || !reason) {
+      return reply.status(400).send({ error: 'accountId, tenantId, and reason are required' });
+    }
+
+    const account = await prisma.account.findFirst({ where: { id: accountId, tenantId } });
+    if (!account) return reply.status(404).send({ error: 'Account not found' });
+    if (account.accountType !== 'verified') {
+      return reply.status(400).send({ error: 'Account is not verified — nothing to unlink' });
+    }
+
+    await prisma.account.update({
+      where: { id: accountId },
+      data: { accountType: 'shadow', cedula: null },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type,
+        consumer_account_id, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${(request as any).admin.adminId}::uuid,
+        'admin', 'admin', 'IDENTITY_UPGRADE',
+        ${accountId}::uuid, 'success',
+        ${JSON.stringify({ action: 'unlink_cedula', previousCedula: account.cedula, reason })}::jsonb, now())
+    `;
+
+    return { success: true, account: { id: accountId, accountType: 'shadow', cedula: null } };
+  });
+
   // ---- PLATFORM METRICS ----
   app.get('/api/admin/metrics', { preHandler: [requireAdminAuth] }, async () => {
     const activeTenants = await prisma.tenant.count({ where: { status: 'active' } });

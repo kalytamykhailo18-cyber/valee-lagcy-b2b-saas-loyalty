@@ -29,7 +29,7 @@ export const api = {
   getBalance: () => request('/api/consumer/balance'),
   getHistory: (limit = 50, offset = 0) => request(`/api/consumer/history?limit=${limit}&offset=${offset}`),
   getAccount: () => request('/api/consumer/account'),
-  getCatalog: () => request('/api/consumer/catalog'),
+  getCatalog: (limit = 20, offset = 0) => request(`/api/consumer/catalog?limit=${limit}&offset=${offset}`),
 
   // Consumer Actions
   validateInvoice: (data: any) =>
@@ -58,6 +58,16 @@ export const api = {
   upgradeIdentity: (phoneNumber: string, cedula: string) =>
     request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula }) }),
   getAnalytics: () => request('/api/merchant/analytics'),
+  getRecurrenceRules: () => request('/api/merchant/recurrence-rules'),
+  createRecurrenceRule: (data: any) =>
+    request('/api/merchant/recurrence-rules', { method: 'POST', body: JSON.stringify(data) }),
+  toggleRecurrenceRule: (id: string) =>
+    request(`/api/merchant/recurrence-rules/${id}/toggle`, { method: 'PATCH' }),
+  getRecurrenceNotifications: (limit = 50, offset = 0) =>
+    request(`/api/merchant/recurrence-notifications?limit=${limit}&offset=${offset}`),
+  getMultiplier: () => request('/api/merchant/multiplier'),
+  setMultiplier: (multiplier: string, assetTypeId: string) =>
+    request('/api/merchant/multiplier', { method: 'PUT', body: JSON.stringify({ multiplier, assetTypeId }) }),
   createStaff: (data: any) =>
     request('/api/merchant/staff', { method: 'POST', body: JSON.stringify(data) }),
 

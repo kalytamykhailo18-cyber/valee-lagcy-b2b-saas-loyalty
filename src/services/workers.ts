@@ -8,6 +8,7 @@ import IORedis from 'ioredis';
 import { processCSV } from './csv-upload.js';
 import { runReconciliation } from './reconciliation.js';
 import { expireRedemption } from './redemption.js';
+import { runRecurrenceEngine } from './recurrence.js';
 import prisma from '../db/client.js';
 
 function getRedisConnection() {
@@ -97,6 +98,14 @@ export function startWorkers() {
     await expireRedemption(tokenId);
   }, { connection });
 
+  // Recurrence engine worker
+  new Worker('recurrence', async () => {
+    console.log('[Worker] Running recurrence engine...');
+    const result = await runRecurrenceEngine();
+    console.log(`[Worker] Recurrence: ${result.notified} notified, ${result.bonusesGranted} bonuses, ${result.skipped} skipped`);
+    return result;
+  }, { connection });
+
   // Schedule reconciliation to run every 5 minutes
   const reconciliationIntervalMs = 5 * 60 * 1000;
   setInterval(async () => {
@@ -107,6 +116,19 @@ export function startWorkers() {
       console.error('[Worker] Failed to enqueue reconciliation:', err);
     }
   }, reconciliationIntervalMs);
+
+  // Schedule recurrence engine to run once per day
+  const recurrenceIntervalMs = 24 * 60 * 60 * 1000;
+  const recurrenceQueue = new Queue('recurrence', { connection: getRedisConnection() });
+  setInterval(async () => {
+    try {
+      await recurrenceQueue.add('check-recurrence', {});
+    } catch (err) {
+      console.error('[Worker] Failed to enqueue recurrence:', err);
+    }
+  }, recurrenceIntervalMs);
+  // Also run once on startup
+  recurrenceQueue.add('check-recurrence', {}).catch(() => {});
 
   console.log('[Workers] All background workers started');
 }

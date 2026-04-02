@@ -5,13 +5,16 @@ import { convertToLoyaltyValue } from './assets.js';
 import { checkGeofence } from './geofencing.js';
 import { extractFromImage } from './ocr.js';
 import { generateOutputToken } from './qr-token.js';
+import { checkAndUpdateLevel } from './levels.js';
 
 export interface ExtractedInvoiceData {
   invoice_number: string | null;
   total_amount: number | null;
   transaction_date: string | null;
+  transaction_time?: string | null;
   customer_phone: string | null;
   merchant_name: string | null;
+  order_items?: Array<{ name: string; quantity: number; unit_price: number }> | null;
   confidence_score: number;
 }
 
@@ -160,17 +163,26 @@ export async function validateInvoice(params: {
 
   // Store token signature on the invoice record (ledger is immutable — can't UPDATE it)
   // The token is linked to the ledger entry via outputToken.payload.ledgerEntryId
+  // Store token signature + full order details on the invoice record
   await prisma.invoice.update({
     where: { id: invoice.id },
-    data: { extractedData: { ...(invoice.extractedData as any || {}), outputTokenSignature: outputToken.signature } },
+    data: {
+      extractedData: { ...(invoice.extractedData as any || {}), outputTokenSignature: outputToken.signature },
+      orderDetails: extracted.order_items ? { items: extracted.order_items, extractedAt: new Date().toISOString() } : undefined,
+    },
   });
 
-  // STAGE E: Get new balance
+  // STAGE E: Get new balance + check level-up
   const newBalance = await getAccountBalance(consumerAccount.id, assetTypeId, tenantId);
+  const levelResult = await checkAndUpdateLevel(consumerAccount.id, tenantId);
+
+  let message = `Invoice validated! You earned ${loyaltyValue} points. Your new balance is ${newBalance} points.`;
+  if (levelResult.leveled) {
+    message += ` Congratulations — you reached level ${levelResult.newLevel}!`;
+  }
 
   return {
-    success: true, stage: 'complete',
-    message: `Invoice validated! You earned ${loyaltyValue} points. Your new balance is ${newBalance} points.`,
+    success: true, stage: 'complete', message,
     valueAssigned: loyaltyValue, newBalance, invoiceNumber: extracted.invoice_number,
     outputToken: outputToken.token,
   };

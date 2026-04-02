@@ -7,7 +7,7 @@ import Link from 'next/link'
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ name: '', description: '', redemptionCost: '', stock: '0', assetTypeId: '' })
+  const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '0', assetTypeId: '' })
   const [loading, setLoading] = useState(false)
 
   useEffect(() => { loadProducts() }, [])
@@ -26,12 +26,13 @@ export default function ProductManagement() {
       await api.createProduct({
         name: form.name,
         description: form.description,
+        photoUrl: form.photoUrl || undefined,
         redemptionCost: form.redemptionCost,
         stock: parseInt(form.stock) || 0,
         assetTypeId: form.assetTypeId,
       })
       setShowForm(false)
-      setForm({ name: '', description: '', redemptionCost: '', stock: '0', assetTypeId: '' })
+      setForm({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '0', assetTypeId: '' })
       loadProducts()
     } catch {}
     setLoading(false)
@@ -61,6 +62,8 @@ export default function ProductManagement() {
           <input type="text" placeholder="Nombre" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
           <input type="text" placeholder="Descripcion" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
+            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          <input type="text" placeholder="URL de foto (Cloudinary)" value={form.photoUrl} onChange={e => setForm({ ...form, photoUrl: e.target.value })}
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
           <div className="grid grid-cols-2 gap-3">
             <input type="number" placeholder="Costo (pts)" value={form.redemptionCost} onChange={e => setForm({ ...form, redemptionCost: e.target.value })}

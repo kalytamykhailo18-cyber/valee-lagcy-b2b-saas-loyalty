@@ -67,16 +67,20 @@ export async function aiExtractInvoiceFields(ocrText: string): Promise<Extracted
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6-20250514',
-        max_tokens: 500,
+        max_tokens: 1000,
         messages: [{
           role: 'user',
           content: `Extract the following fields from this invoice/receipt text. Return ONLY a JSON object with these fields:
 - invoice_number: the invoice or order number (string or null)
 - total_amount: the total amount paid (number or null)
 - transaction_date: the date of the transaction in ISO format (string or null)
+- transaction_time: the time of the transaction if visible (string or null, e.g. "14:30")
 - customer_phone: the customer's phone number if present (string or null)
 - merchant_name: the merchant/store name if present (string or null)
+- order_items: an array of items ordered, each with { name: string, quantity: number, unit_price: number } (array or null). Extract every line item visible on the receipt.
 - confidence_score: how confident you are in the extraction from 0.0 to 1.0 (number)
+
+IMPORTANT: The order items are critical business data. Extract every product/item line you can find, including quantities and individual prices.
 
 Receipt text:
 ${ocrText}
@@ -111,8 +115,10 @@ Return ONLY the JSON object, no other text.`,
       invoice_number: parsed.invoice_number || null,
       total_amount: parsed.total_amount != null ? Number(parsed.total_amount) : null,
       transaction_date: parsed.transaction_date || null,
+      transaction_time: parsed.transaction_time || null,
       customer_phone: parsed.customer_phone || null,
       merchant_name: parsed.merchant_name || null,
+      order_items: parsed.order_items || null,
       confidence_score: parsed.confidence_score != null ? Number(parsed.confidence_score) : 0,
     };
   } catch (err) {

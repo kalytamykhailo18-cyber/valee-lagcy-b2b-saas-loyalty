@@ -1,6 +1,7 @@
 import prisma from '../db/client.js';
 import { findOrCreateConsumerAccount } from './accounts.js';
 import { getAccountBalance, getAccountHistory } from './ledger.js';
+import { grantWelcomeBonus } from './welcome-bonus.js';
 
 // ============================================================
 // CONVERSATION STATE DETECTION
@@ -71,12 +72,16 @@ export function getStateGreeting(
   phoneNumber: string
 ): string[] {
   switch (state) {
-    case 'first_time':
+    case 'first_time': {
+      const bonusAmount = process.env.WELCOME_BONUS_AMOUNT || '50';
       return [
         `¡Hola! 👋 Bienvenido a ${merchantName}.`,
-        `Acabas de hacer una compra y puedes ganar recompensas por ella. Es muy fácil:`,
+        `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida!`,
+        `Ahora puedes ganar más recompensas. Es muy fácil:`,
         `📸 Envíanos una foto de tu factura y te cargaremos tus puntos automáticamente. ¡Así de simple!`,
+        `📱 Accede a tu cuenta aquí: https://valee.app/consumer/${merchantName.toLowerCase().replace(/\s+/g, '-')}`,
       ];
+    }
 
     case 'returning_with_history':
       return [
@@ -280,7 +285,15 @@ export async function handleIncomingMessage(params: {
   const { state, accountId, balance } = await detectConversationState(phoneNumber, tenantId);
 
   // Now ensure account exists
-  const { account } = await findOrCreateConsumerAccount(tenantId, phoneNumber);
+  const { account, created } = await findOrCreateConsumerAccount(tenantId, phoneNumber);
+
+  // Grant welcome bonus on first contact
+  if (created) {
+    const assetType = await prisma.assetType.findFirst();
+    if (assetType) {
+      await grantWelcomeBonus(account.id, tenantId, assetType.id);
+    }
+  }
 
   // Get merchant name
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });

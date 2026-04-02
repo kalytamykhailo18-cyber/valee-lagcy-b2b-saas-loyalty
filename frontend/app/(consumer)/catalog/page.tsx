@@ -18,6 +18,9 @@ export default function Catalog() {
   const [products, setProducts] = useState<Product[]>([])
   const [balance, setBalance] = useState('0')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
+  const [total, setTotal] = useState(0)
   const [message, setMessage] = useState('')
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [redeeming, setRedeeming] = useState(false)
@@ -25,11 +28,35 @@ export default function Catalog() {
 
   useEffect(() => { loadCatalog() }, [])
 
+  // Infinite scroll: load more when user scrolls near bottom
+  useEffect(() => {
+    function handleScroll() {
+      if (loadingMore || !hasMore) return
+      if (window.innerHeight + window.scrollY >= document.body.offsetHeight - 200) {
+        loadMore()
+      }
+    }
+    window.addEventListener('scroll', handleScroll)
+    return () => window.removeEventListener('scroll', handleScroll)
+  }, [products, loadingMore, hasMore])
+
+  async function loadMore() {
+    if (loadingMore || !hasMore) return
+    setLoadingMore(true)
+    try {
+      const data = await api.getCatalog(20, products.length)
+      setProducts(prev => [...prev, ...data.products])
+      setHasMore(products.length + data.products.length < data.total)
+    } catch {} finally { setLoadingMore(false) }
+  }
+
   async function loadCatalog() {
     try {
-      const data = await api.getCatalog()
+      const data = await api.getCatalog(20, 0)
       setProducts(data.products)
       setBalance(data.balance)
+      setTotal(data.total || data.products.length)
+      setHasMore(data.products.length < (data.total || data.products.length))
     } catch {
       setMessage('Error loading catalog')
     } finally {
@@ -160,7 +187,15 @@ export default function Catalog() {
         ))}
       </div>
 
-      {products.length === 0 && (
+      {loadingMore && (
+        <p className="text-center text-slate-400 mt-4 py-4">Cargando más productos...</p>
+      )}
+
+      {!hasMore && products.length > 0 && (
+        <p className="text-center text-slate-300 text-sm mt-4 py-4">No hay más productos</p>
+      )}
+
+      {products.length === 0 && !loading && (
         <p className="text-center text-slate-400 mt-12">No hay productos disponibles en este momento</p>
       )}
     </div>

@@ -170,7 +170,7 @@ export async function processRedemption(params: {
     return { success: false, message: 'Invalid QR — signature verification failed.' };
   }
 
-  // 3. Check TTL
+  // 3. Check TTL (from token payload)
   if (new Date() > new Date(payload.expiresAt)) {
     return { success: false, message: 'QR expired.' };
   }
@@ -190,6 +190,11 @@ export async function processRedemption(params: {
 
   if (tokenRecord.status === 'expired') {
     return { success: false, message: 'This QR has expired.' };
+  }
+
+  // Also check DB record's expiresAt (may have been updated by expiry worker)
+  if (new Date() > tokenRecord.expiresAt) {
+    return { success: false, message: 'QR expired.' };
   }
 
   // 5. Verify tenant match
@@ -217,14 +222,17 @@ export async function processRedemption(params: {
   // Get product for name
   const product = await prisma.product.findUnique({ where: { id: payload.productId } });
 
-  // 8. Write REDEMPTION_CONFIRMED double-entry: debit holding, credit...
-  // Per the event table: REDEMPTION_CONFIRMED debits holding (value leaves holding)
-  // The value is consumed — we debit holding to close the loop
+  // 8. Write REDEMPTION_CONFIRMED double-entry: debit holding, credit pool
+  // The value is consumed — holding releases to pool (merchant absorbs)
+  // Consumer's balance stays reduced — value was spent on the product
+  const poolAccount = await getSystemAccount(payload.tenantId, 'issued_value_pool');
+  if (!poolAccount) throw new Error('issued_value_pool not found');
+
   await writeDoubleEntry({
     tenantId: payload.tenantId,
     eventType: 'REDEMPTION_CONFIRMED',
     debitAccountId: holdingAccount.id,
-    creditAccountId: payload.consumerAccountId,
+    creditAccountId: poolAccount.id,
     amount: payload.amount,
     assetTypeId: payload.assetTypeId,
     referenceId: `CONFIRMED-${payload.tokenId}`,

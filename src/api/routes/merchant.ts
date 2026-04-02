@@ -94,14 +94,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
   app.post('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, description, photoUrl, redemptionCost, assetTypeId, stock } = request.body as any;
+    const { name, description, photoUrl, redemptionCost, assetTypeId, stock, minLevel } = request.body as any;
 
     if (!name || !redemptionCost || !assetTypeId) {
       return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
     }
 
     const product = await prisma.product.create({
-      data: { tenantId, name, description, photoUrl, redemptionCost, assetTypeId, stock: stock || 0, active: true },
+      data: { tenantId, name, description, photoUrl, redemptionCost, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
     });
 
     // Audit
@@ -327,6 +327,92 @@ export default async function merchantRoutes(app: FastifyInstance) {
     `;
 
     return { staff: { id: staff.id, name: staff.name, email: staff.email, role: staff.role } };
+  });
+
+  // ---- CONVERSION MULTIPLIER (Owner only) ----
+  app.get('/api/merchant/multiplier', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const config = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = config
+      ? await prisma.assetType.findUnique({ where: { id: config.assetTypeId } })
+      : await prisma.assetType.findFirst();
+
+    return {
+      currentRate: config?.conversionRate?.toString() || assetType?.defaultConversionRate?.toString() || '1',
+      defaultRate: assetType?.defaultConversionRate?.toString() || '1',
+      assetTypeId: assetType?.id || null,
+    };
+  });
+
+  app.put('/api/merchant/multiplier', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { multiplier, assetTypeId } = request.body as { multiplier: string; assetTypeId: string };
+
+    if (!multiplier || !assetTypeId) {
+      return reply.status(400).send({ error: 'multiplier and assetTypeId are required' });
+    }
+
+    const rate = parseFloat(multiplier);
+    if (isNaN(rate) || rate <= 0) {
+      return reply.status(400).send({ error: 'multiplier must be a positive number' });
+    }
+
+    const config = await prisma.tenantAssetConfig.upsert({
+      where: { tenantId_assetTypeId: { tenantId, assetTypeId } },
+      update: { conversionRate: rate.toFixed(8) },
+      create: { tenantId, assetTypeId, conversionRate: rate.toFixed(8) },
+    });
+
+    return { success: true, newRate: config.conversionRate.toString() };
+  });
+
+  // ---- RECURRENCE RULES (Owner only) ----
+  app.get('/api/merchant/recurrence-rules', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const rules = await prisma.recurrenceRule.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { rules };
+  });
+
+  app.post('/api/merchant/recurrence-rules', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { name, intervalDays, graceDays, messageTemplate, bonusAmount } = request.body as any;
+
+    if (!name || !intervalDays || !messageTemplate) {
+      return reply.status(400).send({ error: 'name, intervalDays, and messageTemplate are required' });
+    }
+
+    const rule = await prisma.recurrenceRule.create({
+      data: { tenantId, name, intervalDays: parseInt(intervalDays), graceDays: parseInt(graceDays || '1'), messageTemplate, bonusAmount: bonusAmount || null },
+    });
+    return { rule };
+  });
+
+  app.patch('/api/merchant/recurrence-rules/:id/toggle', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
+    if (!rule) return reply.status(404).send({ error: 'Rule not found' });
+
+    const updated = await prisma.recurrenceRule.update({ where: { id }, data: { active: !rule.active } });
+    return { rule: updated };
+  });
+
+  app.get('/api/merchant/recurrence-notifications', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { limit = '50', offset = '0' } = request.query as any;
+
+    const notifications = await prisma.recurrenceNotification.findMany({
+      where: { tenantId },
+      orderBy: { sentAt: 'desc' },
+      take: parseInt(limit),
+      skip: parseInt(offset),
+      include: { rule: { select: { name: true } }, consumerAccount: { select: { phoneNumber: true } } },
+    });
+    return { notifications };
   });
 
   // ---- DASHBOARD ANALYTICS (Owner only) ----
