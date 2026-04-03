@@ -129,7 +129,8 @@ export default async function merchantRoutes(app: FastifyInstance) {
         description: data.description ?? product.description,
         photoUrl: data.photoUrl ?? product.photoUrl,
         redemptionCost: data.redemptionCost ?? product.redemptionCost,
-        stock: data.stock ?? product.stock,
+        stock: data.stock != null ? parseInt(data.stock) : product.stock,
+        minLevel: data.minLevel != null ? parseInt(data.minLevel) : product.minLevel,
         active: data.active ?? product.active,
       },
     });
@@ -243,12 +244,20 @@ export default async function merchantRoutes(app: FastifyInstance) {
         ${request.staff!.role}::"AuditActorRole", 'CUSTOMER_LOOKUP', ${account.id}::uuid, 'success', now())
     `;
 
+    // Get invoice submission history
+    const invoices = await prisma.invoice.findMany({
+      where: { tenantId, consumerAccountId: account.id },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
     return {
       account: {
         id: account.id,
         phoneNumber: account.phoneNumber,
         accountType: account.accountType,
         cedula: account.cedula,
+        level: account.level,
         createdAt: account.createdAt,
       },
       balance,
@@ -259,6 +268,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
         amount: e.amount.toString(),
         status: e.status,
         createdAt: e.createdAt,
+      })),
+      invoices: invoices.map(i => ({
+        id: i.id,
+        invoiceNumber: i.invoiceNumber,
+        amount: i.amount.toString(),
+        status: i.status,
+        transactionDate: i.transactionDate,
+        createdAt: i.createdAt,
       })),
     };
   });
@@ -327,6 +344,60 @@ export default async function merchantRoutes(app: FastifyInstance) {
     `;
 
     return { staff: { id: staff.id, name: staff.name, email: staff.email, role: staff.role } };
+  });
+
+  // ---- LIST STAFF (Owner only) ----
+  app.get('/api/merchant/staff', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const staffList = await prisma.staff.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, name: true, email: true, role: true, active: true, branchId: true, createdAt: true },
+    });
+    return { staff: staffList };
+  });
+
+  // ---- DEACTIVATE STAFF (Owner only) ----
+  app.patch('/api/merchant/staff/:id/deactivate', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId: actorId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const target = await prisma.staff.findFirst({ where: { id, tenantId } });
+    if (!target) return reply.status(404).send({ error: 'Staff member not found' });
+    if (target.id === actorId) return reply.status(400).send({ error: 'Cannot deactivate yourself' });
+
+    const updated = await prisma.staff.update({
+      where: { id },
+      data: { active: false },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_DEACTIVATED', 'success',
+        ${JSON.stringify({ staffId: id, name: target.name })}::jsonb, now())
+    `;
+
+    return { staff: { id: updated.id, name: updated.name, active: updated.active } };
+  });
+
+  // ---- AUDIT TRAIL (Owner only) ----
+  app.get('/api/merchant/audit-log', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { limit = '50', offset = '0', actionType } = request.query as any;
+
+    const where: any = { tenantId };
+    if (actionType) where.actionType = actionType;
+
+    const entries = await prisma.$queryRaw<any[]>`
+      SELECT al.*, s.name as actor_name
+      FROM audit_log al
+      LEFT JOIN staff s ON s.id = al.actor_id AND al.actor_type = 'staff'
+      WHERE al.tenant_id = ${tenantId}::uuid
+      ORDER BY al.created_at DESC
+      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
+    `;
+
+    return { entries };
   });
 
   // ---- CONVERSION MULTIPLIER (Owner only) ----
@@ -413,6 +484,42 @@ export default async function merchantRoutes(app: FastifyInstance) {
       include: { rule: { select: { name: true } }, consumerAccount: { select: { phoneNumber: true } } },
     });
     return { notifications };
+  });
+
+  // ---- MANUAL REVIEW QUEUE (Owner only) ----
+  app.get('/api/merchant/manual-review', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const invoices = await prisma.invoice.findMany({
+      where: { tenantId, status: { in: ['manual_review', 'pending_validation'] } },
+      orderBy: { createdAt: 'desc' },
+      include: { consumerAccount: { select: { phoneNumber: true } } },
+    });
+    return { invoices: invoices.map(i => ({
+      id: i.id,
+      invoiceNumber: i.invoiceNumber,
+      amount: i.amount.toString(),
+      status: i.status,
+      customerPhone: i.customerPhone,
+      consumerPhone: i.consumerAccount?.phoneNumber,
+      rejectionReason: i.rejectionReason,
+      submittedLatitude: i.submittedLatitude?.toString(),
+      submittedLongitude: i.submittedLongitude?.toString(),
+      createdAt: i.createdAt,
+    })) };
+  });
+
+  app.post('/api/merchant/manual-review/:id/resolve', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { action, reason } = request.body as { action: 'approve' | 'reject'; reason: string };
+
+    if (!action || !reason) return reply.status(400).send({ error: 'action and reason required' });
+
+    const { resolveManualReview } = await import('../../services/reconciliation.js');
+    const result = await resolveManualReview({
+      invoiceId: id, action, reason, resolverType: 'staff', resolverId: staffId,
+    });
+    return result;
   });
 
   // ---- DASHBOARD ANALYTICS (Owner only) ----

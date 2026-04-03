@@ -9,12 +9,16 @@ declare module 'fastify' {
 }
 
 export async function requireConsumerAuth(request: FastifyRequest, reply: FastifyReply) {
+  // Accept token from Authorization header OR HTTP-only cookie
   const authHeader = request.headers.authorization;
-  if (!authHeader?.startsWith('Bearer ')) {
+  const cookieToken = (request.cookies as any)?.accessToken;
+  const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken;
+
+  if (!token) {
     return reply.status(401).send({ error: 'Authentication required' });
   }
   try {
-    request.consumer = verifyConsumerToken(authHeader.slice(7));
+    request.consumer = verifyConsumerToken(token);
   } catch {
     return reply.status(401).send({ error: 'Invalid or expired token' });
   }

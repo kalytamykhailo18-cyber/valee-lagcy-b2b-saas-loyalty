@@ -55,12 +55,24 @@ export default async function consumerRoutes(app: FastifyInstance) {
       type: 'consumer',
     });
 
+    // Set HTTP-only secure cookies
+    reply.setCookie('accessToken', tokens.accessToken, {
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/',
+      maxAge: 15 * 60, // 15 minutes
+    });
+    reply.setCookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/api/consumer/auth/refresh',
+      maxAge: 30 * 24 * 60 * 60, // 30 days
+    });
+
     return { success: true, ...tokens, account: { id: account.id, type: account.accountType, phoneNumber } };
   });
 
   // ---- AUTH: Refresh token ----
   app.post('/api/consumer/auth/refresh', async (request, reply) => {
-    const { refreshToken } = request.body as { refreshToken: string };
+    // Accept refresh token from cookie or body
+    const refreshToken = (request.cookies as any)?.refreshToken
+      || (request.body as any)?.refreshToken;
     if (!refreshToken) return reply.status(400).send({ error: 'refreshToken required' });
 
     try {
@@ -70,6 +82,14 @@ export default async function consumerRoutes(app: FastifyInstance) {
         tenantId: payload.tenantId,
         phoneNumber: payload.phoneNumber,
         type: 'consumer',
+      });
+      reply.setCookie('accessToken', tokens.accessToken, {
+        httpOnly: true, secure: true, sameSite: 'lax', path: '/',
+        maxAge: 15 * 60,
+      });
+      reply.setCookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true, secure: true, sameSite: 'lax', path: '/api/consumer/auth/refresh',
+        maxAge: 30 * 24 * 60 * 60,
       });
       return { success: true, ...tokens };
     } catch {

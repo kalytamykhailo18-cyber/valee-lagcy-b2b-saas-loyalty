@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'; dotenv.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import prisma from '../db/client.js';
 import { createTenant } from '../services/tenants.js';
 import { createSystemAccounts } from '../services/accounts.js';

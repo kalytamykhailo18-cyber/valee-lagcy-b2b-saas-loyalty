@@ -1,6 +1,7 @@
 import dotenv from 'dotenv'; dotenv.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import cookie from '@fastify/cookie';
 import prisma from '../db/client.js';
 import merchantRoutes from '../api/routes/merchant.js';
 import { createTenant } from '../services/tenants.js';
@@ -50,6 +51,7 @@ async function test() {
   // Start a test Fastify server
   const app = Fastify();
   await app.register(cors);
+  await app.register(cookie);
   await app.register(merchantRoutes);
   await app.listen({ port: 0 }); // random port
   const address = app.server.address();

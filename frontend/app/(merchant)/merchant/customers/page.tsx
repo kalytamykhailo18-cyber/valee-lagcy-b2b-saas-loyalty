@@ -64,6 +64,7 @@ export default function CustomerLookup() {
               <p className="font-medium">{customer.account.phoneNumber}</p>
               <p className="text-sm text-slate-500">
                 {customer.account.accountType === 'verified' ? '✅ Verificada' : '👤 Shadow'}
+                {customer.account.level > 1 ? ` | Nivel ${customer.account.level}` : ''}
               </p>
               {customer.account.cedula && <p className="text-sm text-slate-500">Cedula: {customer.account.cedula}</p>}
             </div>
@@ -96,9 +97,29 @@ export default function CustomerLookup() {
 
           {upgradeMsg && <p className={`text-sm ${upgradeMsg.includes('exitosamente') ? 'text-green-600' : 'text-amber-600'}`}>{upgradeMsg}</p>}
 
+          {/* Invoice submission history */}
+          {customer.invoices && customer.invoices.length > 0 && (
+            <div className="border-t pt-3">
+              <p className="text-sm font-medium text-slate-600 mb-2">Facturas</p>
+              <div className="space-y-1">
+                {customer.invoices.map((inv: any) => (
+                  <div key={inv.id} className="flex justify-between text-sm">
+                    <span className="text-slate-600">{inv.invoiceNumber}</span>
+                    <div className="text-right">
+                      <span className="text-slate-700">${parseFloat(inv.amount).toLocaleString()}</span>
+                      <span className={`ml-2 text-xs ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>
+                        {inv.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Transaction history */}
           <div className="border-t pt-3">
-            <p className="text-sm font-medium text-slate-600 mb-2">Historial reciente</p>
+            <p className="text-sm font-medium text-slate-600 mb-2">Historial de puntos</p>
             {customer.history.length === 0 ? (
               <p className="text-xs text-slate-400">Sin movimientos</p>
             ) : (

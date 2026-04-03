@@ -167,7 +167,8 @@ WA-003,75.50,2024-03-02,`, tenant.id, staff.id);
   });
   assert(success.success === true, 'Validation succeeded');
   assert(success.valueAssigned === '150.00000000', `Value: ${success.valueAssigned}`);
-  assert(success.newBalance === '150.00000000', `Balance: ${success.newBalance}`);
+  // 150 (invoice) + 50 (welcome bonus from handleIncomingMessage) = 200
+  assert(success.newBalance === '200.00000000', `Balance: ${success.newBalance}`);
 
   // Verify invoice marked as claimed
   const claimed = await prisma.invoice.findFirst({
@@ -191,7 +192,7 @@ WA-003,75.50,2024-03-02,`, tenant.id, staff.id);
 
   // Verify balance computed from history
   const balance = await getAccountBalance(account!.id, asset.id, tenant.id);
-  assert(balance === '150.00000000', `Live balance: ${balance}`);
+  assert(balance === '200.00000000', `Live balance: ${balance}`);
 
   // ──────────────────────────────────
   // STAGE E: Consumer notification (message content)

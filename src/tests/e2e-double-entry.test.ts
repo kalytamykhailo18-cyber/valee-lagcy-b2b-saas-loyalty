@@ -94,7 +94,7 @@ async function test() {
   // ──────────────────────────────────────────────
   // 3. REDEMPTION_CONFIRMED
   // Debit: redemption_holding
-  // Credit: consumer (value consumed, cycle closed)
+  // Credit: issued_value_pool (merchant absorbs — cycle closed)
   // ──────────────────────────────────────────────
   console.log('\n3. REDEMPTION_CONFIRMED');
   await processRedemption({ token: redemption.token!, cashierStaffId: staff.id, cashierTenantId: tenant.id });
@@ -103,7 +103,7 @@ async function test() {
   const rcDebit = entries.find(e => e.entryType === 'DEBIT')!;
   const rcCredit = entries.find(e => e.entryType === 'CREDIT')!;
   assert(rcDebit.accountId === sys.holding.id, `DEBIT account = redemption_holding`);
-  assert(rcCredit.accountId === consumer.id, `CREDIT account = consumer`);
+  assert(rcCredit.accountId === sys.pool.id, `CREDIT account = issued_value_pool (merchant absorbs)`);
 
   // ──────────────────────────────────────────────
   // 4. REDEMPTION_EXPIRED
