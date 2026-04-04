@@ -384,6 +384,7 @@ model RedemptionToken {
   consumerAccountId    String                @map("consumer_account_id") @db.Uuid
   productId            String                @map("product_id") @db.Uuid
   amount               Decimal               @db.Decimal(18, 8)
+  cashAmount           Decimal?              @map("cash_amount") @db.Decimal(18, 2)
   assetTypeId          String                @map("asset_type_id") @db.Uuid
   status               RedemptionTokenStatus @default(pending)
   tokenSignature       String                @map("token_signature") @db.VarChar(64)
@@ -419,6 +420,7 @@ model Product {
   description    String?
   photoUrl       String?   @map("photo_url")
   redemptionCost Decimal   @map("redemption_cost") @db.Decimal(18, 8)
+  cashPrice      Decimal?  @map("cash_price") @db.Decimal(18, 2)
   assetTypeId    String    @map("asset_type_id") @db.Uuid
   stock          Int       @default(0)
   minLevel       Int       @default(1) @map("min_level")

@@ -207,6 +207,8 @@ export default async function consumerRoutes(app: FastifyInstance) {
         description: p.description,
         photoUrl: p.photoUrl,
         redemptionCost: p.redemptionCost.toString(),
+        cashPrice: p.cashPrice?.toString() || null,
+        hybridEnabled: p.cashPrice !== null && Number(p.cashPrice) > 0,
         stock: p.stock,
         minLevel: p.minLevel,
         canAfford: parseFloat(balance) >= Number(p.redemptionCost),
@@ -220,7 +222,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // ---- INITIATE REDEMPTION ----
   app.post('/api/consumer/redeem', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;
-    const { productId, assetTypeId } = request.body as { productId: string; assetTypeId: string };
+    const { productId, assetTypeId, cashAmount } = request.body as { productId: string; assetTypeId: string; cashAmount?: string };
 
     if (!productId || !assetTypeId) {
       return reply.status(400).send({ error: 'productId and assetTypeId are required' });
@@ -231,6 +233,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       productId,
       tenantId,
       assetTypeId,
+      cashAmount: cashAmount || null,
     });
 
     return result;

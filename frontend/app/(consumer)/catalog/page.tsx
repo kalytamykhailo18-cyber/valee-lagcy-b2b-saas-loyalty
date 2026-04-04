@@ -95,7 +95,16 @@ export default function Catalog() {
           <div className="bg-slate-100 rounded-2xl p-8 inline-block">
             <QRDisplay value={redeemResult.token} />
           </div>
-          <p className="text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
+          {redeemResult.cashAmount && parseFloat(redeemResult.cashAmount) > 0 ? (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mt-4 text-left space-y-2">
+              <p className="text-amber-900 font-bold text-center mb-3">Canje hibrido</p>
+              <p className="text-amber-800"><span className="font-bold">1.</span> Paga <span className="font-bold">${parseFloat(redeemResult.cashAmount).toLocaleString()}</span> en caja</p>
+              <p className="text-amber-800"><span className="font-bold">2.</span> Muestra tu QR al cajero para ser escaneado</p>
+              <p className="text-amber-800"><span className="font-bold">3.</span> Espera tu premio!</p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
+          )}
           {redeemResult.expiresAt && (
             <CountdownTimer expiresAt={redeemResult.expiresAt} onExpired={() => {
               setRedeemResult(null)

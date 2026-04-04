@@ -299,9 +299,19 @@ export async function handleIncomingMessage(params: {
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   const merchantName = tenant?.name || 'el comercio';
 
+  // If account was just created (first contact via QR), always send welcome greeting
+  if (created || state === 'first_time') {
+    return getStateGreeting('first_time', merchantName, '50', phoneNumber);
+  }
+
   // If it's the first message or a greeting, send state-based greeting
   if (messageType === 'text' && messageText) {
     const lower = messageText.toLowerCase().trim();
+
+    // Check if it's a merchant QR message (already handled by webhook for tenant routing)
+    if (/^merchant:/i.test(lower)) {
+      return getStateGreeting(state, merchantName, balance, phoneNumber);
+    }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {

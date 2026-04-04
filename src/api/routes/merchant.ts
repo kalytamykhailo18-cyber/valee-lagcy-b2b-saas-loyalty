@@ -94,14 +94,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
   app.post('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, description, photoUrl, redemptionCost, assetTypeId, stock, minLevel } = request.body as any;
+    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel } = request.body as any;
 
     if (!name || !redemptionCost || !assetTypeId) {
       return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
     }
 
     const product = await prisma.product.create({
-      data: { tenantId, name, description, photoUrl, redemptionCost, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
+      data: { tenantId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
     });
 
     // Audit
@@ -129,6 +129,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
         description: data.description ?? product.description,
         photoUrl: data.photoUrl ?? product.photoUrl,
         redemptionCost: data.redemptionCost ?? product.redemptionCost,
+        cashPrice: data.cashPrice !== undefined ? (data.cashPrice || null) : product.cashPrice,
         stock: data.stock != null ? parseInt(data.stock) : product.stock,
         minLevel: data.minLevel != null ? parseInt(data.minLevel) : product.minLevel,
         active: data.active ?? product.active,

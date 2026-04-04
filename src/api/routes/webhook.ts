@@ -11,17 +11,53 @@ export default async function webhookRoutes(app: FastifyInstance) {
   app.post('/api/webhook/whatsapp', async (request, reply) => {
     const body = request.body as any;
 
+    // Log the raw payload for debugging
+    console.log('[Webhook] Received:', JSON.stringify({
+      event: body?.event,
+      remoteJid: body?.data?.key?.remoteJid,
+      fromMe: body?.data?.key?.fromMe,
+      sender: body?.sender,
+      hasMessage: !!body?.data?.message,
+    }));
+
+    // Skip messages sent by us (fromMe)
+    if (body?.data?.key?.fromMe) {
+      return reply.status(200).send({ status: 'ignored', reason: 'fromMe' });
+    }
+
     // Evolution API webhook payload structure
-    // The exact format depends on the Evolution API version
-    const phoneNumber = body?.data?.key?.remoteJid?.replace('@s.whatsapp.net', '')?.replace(/\D/g, '') || '';
+    // remoteJid can be: "584144018263@s.whatsapp.net" (traditional) or "179212308746274@lid" (new LID format)
+    // For LID format, the real phone is in body.sender or we need to look it up
+    let rawJid = body?.data?.key?.remoteJid || '';
+    let phoneNumber = '';
+
+    if (rawJid.includes('@s.whatsapp.net')) {
+      // Traditional format — extract phone directly
+      phoneNumber = rawJid.replace('@s.whatsapp.net', '').replace(/\D/g, '');
+    } else if (rawJid.includes('@lid')) {
+      // LID format — try to get the real number from sender field or participant
+      const senderField = body?.sender || body?.data?.key?.participant || '';
+      if (senderField.includes('@s.whatsapp.net')) {
+        phoneNumber = senderField.replace('@s.whatsapp.net', '').replace(/\D/g, '');
+      } else {
+        // Try to extract from the instance's known contacts
+        phoneNumber = senderField.replace(/\D/g, '');
+      }
+    } else if (rawJid.includes('@g.us')) {
+      // Group message — ignore
+      return reply.status(200).send({ status: 'ignored', reason: 'group message' });
+    }
+
     const messageText = body?.data?.message?.conversation
       || body?.data?.message?.extendedTextMessage?.text
       || '';
     const hasImage = !!(body?.data?.message?.imageMessage);
     const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+${phoneNumber}`;
 
-    if (!phoneNumber) {
-      return reply.status(200).send({ status: 'ignored', reason: 'no phone number' });
+    console.log('[Webhook] Parsed phone:', formattedPhone, 'Message:', messageText?.slice(0, 50));
+
+    if (!phoneNumber || phoneNumber.length < 8) {
+      return reply.status(200).send({ status: 'ignored', reason: 'no valid phone number' });
     }
 
     // Step 3: Parse merchant identifier from the QR pre-filled message

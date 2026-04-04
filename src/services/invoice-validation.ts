@@ -74,8 +74,8 @@ export async function validateInvoice(params: {
 
   // STAGE B: Identity cross-check
   if (extracted.customer_phone) {
-    const normalizedExtracted = extracted.customer_phone.replace(/[\s\-()]/g, '');
-    const normalizedSender = senderPhone.replace(/[\s\-()]/g, '');
+    const normalizedExtracted = extracted.customer_phone.replace(/[^\d]/g, '');
+    const normalizedSender = senderPhone.replace(/[^\d]/g, '');
     if (normalizedExtracted !== normalizedSender) {
       return { success: false, stage: 'identity_check', message: 'The phone number on the invoice does not match your account. This invoice cannot be claimed by this number.', invoiceNumber: extracted.invoice_number };
     }

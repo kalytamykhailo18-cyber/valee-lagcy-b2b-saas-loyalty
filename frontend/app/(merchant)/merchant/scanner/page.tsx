@@ -33,8 +33,9 @@ export default function CashierScanner() {
     }, 5000)
   }
 
-  // SUCCESS screen — full green
+  // SUCCESS screen — full green (with hybrid cash reminder)
   if (state === 'success') {
+    const isHybrid = result?.cashAmount && parseFloat(result.cashAmount) > 0;
     return (
       <div className="min-h-screen bg-green-500 flex items-center justify-center">
         <div className="text-center text-white animate-check">
@@ -42,6 +43,13 @@ export default function CashierScanner() {
           <h1 className="text-3xl font-bold mt-6">CANJE EXITOSO</h1>
           {result?.productName && <p className="text-xl mt-2">{result.productName}</p>}
           {result?.amount && <p className="text-2xl font-bold mt-2">{parseFloat(result.amount).toLocaleString()} pts</p>}
+          {isHybrid && (
+            <div className="bg-yellow-400 text-yellow-900 rounded-xl p-4 mt-4 mx-4">
+              <p className="text-sm font-bold uppercase">Oferta hibrida</p>
+              <p className="text-3xl font-bold mt-1">${parseFloat(result.cashAmount).toLocaleString()}</p>
+              <p className="text-sm font-bold mt-1">Recuerda recibir primero los $, antes de entregar el premio</p>
+            </div>
+          )}
           <p className="mt-4 text-green-100">El canje ha sido procesado correctamente</p>
         </div>
       </div>

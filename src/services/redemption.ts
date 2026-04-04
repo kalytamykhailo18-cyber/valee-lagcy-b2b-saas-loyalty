@@ -29,6 +29,7 @@ export async function initiateRedemption(params: {
   productId: string;
   tenantId: string;
   assetTypeId: string;
+  cashAmount?: string | null; // For hybrid redemption: cash portion paid by consumer
 }): Promise<{
   success: boolean;
   message: string;
@@ -36,6 +37,8 @@ export async function initiateRedemption(params: {
   tokenId?: string;
   expiresAt?: string;
   amount?: string;
+  cashAmount?: string;
+  hybrid?: boolean;
 }> {
   const { consumerAccountId, productId, tenantId, assetTypeId } = params;
 
@@ -52,29 +55,75 @@ export async function initiateRedemption(params: {
     return { success: false, message: 'Product is out of stock.' };
   }
 
-  const redemptionCost = product.redemptionCost.toString();
+  const fullPointsCost = Number(product.redemptionCost);
+  const cashPortion = params.cashAmount ? parseFloat(params.cashAmount) : 0;
+  const productCashPrice = product.cashPrice ? Number(product.cashPrice) : 0;
+  const isHybrid = cashPortion > 0;
 
-  // Final balance check
+  // Calculate how many points are needed after cash contribution
+  let pointsToDeduct: number;
+
+  if (isHybrid) {
+    if (productCashPrice <= 0) {
+      return { success: false, message: 'This product does not accept cash payments. Use points only.' };
+    }
+
+    // Cash covers a proportion of the cost, rest is points
+    // E.g., product costs 1000 pts OR $5. Consumer pays $2, so they cover 2/5 = 40%.
+    // Remaining 60% = 600 pts needed.
+    const cashRatio = Math.min(cashPortion / productCashPrice, 1); // cap at 100%
+    pointsToDeduct = Math.round(fullPointsCost * (1 - cashRatio));
+
+    if (pointsToDeduct < 0) pointsToDeduct = 0;
+  } else {
+    pointsToDeduct = fullPointsCost;
+  }
+
+  // Final balance check (only for the points portion)
   const balance = await getAccountBalance(consumerAccountId, assetTypeId, tenantId);
-  if (parseFloat(balance) < parseFloat(redemptionCost)) {
-    return { success: false, message: `Insufficient balance. You need ${redemptionCost} but have ${balance}.` };
+  if (parseFloat(balance) < pointsToDeduct) {
+    if (isHybrid) {
+      return { success: false, message: `Insufficient points. With $${cashPortion} cash, you still need ${pointsToDeduct} points but have ${balance}.` };
+    }
+    return { success: false, message: `Insufficient balance. You need ${fullPointsCost} points but have ${balance}. You can also pay partially with cash.` };
   }
 
   // Get holding account
   const holdingAccount = await getSystemAccount(tenantId, 'redemption_holding');
   if (!holdingAccount) throw new Error('redemption_holding account not found');
 
-  // Write PENDING_REDEMPTION double-entry: debit consumer, credit holding
-  const ledgerResult = await writeDoubleEntry({
-    tenantId,
-    eventType: 'REDEMPTION_PENDING',
-    debitAccountId: consumerAccountId,
-    creditAccountId: holdingAccount.id,
-    amount: redemptionCost,
-    assetTypeId,
-    referenceId: `REDEEM-${uuidv4()}`,
-    referenceType: 'redemption_token',
-  });
+  const pointsAmount = pointsToDeduct.toFixed(8);
+  const referenceId = `REDEEM-${uuidv4()}`;
+
+  // Write PENDING_REDEMPTION double-entry for the POINTS portion (skip if 0 points — full cash)
+  let ledgerResult;
+  if (pointsToDeduct > 0) {
+    ledgerResult = await writeDoubleEntry({
+      tenantId,
+      eventType: 'REDEMPTION_PENDING',
+      debitAccountId: consumerAccountId,
+      creditAccountId: holdingAccount.id,
+      amount: pointsAmount,
+      assetTypeId,
+      referenceId,
+      referenceType: 'redemption_token',
+      metadata: isHybrid ? { hybrid: true, cashAmount: cashPortion, pointsDeducted: pointsToDeduct, fullPointsCost } : undefined,
+    });
+  } else {
+    // Full cash — create a minimal ledger record with the cash amount as metadata only
+    // Use a nominal 0.00000001 amount to satisfy the CHECK constraint
+    ledgerResult = await writeDoubleEntry({
+      tenantId,
+      eventType: 'REDEMPTION_PENDING',
+      debitAccountId: consumerAccountId,
+      creditAccountId: holdingAccount.id,
+      amount: '0.00000001',
+      assetTypeId,
+      referenceId,
+      referenceType: 'redemption_token',
+      metadata: { hybrid: true, fullCash: true, cashAmount: cashPortion, pointsDeducted: 0, fullPointsCost },
+    });
+  }
 
   // Generate token
   const hmacSecret = process.env.HMAC_SECRET;
@@ -89,7 +138,7 @@ export async function initiateRedemption(params: {
     tokenId,
     consumerAccountId,
     productId,
-    amount: redemptionCost,
+    amount: pointsAmount,
     tenantId,
     assetTypeId,
     createdAt: now.toISOString(),
@@ -107,7 +156,8 @@ export async function initiateRedemption(params: {
       tenantId,
       consumerAccountId,
       productId,
-      amount: redemptionCost,
+      amount: pointsAmount,
+      cashAmount: isHybrid ? cashPortion : null,
       assetTypeId,
       status: 'pending',
       tokenSignature: signature,
@@ -125,11 +175,15 @@ export async function initiateRedemption(params: {
 
   return {
     success: true,
-    message: 'Redemption QR generated.',
+    message: isHybrid
+      ? `Hybrid redemption: ${pointsToDeduct} points + $${cashPortion} cash. QR generated.`
+      : 'Redemption QR generated.',
     token,
     tokenId,
     expiresAt: expiresAt.toISOString(),
-    amount: redemptionCost,
+    amount: pointsAmount,
+    cashAmount: isHybrid ? cashPortion.toString() : undefined,
+    hybrid: isHybrid,
   };
 }
 
@@ -272,9 +326,12 @@ export async function processRedemption(params: {
 
   return {
     success: true,
-    message: 'Redemption processed successfully!',
+    message: tokenRecord.cashAmount && Number(tokenRecord.cashAmount) > 0
+      ? `Hybrid redemption: ${payload.amount} pts + $${Number(tokenRecord.cashAmount)} cash`
+      : 'Redemption processed successfully!',
     productName: product?.name || 'Unknown',
     amount: payload.amount,
+    cashAmount: tokenRecord.cashAmount ? Number(tokenRecord.cashAmount).toString() : undefined,
   };
 }
 
