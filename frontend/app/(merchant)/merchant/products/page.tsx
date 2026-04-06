@@ -11,6 +11,26 @@ export default function ProductManagement() {
   const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1' })
   const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '' })
   const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [editUploading, setEditUploading] = useState(false)
+
+  async function handleImageUpload(file: File, target: 'create' | 'edit') {
+    const setUploadState = target === 'create' ? setUploading : setEditUploading
+    setUploadState(true)
+    try {
+      const result = await api.uploadProductImage(file)
+      if (result.success && result.url) {
+        if (target === 'create') {
+          setForm(prev => ({ ...prev, photoUrl: result.url }))
+        } else {
+          setEditForm(prev => ({ ...prev, photoUrl: result.url }))
+        }
+      }
+    } catch (err) {
+      console.error('Image upload failed:', err)
+    }
+    setUploadState(false)
+  }
 
   useEffect(() => { loadProducts() }, [])
 
@@ -92,8 +112,25 @@ export default function ProductManagement() {
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
           <input type="text" placeholder="Descripcion" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
             className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          <input type="text" placeholder="URL de foto (Cloudinary)" value={form.photoUrl} onChange={e => setForm({ ...form, photoUrl: e.target.value })}
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+          <div className="space-y-2">
+            <label className="text-xs text-slate-500 font-medium">Foto del producto</label>
+            <div className="flex items-center gap-3">
+              <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${uploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                {uploading ? 'Subiendo...' : 'Subir foto'}
+                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
+                  disabled={uploading}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'create'); e.target.value = '' }} />
+              </label>
+              {form.photoUrl && (
+                <img src={form.photoUrl} alt="Preview" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
+              )}
+            </div>
+            <details className="text-xs text-slate-400">
+              <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
+              <input type="text" placeholder="URL de foto (Cloudinary)" value={form.photoUrl} onChange={e => setForm({ ...form, photoUrl: e.target.value })}
+                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+            </details>
+          </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-slate-500">Costo (pts)</label>
@@ -127,8 +164,24 @@ export default function ProductManagement() {
                   className="w-full px-3 py-2 rounded-lg border text-sm" />
                 <input type="text" placeholder="Descripcion" value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })}
                   className="w-full px-3 py-2 rounded-lg border text-sm" />
-                <input type="text" placeholder="URL foto" value={editForm.photoUrl} onChange={e => setEditForm({ ...editForm, photoUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border text-sm" />
+                <div className="space-y-2">
+                  <div className="flex items-center gap-3">
+                    <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${editUploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
+                      {editUploading ? 'Subiendo...' : 'Cambiar foto'}
+                      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
+                        disabled={editUploading}
+                        onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'edit'); e.target.value = '' }} />
+                    </label>
+                    {editForm.photoUrl && (
+                      <img src={editForm.photoUrl} alt="Preview" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
+                    )}
+                  </div>
+                  <details className="text-xs text-slate-400">
+                    <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
+                    <input type="text" placeholder="URL foto" value={editForm.photoUrl} onChange={e => setEditForm({ ...editForm, photoUrl: e.target.value })}
+                      className="w-full mt-1 px-3 py-2 rounded-lg border text-sm" />
+                  </details>
+                </div>
                 <div className="grid grid-cols-3 gap-2">
                   <input type="number" placeholder="Costo" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })}
                     className="px-3 py-2 rounded-lg border text-sm" />
@@ -148,6 +201,9 @@ export default function ProductManagement() {
             ) : (
               <div>
                 <div className="flex items-center justify-between">
+                  {p.photoUrl && (
+                    <img src={p.photoUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-slate-200 mr-3 flex-shrink-0" />
+                  )}
                   <div className="flex-1">
                     <p className="font-medium">{p.name}</p>
                     <p className="text-sm text-slate-500">

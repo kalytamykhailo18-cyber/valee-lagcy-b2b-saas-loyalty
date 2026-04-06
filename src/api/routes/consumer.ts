@@ -7,6 +7,9 @@ import { validateInvoice } from '../../services/invoice-validation.js';
 import { initiateRedemption } from '../../services/redemption.js';
 import { requireConsumerAuth } from '../middleware/auth.js';
 import { sendWhatsAppOTP } from '../../services/whatsapp.js';
+import { checkIdempotencyKey, storeIdempotencyKey } from '../../services/idempotency.js';
+import { createDispute } from '../../services/disputes.js';
+import { uploadImage } from '../../services/cloudinary.js';
 
 export default async function consumerRoutes(app: FastifyInstance) {
 
@@ -152,12 +155,73 @@ export default async function consumerRoutes(app: FastifyInstance) {
   });
 
   // ---- INVOICE VALIDATION (from PWA) ----
+  // Accepts multipart/form-data with an image file, or JSON with pre-extracted data.
   app.post('/api/consumer/validate-invoice', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId, phoneNumber } = request.consumer!;
+
+    const contentType = request.headers['content-type'] || '';
+
+    // --- Multipart upload path (image file from PWA camera/gallery) ---
+    if (contentType.includes('multipart/form-data')) {
+      let imageBuffer: Buffer | null = null;
+      let latitude: string | null = null;
+      let longitude: string | null = null;
+      let deviceId: string | null = null;
+      let assetTypeId: string | null = null;
+
+      const parts = request.parts();
+      for await (const part of parts) {
+        if (part.type === 'file' && part.fieldname === 'invoice') {
+          imageBuffer = await part.toBuffer();
+        } else if (part.type === 'field') {
+          const val = part.value as string;
+          if (part.fieldname === 'latitude') latitude = val || null;
+          else if (part.fieldname === 'longitude') longitude = val || null;
+          else if (part.fieldname === 'deviceId') deviceId = val || null;
+          else if (part.fieldname === 'assetTypeId') assetTypeId = val || null;
+        }
+      }
+
+      if (!imageBuffer) {
+        return reply.status(400).send({ error: 'An invoice image file is required (field name: "invoice")' });
+      }
+      if (!assetTypeId) {
+        return reply.status(400).send({ error: 'assetTypeId is required' });
+      }
+
+      const result = await validateInvoice({
+        tenantId,
+        senderPhone: phoneNumber,
+        assetTypeId,
+        imageBuffer,
+        latitude,
+        longitude,
+        deviceId,
+      });
+
+      // Store idempotency after successful validation (key will be set once invoice_number is known)
+      if (result.success && result.invoiceNumber) {
+        const idempotencyKey = `invoice:${tenantId}:${result.invoiceNumber}`;
+        await storeIdempotencyKey(idempotencyKey, 'invoice_validation', result);
+      }
+
+      return result;
+    }
+
+    // --- JSON path (pre-extracted data, used by tests or WhatsApp pipeline) ---
     const { extractedData, latitude, longitude, deviceId, assetTypeId } = request.body as any;
 
     if (!extractedData || !assetTypeId) {
       return reply.status(400).send({ error: 'extractedData and assetTypeId are required' });
+    }
+
+    // Idempotency check: if we have an invoice number from extracted data, check before processing
+    if (extractedData?.invoice_number) {
+      const idempotencyKey = `invoice:${tenantId}:${extractedData.invoice_number}`;
+      const cached = await checkIdempotencyKey(idempotencyKey);
+      if (cached) {
+        return cached;
+      }
     }
 
     const result = await validateInvoice({
@@ -169,6 +233,13 @@ export default async function consumerRoutes(app: FastifyInstance) {
       longitude,
       deviceId,
     });
+
+    // Store idempotency after successful validation
+    if (result.success && (result.invoiceNumber || extractedData?.invoice_number)) {
+      const invoiceNum = result.invoiceNumber || extractedData.invoice_number;
+      const idempotencyKey = `invoice:${tenantId}:${invoiceNum}`;
+      await storeIdempotencyKey(idempotencyKey, 'invoice_validation', result);
+    }
 
     return result;
   });
@@ -222,10 +293,19 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // ---- INITIATE REDEMPTION ----
   app.post('/api/consumer/redeem', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;
-    const { productId, assetTypeId, cashAmount } = request.body as { productId: string; assetTypeId: string; cashAmount?: string };
+    const { productId, assetTypeId, cashAmount, requestId } = request.body as { productId: string; assetTypeId: string; cashAmount?: string; requestId?: string };
 
     if (!productId || !assetTypeId) {
       return reply.status(400).send({ error: 'productId and assetTypeId are required' });
+    }
+
+    // Idempotency check: if client provided a requestId, check before processing
+    if (requestId) {
+      const idempotencyKey = `redeem:${tenantId}:${requestId}`;
+      const cached = await checkIdempotencyKey(idempotencyKey);
+      if (cached) {
+        return cached;
+      }
     }
 
     const result = await initiateRedemption({
@@ -236,6 +316,53 @@ export default async function consumerRoutes(app: FastifyInstance) {
       cashAmount: cashAmount || null,
     });
 
+    // Store idempotency after successful redemption
+    if (requestId && result.success) {
+      const idempotencyKey = `redeem:${tenantId}:${requestId}`;
+      await storeIdempotencyKey(idempotencyKey, 'redemption', result);
+    }
+
     return result;
+  });
+
+  // ---- UPLOAD IMAGE (for dispute screenshots) ----
+  app.post('/api/consumer/upload-image', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const file = await request.file();
+    if (!file) {
+      return reply.status(400).send({ error: 'No file uploaded' });
+    }
+
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return reply.status(400).send({ error: 'Invalid file type. Allowed: JPEG, PNG, WebP' });
+    }
+
+    const buffer = await file.toBuffer();
+    const url = await uploadImage(buffer, 'loyalty-platform/disputes');
+
+    if (!url) {
+      return reply.status(500).send({ error: 'Image upload failed' });
+    }
+
+    return { success: true, url };
+  });
+
+  // ---- SUBMIT DISPUTE ----
+  app.post('/api/consumer/disputes', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { accountId, tenantId } = request.consumer!;
+    const { description, screenshotUrl } = request.body as { description: string; screenshotUrl?: string };
+
+    if (!description || description.trim().length === 0) {
+      return reply.status(400).send({ error: 'description is required' });
+    }
+
+    const dispute = await createDispute({
+      tenantId,
+      consumerAccountId: accountId,
+      description: description.trim(),
+      screenshotUrl: screenshotUrl || undefined,
+    });
+
+    return { success: true, dispute: { id: dispute.id, status: dispute.status, createdAt: dispute.createdAt } };
   });
 }

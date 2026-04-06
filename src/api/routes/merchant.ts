@@ -9,8 +9,35 @@ import { upgradeToVerified } from '../../services/accounts.js';
 import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
 import { requireStaffAuth, requireOwnerRole } from '../middleware/auth.js';
 import { verifyAndResolveLedgerEntry } from '../../services/qr-token.js';
+import { uploadImage } from '../../services/cloudinary.js';
+import { checkIdempotencyKey, storeIdempotencyKey } from '../../services/idempotency.js';
+import { createBranch, listBranches, toggleBranch } from '../../services/branches.js';
+import { generateBranchQR } from '../../services/merchant-qr.js';
+import { listDisputes, resolveDispute } from '../../services/disputes.js';
 
 export default async function merchantRoutes(app: FastifyInstance) {
+
+  // ---- IMAGE UPLOAD (Owner only) ----
+  app.post('/api/merchant/upload-image', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const file = await request.file();
+    if (!file) {
+      return reply.status(400).send({ error: 'No file uploaded' });
+    }
+
+    const allowedMimeTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowedMimeTypes.includes(file.mimetype)) {
+      return reply.status(400).send({ error: 'Invalid file type. Allowed: JPEG, PNG, WebP, GIF' });
+    }
+
+    const buffer = await file.toBuffer();
+    const url = await uploadImage(buffer, 'loyalty-platform/products');
+
+    if (!url) {
+      return reply.status(500).send({ error: 'Image upload failed. Check Cloudinary configuration.' });
+    }
+
+    return { success: true, url };
+  });
 
   // ---- AUTH: Staff login ----
   app.post('/api/merchant/auth/login', async (request, reply) => {
@@ -173,6 +200,13 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
     if (!token) return reply.status(400).send({ error: 'token is required' });
 
+    // Idempotency check: use the token itself as the natural idempotency key
+    const idempotencyKey = `scan:${tenantId}:${token}`;
+    const cached = await checkIdempotencyKey(idempotencyKey);
+    if (cached) {
+      return cached;
+    }
+
     const result = await processRedemption({
       token,
       cashierStaffId: staffId,
@@ -186,6 +220,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
         VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff',
           ${request.staff!.role}::"AuditActorRole", 'QR_SCAN_FAILURE', 'failure', ${result.message}, now())
       `;
+    }
+
+    // Store idempotency after successful scan
+    if (result.success) {
+      await storeIdempotencyKey(idempotencyKey, 'scan_redemption', result);
     }
 
     return result;
@@ -401,6 +440,40 @@ export default async function merchantRoutes(app: FastifyInstance) {
     return { entries };
   });
 
+  // ---- TENANT SETTINGS (Owner only) ----
+  app.get('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    return {
+      welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
+      rif: tenant?.rif || null,
+      name: tenant?.name || '',
+    };
+  });
+
+  app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { welcomeBonusAmount, rif } = request.body as { welcomeBonusAmount?: number; rif?: string };
+
+    const data: any = {};
+    if (welcomeBonusAmount !== undefined) {
+      if (typeof welcomeBonusAmount !== 'number' || welcomeBonusAmount < 0) {
+        return reply.status(400).send({ error: 'welcomeBonusAmount must be a non-negative number' });
+      }
+      data.welcomeBonusAmount = welcomeBonusAmount;
+    }
+    if (rif !== undefined) {
+      data.rif = rif || null;
+    }
+
+    const updated = await prisma.tenant.update({ where: { id: tenantId }, data });
+    return {
+      welcomeBonusAmount: updated.welcomeBonusAmount,
+      rif: updated.rif,
+      name: updated.name,
+    };
+  });
+
   // ---- CONVERSION MULTIPLIER (Owner only) ----
   app.get('/api/merchant/multiplier', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
@@ -551,6 +624,244 @@ export default async function merchantRoutes(app: FastifyInstance) {
       netBalance: (parseFloat(valueIssued.total) - parseFloat(valueRedeemed.total)).toFixed(8),
       consumerCount,
       transactionCount,
+    };
+  });
+
+  // ---- BRANCH MANAGEMENT (Owner only) ----
+  app.get('/api/merchant/branches', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const branches = await listBranches(tenantId);
+    return { branches };
+  });
+
+  app.post('/api/merchant/branches', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { name, address, latitude, longitude } = request.body as {
+      name: string; address?: string; latitude?: number; longitude?: number;
+    };
+
+    if (!name) return reply.status(400).send({ error: 'name is required' });
+
+    const branch = await createBranch({
+      tenantId,
+      name,
+      address: address || undefined,
+      latitude: latitude != null ? latitude : undefined,
+      longitude: longitude != null ? longitude : undefined,
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_CREATED', 'success',
+        ${JSON.stringify({ branchId: branch.id, name })}::jsonb, now())
+    `;
+
+    return { branch };
+  });
+
+  app.patch('/api/merchant/branches/:id/toggle', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    try {
+      const branch = await toggleBranch(id, tenantId);
+
+      await prisma.$executeRaw`
+        INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_TOGGLED', 'success',
+          ${JSON.stringify({ branchId: id, active: branch.active })}::jsonb, now())
+      `;
+
+      return { branch };
+    } catch (e: any) {
+      return reply.status(404).send({ error: e.message || 'Branch not found' });
+    }
+  });
+
+  app.post('/api/merchant/branches/:id/generate-qr', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    // Verify branch belongs to tenant
+    const branch = await prisma.branch.findFirst({ where: { id, tenantId } });
+    if (!branch) return reply.status(404).send({ error: 'Branch not found' });
+
+    try {
+      const result = await generateBranchQR(id);
+
+      await prisma.$executeRaw`
+        INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_QR_GENERATED', 'success',
+          ${JSON.stringify({ branchId: id, branchName: branch.name })}::jsonb, now())
+      `;
+
+      return { success: true, deepLink: result.deepLink, qrCodeUrl: result.qrCodeUrl };
+    } catch (e: any) {
+      return reply.status(500).send({ error: e.message || 'Failed to generate QR' });
+    }
+  });
+
+  // ---- DISPUTES (Owner only) ----
+  app.get('/api/merchant/disputes', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { status } = request.query as { status?: string };
+
+    const disputes = await listDisputes(tenantId, status || undefined);
+
+    // Enrich with consumer info
+    const enriched = await Promise.all(disputes.map(async (d) => {
+      const account = await prisma.account.findUnique({ where: { id: d.consumerAccountId } });
+      return {
+        id: d.id,
+        description: d.description,
+        screenshotUrl: d.screenshotUrl,
+        status: d.status,
+        consumerPhone: account?.phoneNumber || null,
+        consumerAccountId: d.consumerAccountId,
+        resolutionReason: d.resolutionReason,
+        createdAt: d.createdAt,
+        resolvedAt: d.resolvedAt,
+      };
+    }));
+
+    return { disputes: enriched };
+  });
+
+  app.post('/api/merchant/disputes/:id/resolve', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { action, reason, adjustmentAmount, assetTypeId } = request.body as {
+      action: 'approve' | 'reject' | 'escalate';
+      reason: string;
+      adjustmentAmount?: string;
+      assetTypeId?: string;
+    };
+
+    if (!action || !reason) return reply.status(400).send({ error: 'action and reason are required' });
+
+    // Verify dispute belongs to this tenant
+    const dispute = await prisma.dispute.findFirst({ where: { id, tenantId } });
+    if (!dispute) return reply.status(404).send({ error: 'Dispute not found' });
+
+    // For approve, get assetTypeId if not provided
+    let resolvedAssetTypeId = assetTypeId;
+    if (action === 'approve' && adjustmentAmount && !resolvedAssetTypeId) {
+      const at = await prisma.assetType.findFirst();
+      resolvedAssetTypeId = at?.id;
+    }
+
+    const result = await resolveDispute({
+      disputeId: id,
+      action,
+      reason,
+      resolverId: staffId,
+      resolverType: 'staff',
+      adjustmentAmount: action === 'approve' ? adjustmentAmount : undefined,
+      assetTypeId: action === 'approve' ? resolvedAssetTypeId : undefined,
+    });
+
+    return result;
+  });
+
+  // ---- MERCHANT METRICS (Owner only) — enhanced with branch filtering ----
+  app.get('/api/merchant/metrics', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { branchId } = request.query as { branchId?: string };
+
+    const { getMerchantMetrics } = await import('../../services/metrics.js');
+    const metrics = await getMerchantMetrics(tenantId, branchId || undefined);
+
+    return metrics;
+  });
+
+  // ---- PRODUCT PERFORMANCE (Owner only) ----
+  app.get('/api/merchant/product-performance', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+
+    const { getProductPerformance } = await import('../../services/metrics.js');
+    const products = await getProductPerformance(tenantId);
+
+    return { products };
+  });
+
+  // ---- FILTERABLE TRANSACTION HISTORY (Owner only) ----
+  app.get('/api/merchant/transactions', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { startDate, endDate, eventType, status, branchId, limit = '50', offset = '0' } = request.query as {
+      startDate?: string;
+      endDate?: string;
+      eventType?: string;
+      status?: string;
+      branchId?: string;
+      limit?: string;
+      offset?: string;
+    };
+
+    const params: any[] = [tenantId];
+    const conditions: string[] = ['le.tenant_id = $1::uuid'];
+    let paramIndex = 2;
+
+    if (startDate) {
+      conditions.push(`le.created_at >= $${paramIndex}::timestamptz`);
+      params.push(startDate);
+      paramIndex++;
+    }
+    if (endDate) {
+      conditions.push(`le.created_at <= $${paramIndex}::timestamptz`);
+      params.push(endDate);
+      paramIndex++;
+    }
+    if (eventType) {
+      conditions.push(`le.event_type = $${paramIndex}`);
+      params.push(eventType);
+      paramIndex++;
+    }
+    if (status) {
+      conditions.push(`le.status = $${paramIndex}`);
+      params.push(status);
+      paramIndex++;
+    }
+    if (branchId) {
+      conditions.push(`le.branch_id = $${paramIndex}::uuid`);
+      params.push(branchId);
+      paramIndex++;
+    }
+
+    const whereClause = conditions.join(' AND ');
+    const lim = Math.min(parseInt(limit) || 50, 200);
+    const off = parseInt(offset) || 0;
+
+    const entries = await prisma.$queryRawUnsafe<any[]>(`
+      SELECT le.id, le.event_type, le.entry_type, le.amount::text, le.status, le.reference_id,
+             le.branch_id, le.created_at,
+             a.phone_number as account_phone,
+             b.name as branch_name
+      FROM ledger_entries le
+      LEFT JOIN accounts a ON a.id = le.account_id
+      LEFT JOIN branches b ON b.id = le.branch_id
+      WHERE ${whereClause}
+      ORDER BY le.created_at DESC
+      LIMIT ${lim} OFFSET ${off}
+    `, ...params);
+
+    const [countResult] = await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
+      SELECT COUNT(*) as count FROM ledger_entries le WHERE ${whereClause}
+    `, ...params);
+
+    return {
+      entries: entries.map(e => ({
+        id: e.id,
+        eventType: e.event_type,
+        entryType: e.entry_type,
+        amount: e.amount,
+        status: e.status,
+        referenceId: e.reference_id,
+        branchId: e.branch_id,
+        branchName: e.branch_name,
+        accountPhone: e.account_phone,
+        createdAt: e.created_at,
+      })),
+      total: Number(countResult.count),
     };
   });
 }

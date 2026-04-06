@@ -34,14 +34,68 @@ export const api = {
   // Consumer Actions
   validateInvoice: (data: any) =>
     request('/api/consumer/validate-invoice', { method: 'POST', body: JSON.stringify(data) }),
+
+  /** Upload an actual invoice image for OCR + validation (multipart/form-data) */
+  uploadInvoiceImage: async (file: File, assetTypeId: string, opts?: { latitude?: string; longitude?: string; deviceId?: string }) => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const form = new FormData();
+    form.append('invoice', file);
+    form.append('assetTypeId', assetTypeId);
+    if (opts?.latitude) form.append('latitude', opts.latitude);
+    if (opts?.longitude) form.append('longitude', opts.longitude);
+    if (opts?.deviceId) form.append('deviceId', opts.deviceId);
+
+    const res = await fetch(`${API_BASE}/api/consumer/validate-invoice`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+    });
+    const data = await res.json();
+    if (!res.ok) throw { status: res.status, ...data };
+    return data;
+  },
   redeemProduct: (productId: string, assetTypeId: string) =>
     request('/api/consumer/redeem', { method: 'POST', body: JSON.stringify({ productId, assetTypeId }) }),
+
+  // Consumer image upload (for dispute screenshots)
+  uploadConsumerImage: async (file: File): Promise<{ success: boolean; url: string }> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/consumer/upload-image`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw { status: res.status, ...data };
+    return data;
+  },
 
   // Merchant Auth
   merchantLogin: (email: string, password: string, tenantSlug: string) =>
     request('/api/merchant/auth/login', { method: 'POST', body: JSON.stringify({ email, password, tenantSlug }) }),
 
   // Merchant Data
+  uploadProductImage: async (file: File): Promise<{ success: boolean; url: string }> => {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const formData = new FormData();
+    formData.append('file', file);
+    const res = await fetch(`${API_BASE}/api/merchant/upload-image`, {
+      method: 'POST',
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw { status: res.status, ...data };
+    return data;
+  },
   uploadCSV: (csvContent: string) =>
     request('/api/merchant/csv-upload', { method: 'POST', body: JSON.stringify({ csvContent }) }),
   getProducts: () => request('/api/merchant/products'),
@@ -58,6 +112,15 @@ export const api = {
   upgradeIdentity: (phoneNumber: string, cedula: string) =>
     request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula }) }),
   getAnalytics: () => request('/api/merchant/analytics'),
+  getMerchantMetrics: (branchId?: string) => {
+    const qs = branchId ? `?branchId=${branchId}` : '';
+    return request(`/api/merchant/metrics${qs}`);
+  },
+  getProductPerformance: () => request('/api/merchant/product-performance'),
+  getTransactions: (params?: Record<string, string>) => {
+    const qs = params ? '?' + new URLSearchParams(params).toString() : '';
+    return request(`/api/merchant/transactions${qs}`);
+  },
   getRecurrenceRules: () => request('/api/merchant/recurrence-rules'),
   createRecurrenceRule: (data: any) =>
     request('/api/merchant/recurrence-rules', { method: 'POST', body: JSON.stringify(data) }),
@@ -70,6 +133,25 @@ export const api = {
     request('/api/merchant/multiplier', { method: 'PUT', body: JSON.stringify({ multiplier, assetTypeId }) }),
   createStaff: (data: any) =>
     request('/api/merchant/staff', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Branches
+  getBranches: () => request('/api/merchant/branches'),
+  createBranch: (data: { name: string; address?: string; latitude?: number; longitude?: number }) =>
+    request('/api/merchant/branches', { method: 'POST', body: JSON.stringify(data) }),
+  toggleBranch: (id: string) =>
+    request(`/api/merchant/branches/${id}/toggle`, { method: 'PATCH' }),
+  generateBranchQR: (id: string) =>
+    request(`/api/merchant/branches/${id}/generate-qr`, { method: 'POST' }),
+
+  // Disputes (merchant)
+  getDisputes: (status?: string) =>
+    request(`/api/merchant/disputes${status ? `?status=${status}` : ''}`),
+  resolveDispute: (id: string, data: { action: string; reason: string; adjustmentAmount?: string; assetTypeId?: string }) =>
+    request(`/api/merchant/disputes/${id}/resolve`, { method: 'POST', body: JSON.stringify(data) }),
+
+  // Disputes (consumer)
+  submitDispute: (data: { description: string; screenshotUrl?: string }) =>
+    request('/api/consumer/disputes', { method: 'POST', body: JSON.stringify(data) }),
 
   // Admin Auth
   adminLogin: (email: string, password: string) =>

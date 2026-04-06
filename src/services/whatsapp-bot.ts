@@ -69,11 +69,12 @@ export function getStateGreeting(
   state: ConversationState,
   merchantName: string,
   balance: string,
-  phoneNumber: string
+  phoneNumber: string,
+  welcomeBonusAmount?: string
 ): string[] {
   switch (state) {
     case 'first_time': {
-      const bonusAmount = process.env.WELCOME_BONUS_AMOUNT || '50';
+      const bonusAmount = welcomeBonusAmount || process.env.WELCOME_BONUS_AMOUNT || '50';
       return [
         `¡Hola! 👋 Bienvenido a ${merchantName}.`,
         `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida!`,
@@ -301,7 +302,8 @@ export async function handleIncomingMessage(params: {
 
   // If account was just created (first contact via QR), always send welcome greeting
   if (created || state === 'first_time') {
-    return getStateGreeting('first_time', merchantName, '50', phoneNumber);
+    const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
+    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt);
   }
 
   // If it's the first message or a greeting, send state-based greeting

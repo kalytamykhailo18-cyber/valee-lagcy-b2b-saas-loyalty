@@ -143,9 +143,11 @@ model Tenant {
   name       String       @db.VarChar(255)
   slug       String       @unique @db.VarChar(100)
   status     TenantStatus @default(active)
-  ownerEmail String       @map("owner_email") @db.VarChar(255)
-  qrCodeUrl  String?      @map("qr_code_url")
-  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  ownerEmail       String       @map("owner_email") @db.VarChar(255)
+  qrCodeUrl        String?      @map("qr_code_url")
+  welcomeBonusAmount Int        @default(50) @map("welcome_bonus_amount")
+  rif              String?      @db.VarChar(50)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   branches          Branch[]

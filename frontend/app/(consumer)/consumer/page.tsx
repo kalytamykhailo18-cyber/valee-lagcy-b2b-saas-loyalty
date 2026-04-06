@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
+import { getLocalPendingBalance, getPendingCount, syncPendingActions, purgeExpiredActions, type QueuedAction } from '@/lib/offline-queue'
+import { useOnlineStatus } from '@/lib/use-online-status'
 
 type Screen = 'login' | 'otp' | 'main'
 
@@ -41,6 +43,24 @@ export default function ConsumerApp() {
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [account, setAccount] = useState<any>(null)
   const [showWelcome, setShowWelcome] = useState(false)
+  const [pendingCount, setPendingCount] = useState(0)
+
+  const handleSync = useCallback(async () => {
+    const count = getPendingCount()
+    if (count === 0) return
+    try {
+      await syncPendingActions(async (action: QueuedAction) => {
+        if (action.type === 'redeem_product') {
+          return await api.redeemProduct(action.payload.productId, action.payload.assetTypeId)
+        }
+        throw new Error('Unknown action type')
+      })
+      loadData()
+    } catch {}
+    setPendingCount(getPendingCount())
+  }, [])
+
+  const isOnline = useOnlineStatus(handleSync)
 
   useEffect(() => {
     const token = localStorage.getItem('accessToken')
@@ -48,6 +68,9 @@ export default function ConsumerApp() {
       setScreen('main')
       loadData()
     }
+    // Check expired items
+    const expired = purgeExpiredActions()
+    setPendingCount(getPendingCount())
   }, [])
 
   async function loadData() {
@@ -203,15 +226,35 @@ export default function ConsumerApp() {
         <button onClick={logout} className="text-sm text-slate-400 hover:text-slate-600">Salir</button>
       </div>
 
+      {/* Offline indicator */}
+      {!isOnline && (
+        <div className="mx-4 mt-2 bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+          Sin conexion. Algunas acciones se guardaran localmente.
+        </div>
+      )}
+      {pendingCount > 0 && (
+        <div className="mx-4 mt-2 bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-sm text-indigo-800 flex items-center justify-between">
+          <span>{pendingCount} accion(es) pendiente(s) de sincronizar</span>
+          {isOnline && (
+            <button onClick={handleSync} className="text-indigo-600 font-medium text-sm underline">Sincronizar</button>
+          )}
+        </div>
+      )}
+
       {/* Balance Card */}
       <div className="mx-4 mt-4 bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl p-6 text-white shadow-lg">
         <p className="text-indigo-200 text-sm">Tu saldo</p>
-        <p className="text-4xl font-bold mt-1">{parseFloat(balance).toLocaleString()}</p>
+        <p className="text-4xl font-bold mt-1">{(parseFloat(balance) - getLocalPendingBalance()).toLocaleString()}</p>
         <p className="text-indigo-200 text-sm mt-1">{unitLabel}</p>
+        {pendingCount > 0 && (
+          <p className="text-indigo-300 text-xs mt-1">
+            ({getLocalPendingBalance().toLocaleString()} pts en canjes pendientes)
+          </p>
+        )}
       </div>
 
       {/* Action Buttons */}
-      <div className="mx-4 mt-4 grid grid-cols-2 gap-3">
+      <div className="mx-4 mt-4 grid grid-cols-3 gap-3">
         <Link href="/scan" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
           <span className="text-2xl">📸</span>
           <p className="text-sm font-medium mt-1">Escanear factura</p>
@@ -219,6 +262,10 @@ export default function ConsumerApp() {
         <Link href="/catalog" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
           <span className="text-2xl">🎁</span>
           <p className="text-sm font-medium mt-1">Catalogo</p>
+        </Link>
+        <Link href="/disputes" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
+          <span className="text-2xl">📋</span>
+          <p className="text-sm font-medium mt-1">Reclamo</p>
         </Link>
       </div>
 

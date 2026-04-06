@@ -1,6 +1,6 @@
 /**
  * Welcome bonus: credits a one-time bonus to new consumer accounts.
- * Amount from WELCOME_BONUS_AMOUNT in .env.
+ * Amount is per-tenant (tenant.welcomeBonusAmount), fallback to WELCOME_BONUS_AMOUNT in .env.
  */
 
 import prisma from '../db/client.js';
@@ -12,8 +12,6 @@ export async function grantWelcomeBonus(
   tenantId: string,
   assetTypeId: string
 ): Promise<{ granted: boolean; amount: string }> {
-  const bonusAmount = process.env.WELCOME_BONUS_AMOUNT || '50';
-
   // Check if already granted
   const account = await prisma.account.findUnique({ where: { id: accountId } });
   if (!account || account.welcomeBonusGranted) {
@@ -22,6 +20,16 @@ export async function grantWelcomeBonus(
 
   // System accounts don't get bonuses
   if (account.accountType === 'system') {
+    return { granted: false, amount: '0' };
+  }
+
+  // Get tenant-specific bonus amount
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  const bonusAmount = tenant?.welcomeBonusAmount?.toString()
+    || process.env.WELCOME_BONUS_AMOUNT
+    || '50';
+
+  if (parseInt(bonusAmount) <= 0) {
     return { granted: false, amount: '0' };
   }
 

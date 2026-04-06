@@ -4,6 +4,7 @@ dotenv.config();
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
 import consumerRoutes from './api/routes/consumer.js';
 import merchantRoutes from './api/routes/merchant.js';
 import adminRoutes from './api/routes/admin.js';
@@ -14,6 +15,7 @@ const app = Fastify({ logger: true });
 async function start() {
   await app.register(cors, { origin: true, credentials: true });
   await app.register(cookie);
+  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB max
 
   await app.register(consumerRoutes);
   await app.register(merchantRoutes);

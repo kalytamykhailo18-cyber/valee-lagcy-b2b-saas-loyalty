@@ -40,18 +40,10 @@ export default function ScanInvoice() {
       }, 500)
     })
 
-    // Call API (simulated with extractedData for now)
-    const apiPromise = api.validateInvoice({
-      extractedData: {
-        invoice_number: 'SCAN-' + Date.now(),
-        total_amount: 100,
-        transaction_date: new Date().toISOString(),
-        customer_phone: null,
-        merchant_name: null,
-        confidence_score: 0.95,
-      },
-      assetTypeId: localStorage.getItem('assetTypeId') || '',
-    }).catch(err => ({ success: false, message: err.error || 'Error processing invoice' }))
+    // Upload actual image for OCR + AI extraction + validation
+    const assetTypeId = localStorage.getItem('assetTypeId') || ''
+    const apiPromise = api.uploadInvoiceImage(file, assetTypeId)
+      .catch(err => ({ success: false, message: err.error || 'Error processing invoice' }))
 
     // Wait for both animation and API
     const [, apiResult] = await Promise.all([animPromise, apiPromise])

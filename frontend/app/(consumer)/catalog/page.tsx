@@ -1,8 +1,19 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
+import {
+  generateActionId,
+  enqueueAction,
+  getPendingActions,
+  getLocalPendingBalance,
+  getPendingCount,
+  syncPendingActions,
+  purgeExpiredActions,
+  type QueuedAction,
+} from '@/lib/offline-queue'
+import { useOnlineStatus } from '@/lib/use-online-status'
 
 interface Product {
   id: string
@@ -25,8 +36,48 @@ export default function Catalog() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
   const [redeeming, setRedeeming] = useState(false)
   const [redeemResult, setRedeemResult] = useState<any>(null)
+  const [pendingCount, setPendingCount] = useState(0)
+  const [syncing, setSyncing] = useState(false)
+
+  const handleSync = useCallback(async () => {
+    const pending = getPendingActions()
+    if (pending.length === 0) return
+
+    setSyncing(true)
+    try {
+      await syncPendingActions(async (action: QueuedAction) => {
+        if (action.type === 'redeem_product') {
+          return await api.redeemProduct(action.payload.productId, action.payload.assetTypeId)
+        }
+        throw new Error('Unknown action type')
+      })
+      // Refresh data after sync
+      loadCatalog()
+    } catch {}
+    setSyncing(false)
+    setPendingCount(getPendingCount())
+  }, [])
+
+  const isOnline = useOnlineStatus(handleSync)
 
   useEffect(() => { loadCatalog() }, [])
+
+  // Check for expired items periodically
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const expired = purgeExpiredActions()
+      if (expired.length > 0) {
+        setMessage(`${expired.length} accion(es) pendiente(s) expiraron. Intenta de nuevo manualmente.`)
+      }
+      setPendingCount(getPendingCount())
+    }, 60000) // Check every minute
+    return () => clearInterval(interval)
+  }, [])
+
+  // Update pending count on mount
+  useEffect(() => {
+    setPendingCount(getPendingCount())
+  }, [])
 
   // Infinite scroll: load more when user scrolls near bottom
   useEffect(() => {
@@ -64,9 +115,18 @@ export default function Catalog() {
     }
   }
 
+  /** Effective balance = server balance - locally pending debits */
+  function getEffectiveBalance(): number {
+    const serverBal = parseFloat(balance) || 0
+    const pendingDebits = getLocalPendingBalance()
+    return serverBal - pendingDebits
+  }
+
   function handleProductClick(product: Product) {
-    if (!product.canAfford) {
-      const needed = (parseFloat(product.redemptionCost) - parseFloat(balance)).toFixed(0)
+    const effectiveBal = getEffectiveBalance()
+    const cost = parseFloat(product.redemptionCost)
+    if (cost > effectiveBal) {
+      const needed = (cost - effectiveBal).toFixed(0)
       setMessage(`Necesitas ${needed} puntos mas. Escanea una factura para ganar mas puntos!`)
       return
     }
@@ -76,15 +136,41 @@ export default function Catalog() {
   async function confirmRedeem() {
     if (!selectedProduct) return
     setRedeeming(true)
+
+    const actionId = generateActionId()
+    const assetTypeId = localStorage.getItem('assetTypeId') || ''
+
     try {
-      const result = await api.redeemProduct(selectedProduct.id, localStorage.getItem('assetTypeId') || '')
+      const result = await api.redeemProduct(selectedProduct.id, assetTypeId)
       setRedeemResult(result)
     } catch (e: any) {
-      setRedeemResult({ success: false, message: e.error || 'Error processing redemption' })
+      // Check if it's a network error (not a server validation error)
+      const isNetworkError = !e.status || e.status === 0 || e.message === 'Failed to fetch'
+          || (typeof e === 'object' && !('error' in e) && !('message' in e))
+
+      if (isNetworkError) {
+        // Queue locally for later sync
+        enqueueAction(
+          actionId,
+          'redeem_product',
+          { productId: selectedProduct.id, assetTypeId },
+          parseFloat(selectedProduct.redemptionCost)
+        )
+        setPendingCount(getPendingCount())
+        setRedeemResult({
+          success: false,
+          queued: true,
+          message: 'Sin conexion. Tu canje se procesara automaticamente cuando vuelvas a estar en linea.',
+        })
+      } else {
+        setRedeemResult({ success: false, message: e.error || 'Error processing redemption' })
+      }
     } finally {
       setRedeeming(false)
     }
   }
+
+  const effectiveBalance = getEffectiveBalance()
 
   // QR Result Screen with animation
   if (redeemResult?.success && redeemResult.token) {
@@ -118,9 +204,30 @@ export default function Catalog() {
     )
   }
 
+  // Queued result screen
+  if (redeemResult?.queued) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-3xl">~</span>
+          </div>
+          <h2 className="text-lg font-bold text-amber-700">Canje en cola</h2>
+          <p className="text-sm text-slate-500 mt-2">{redeemResult.message}</p>
+          <button
+            onClick={() => { setRedeemResult(null); setSelectedProduct(null) }}
+            className="mt-6 bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium w-full"
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // Confirmation dialog
   if (selectedProduct) {
-    const balanceAfter = (parseFloat(balance) - parseFloat(selectedProduct.redemptionCost)).toFixed(0)
+    const balanceAfter = (effectiveBalance - parseFloat(selectedProduct.redemptionCost)).toFixed(0)
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm animate-fade-in">
@@ -130,7 +237,7 @@ export default function Catalog() {
             <p className="text-slate-600"><span className="font-medium">Costo:</span> {parseFloat(selectedProduct.redemptionCost).toLocaleString()} pts</p>
             <p className="text-slate-600"><span className="font-medium">Saldo despues:</span> {parseFloat(balanceAfter).toLocaleString()} pts</p>
           </div>
-          {redeemResult && !redeemResult.success && (
+          {redeemResult && !redeemResult.success && !redeemResult.queued && (
             <p className="text-red-500 text-sm mt-3">{redeemResult.message}</p>
           )}
           <div className="mt-6 flex gap-3">
@@ -155,53 +262,82 @@ export default function Catalog() {
         <h1 className="text-xl font-bold">Catalogo</h1>
       </div>
 
-      <p className="text-sm text-slate-500 mb-4">Tu saldo: <span className="font-bold text-indigo-600">{parseFloat(balance).toLocaleString()} pts</span></p>
+      {/* Offline / Sync indicator */}
+      {!isOnline && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
+          Sin conexion. Los canjes se guardaran localmente.
+        </div>
+      )}
+      {pendingCount > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+          <span className="text-sm text-indigo-800">
+            {syncing ? 'Sincronizando...' : `${pendingCount} canje(s) pendiente(s)`}
+          </span>
+          {isOnline && !syncing && (
+            <button onClick={handleSync} className="text-sm text-indigo-600 font-medium underline">
+              Sincronizar ahora
+            </button>
+          )}
+        </div>
+      )}
+
+      <p className="text-sm text-slate-500 mb-4">
+        Tu saldo: <span className="font-bold text-indigo-600">{effectiveBalance.toLocaleString()} pts</span>
+        {pendingCount > 0 && (
+          <span className="text-xs text-amber-600 ml-2">
+            ({getLocalPendingBalance().toLocaleString()} pts pendientes)
+          </span>
+        )}
+      </p>
 
       {message && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
           {message}
-          <button onClick={() => setMessage('')} className="ml-2 font-bold">×</button>
+          <button onClick={() => setMessage('')} className="ml-2 font-bold">x</button>
         </div>
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {products.map(product => (
-          <div
-            key={product.id}
-            onClick={() => handleProductClick(product)}
-            className={`bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer transition hover:shadow-md ${!product.canAfford ? 'grayscale opacity-70' : ''}`}
-          >
-            <div className="h-32 bg-slate-100 flex items-center justify-center">
-              {product.photoUrl ? (
-                <img src={product.photoUrl} alt={product.name} className="h-full w-full object-cover" />
-              ) : (
-                <span className="text-4xl">🎁</span>
-              )}
+        {products.map(product => {
+          const canAfford = parseFloat(product.redemptionCost) <= effectiveBalance
+          return (
+            <div
+              key={product.id}
+              onClick={() => handleProductClick(product)}
+              className={`bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer transition hover:shadow-md ${!canAfford ? 'grayscale opacity-70' : ''}`}
+            >
+              <div className="h-32 bg-slate-100 flex items-center justify-center">
+                {product.photoUrl ? (
+                  <img src={product.photoUrl} alt={product.name} className="h-full w-full object-cover" />
+                ) : (
+                  <span className="text-4xl">*</span>
+                )}
+              </div>
+              <div className="p-3">
+                <p className="font-medium text-sm truncate">{product.name}</p>
+                <p className="text-indigo-600 font-bold text-sm">{parseFloat(product.redemptionCost).toLocaleString()} pts</p>
+                <p className="text-xs text-slate-400">{product.stock} disponibles</p>
+                {canAfford ? (
+                  <button className="w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
+                    Canjear
+                  </button>
+                ) : (
+                  <button className="w-full mt-2 bg-slate-200 text-slate-500 text-xs py-2 rounded-lg font-medium cursor-not-allowed" disabled>
+                    Bloqueado
+                  </button>
+                )}
+              </div>
             </div>
-            <div className="p-3">
-              <p className="font-medium text-sm truncate">{product.name}</p>
-              <p className="text-indigo-600 font-bold text-sm">{parseFloat(product.redemptionCost).toLocaleString()} pts</p>
-              <p className="text-xs text-slate-400">{product.stock} disponibles</p>
-              {product.canAfford ? (
-                <button className="w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
-                  Canjear
-                </button>
-              ) : (
-                <button className="w-full mt-2 bg-slate-200 text-slate-500 text-xs py-2 rounded-lg font-medium cursor-not-allowed" disabled>
-                  🔒 Bloqueado
-                </button>
-              )}
-            </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {loadingMore && (
-        <p className="text-center text-slate-400 mt-4 py-4">Cargando más productos...</p>
+        <p className="text-center text-slate-400 mt-4 py-4">Cargando mas productos...</p>
       )}
 
       {!hasMore && products.length > 0 && (
-        <p className="text-center text-slate-300 text-sm mt-4 py-4">No hay más productos</p>
+        <p className="text-center text-slate-300 text-sm mt-4 py-4">No hay mas productos</p>
       )}
 
       {products.length === 0 && !loading && (
