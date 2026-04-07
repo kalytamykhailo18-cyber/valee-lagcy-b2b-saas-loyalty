@@ -2,8 +2,8 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Loyalty Platform',
-  description: 'Earn rewards for your purchases',
+  title: 'Valee — Gana recompensas en tus comercios favoritos',
+  description: 'Cada compra cuenta. Acumula puntos en cada visita y canjealos por productos.',
 }
 
 export const viewport: Viewport = {

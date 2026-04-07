@@ -70,6 +70,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
     if (!csvContent) return reply.status(400).send({ error: 'csvContent is required' });
 
+    // Plan limit check
+    const { enforceLimit } = await import('../../services/plan-limits.js');
+    try { await enforceLimit(tenantId, 'csv_uploads'); }
+    catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
+
     // If async=true and Redis is configured, queue the job
     if (useAsync && process.env.REDIS_URL) {
       const jobId = await enqueueCsvJob(csvContent, tenantId, staffId);
@@ -126,6 +131,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
     if (!name || !redemptionCost || !assetTypeId) {
       return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
     }
+
+    // Plan limit check
+    const { enforceLimit } = await import('../../services/plan-limits.js');
+    try { await enforceLimit(tenantId, 'products_in_catalog'); }
+    catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
 
     const product = await prisma.product.create({
       data: { tenantId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
@@ -191,6 +201,54 @@ export default async function merchantRoutes(app: FastifyInstance) {
     `;
 
     return { product: updated };
+  });
+
+  // ---- DUAL-SCAN: Cashier initiates a transaction without a fiscal invoice ----
+  app.post('/api/merchant/dual-scan/initiate', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { staffId, tenantId } = request.staff!;
+    const { amount, branchId } = request.body as { amount: string; branchId?: string };
+
+    if (!amount || typeof amount !== 'string') {
+      return reply.status(400).send({ error: 'amount is required (string)' });
+    }
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return reply.status(400).send({ error: 'amount must be a positive number' });
+    }
+
+    const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = assetConfig
+      ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+      : await prisma.assetType.findFirst();
+    if (!assetType) return reply.status(500).send({ error: 'No asset type configured' });
+
+    // Resolve branch: if cashier has a branchId, use that; otherwise use the provided one
+    const cashier = await prisma.staff.findUnique({ where: { id: staffId } });
+    const effectiveBranchId = cashier?.branchId || branchId || null;
+
+    const { initiateDualScan } = await import('../../services/dual-scan.js');
+    const result = await initiateDualScan({
+      tenantId,
+      cashierId: staffId,
+      branchId: effectiveBranchId,
+      amount,
+      assetTypeId: assetType.id,
+    });
+
+    if (!result.success) {
+      return reply.status(400).send({ error: result.error });
+    }
+
+    // Audit the cashier action
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type,
+        amount, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'cashier',
+        'QR_SCAN_SUCCESS', ${amountNum}, 'success',
+        ${JSON.stringify({ kind: 'dual_scan_initiate', branchId: effectiveBranchId })}::jsonb, now())
+    `;
+
+    return { success: true, token: result.token, expiresAt: result.expiresAt };
   });
 
   // ---- CASHIER QR SCANNER ----
@@ -372,6 +430,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'name, email, password, and role are required' });
     }
 
+    // Plan limit check
+    const { enforceLimit } = await import('../../services/plan-limits.js');
+    try { await enforceLimit(tenantId, 'staff_members'); }
+    catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
+
     const passwordHash = await bcrypt.hash(password, 10);
     const staff = await prisma.staff.create({
       data: { tenantId, name, email, passwordHash, role, branchId },
@@ -448,12 +511,22 @@ export default async function merchantRoutes(app: FastifyInstance) {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
       rif: tenant?.rif || null,
       name: tenant?.name || '',
+      preferredExchangeSource: tenant?.preferredExchangeSource || null,
+      referenceCurrency: tenant?.referenceCurrency || 'usd',
     };
   });
 
   app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { welcomeBonusAmount, rif } = request.body as { welcomeBonusAmount?: number; rif?: string };
+    const { welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency } = request.body as {
+      welcomeBonusAmount?: number;
+      rif?: string;
+      preferredExchangeSource?: string | null;
+      referenceCurrency?: string;
+    };
+
+    const validSources = ['bcv', 'binance_p2p', 'bybit_p2p', 'promedio', 'euro_bcv'];
+    const validCurrencies = ['usd', 'eur', 'bs'];
 
     const data: any = {};
     if (welcomeBonusAmount !== undefined) {
@@ -465,13 +538,57 @@ export default async function merchantRoutes(app: FastifyInstance) {
     if (rif !== undefined) {
       data.rif = rif || null;
     }
+    if (preferredExchangeSource !== undefined) {
+      if (preferredExchangeSource !== null && !validSources.includes(preferredExchangeSource)) {
+        return reply.status(400).send({ error: `preferredExchangeSource must be one of: ${validSources.join(', ')} or null` });
+      }
+      data.preferredExchangeSource = preferredExchangeSource;
+    }
+    if (referenceCurrency !== undefined) {
+      if (!validCurrencies.includes(referenceCurrency)) {
+        return reply.status(400).send({ error: `referenceCurrency must be one of: ${validCurrencies.join(', ')}` });
+      }
+      data.referenceCurrency = referenceCurrency;
+    }
 
     const updated = await prisma.tenant.update({ where: { id: tenantId }, data });
     return {
       welcomeBonusAmount: updated.welcomeBonusAmount,
       rif: updated.rif,
       name: updated.name,
+      preferredExchangeSource: updated.preferredExchangeSource,
+      referenceCurrency: updated.referenceCurrency,
     };
+  });
+
+  // ---- ATTRIBUTION ROI ----
+  app.get('/api/merchant/attribution-roi', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { from, to } = request.query as { from?: string; to?: string };
+    const { getAttributionRoi } = await import('../../services/attribution.js');
+    return getAttributionRoi({
+      tenantId,
+      fromDate: from ? new Date(from) : undefined,
+      toDate: to ? new Date(to) : undefined,
+    });
+  });
+
+  // ---- PLAN USAGE ----
+  app.get('/api/merchant/plan-usage', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { getUsageSummary } = await import('../../services/plan-limits.js');
+    return getUsageSummary(tenantId);
+  });
+
+  // Read-only: current exchange rates available in the system
+  app.get('/api/merchant/exchange-rates', { preHandler: [requireStaffAuth] }, async () => {
+    const rates = await prisma.$queryRaw<any[]>`
+      SELECT DISTINCT ON (source, currency)
+        source, currency, rate_bs as "rateBs", reported_at as "reportedAt", fetched_at as "fetchedAt"
+      FROM exchange_rates
+      ORDER BY source, currency, fetched_at DESC
+    `;
+    return { rates: rates.map(r => ({ ...r, rateBs: Number(r.rateBs) })) };
   });
 
   // ---- CONVERSION MULTIPLIER (Owner only) ----

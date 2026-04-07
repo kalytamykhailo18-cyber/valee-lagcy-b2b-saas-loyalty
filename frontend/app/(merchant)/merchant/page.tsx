@@ -303,6 +303,10 @@ export default function MerchantDashboard() {
             <p className="font-medium">Escaner QR</p>
             <p className="text-xs text-slate-500">Escanear codigos de canje de clientes</p>
           </Link>
+          <Link href="/merchant/dual-scan" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
+            <p className="font-medium">Transaccion sin factura</p>
+            <p className="text-xs text-slate-500">Generar QR para clientes (Pago Movil, efectivo, sin recibo)</p>
+          </Link>
           <Link href="/merchant/products" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
             <p className="font-medium">Catalogo de productos</p>
             <p className="text-xs text-slate-500">Agregar, editar y gestionar productos</p>
@@ -318,6 +322,10 @@ export default function MerchantDashboard() {
           <Link href="/merchant/recurrence" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
             <p className="font-medium">Recurrencia</p>
             <p className="text-xs text-slate-500">Reglas de retencion automatica por WhatsApp</p>
+          </Link>
+          <Link href="/merchant/settings" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
+            <p className="font-medium">Configuracion</p>
+            <p className="text-xs text-slate-500">Bienvenida, RIF, tasa de cambio Bs/USD</p>
           </Link>
         </div>
       )}

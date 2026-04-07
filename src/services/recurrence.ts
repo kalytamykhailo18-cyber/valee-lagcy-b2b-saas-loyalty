@@ -11,6 +11,7 @@ import prisma from '../db/client.js';
 import { writeDoubleEntry } from './ledger.js';
 import { getSystemAccount } from './accounts.js';
 import { sendWhatsAppMessage } from './whatsapp.js';
+import { sendTemplateMessage } from './whatsapp-templates.js';
 
 export interface RecurrenceResult {
   notified: number;
@@ -82,14 +83,24 @@ export async function runRecurrenceEngine(): Promise<RecurrenceResult> {
         continue;
       }
 
-      // Build message from template
+      // Build message from template (used as fallback text)
       const message = rule.messageTemplate
         .replace('{name}', consumer.phone_number)
         .replace('{days}', daysSince.toString())
         .replace('{bonus}', rule.bonusAmount ? Number(rule.bonusAmount).toString() : '');
 
-      // Send WhatsApp message
-      await sendWhatsAppMessage(consumer.phone_number, message);
+      // Recurrence messages are PROACTIVE — typically outside the 24h customer service window.
+      // Try the Meta-approved template first, fall back to plain text if it fails.
+      const sent = await sendTemplateMessage('recurrence_reminder', consumer.phone_number, {
+        name: consumer.phone_number,
+        daysSince,
+        bonus: rule.bonusAmount ? Number(rule.bonusAmount) : 0,
+      }, 'auto');
+
+      // If both template and fallback failed, fall back to the merchant's custom message
+      if (!sent) {
+        await sendWhatsAppMessage(consumer.phone_number, message);
+      }
 
       // Grant bonus if configured
       let ledgerEntryId: string | null = null;

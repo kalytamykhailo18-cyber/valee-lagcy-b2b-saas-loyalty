@@ -168,6 +168,44 @@ export async function getAccountBalance(
 }
 
 /**
+ * Computes a breakdown of an account's balance into confirmed vs provisional.
+ * - confirmed: sum of credits/debits where status = 'confirmed'
+ * - provisional: net contribution of entries with status = 'provisional' (these are
+ *   credits that have been provisionally granted but not yet confirmed by reconciliation)
+ * - total: confirmed + provisional (the displayed balance)
+ *
+ * Reversed entries are excluded from both.
+ */
+export async function getAccountBalanceBreakdown(
+  accountId: string,
+  assetTypeId: string,
+  tenantId: string
+): Promise<{ confirmed: string; provisional: string; total: string }> {
+  const result = await prisma.$queryRaw<[{ confirmed: string; provisional: string }]>`
+    SELECT
+      COALESCE(
+        SUM(CASE WHEN status = 'confirmed' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN status = 'confirmed' AND entry_type = 'DEBIT' THEN amount ELSE 0 END),
+        0
+      )::text AS confirmed,
+      COALESCE(
+        SUM(CASE WHEN status = 'provisional' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN status = 'provisional' AND entry_type = 'DEBIT' THEN amount ELSE 0 END),
+        0
+      )::text AS provisional
+    FROM ledger_entries
+    WHERE account_id = ${accountId}::uuid
+      AND asset_type_id = ${assetTypeId}::uuid
+      AND tenant_id = ${tenantId}::uuid
+  `;
+
+  const confirmed = result[0].confirmed;
+  const provisional = result[0].provisional;
+  const total = (Number(confirmed) + Number(provisional)).toFixed(8);
+  return { confirmed, provisional, total };
+}
+
+/**
  * Computes an account's balance at a specific point in time.
  * Replays all events up to the given timestamp.
  * This fulfills the event sourcing requirement: any historical state is reconstructable.

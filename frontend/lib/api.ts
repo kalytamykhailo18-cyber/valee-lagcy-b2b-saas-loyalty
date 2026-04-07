@@ -111,6 +111,17 @@ export const api = {
     request(`/api/merchant/customer-lookup/${encodeURIComponent(phoneNumber)}`),
   upgradeIdentity: (phoneNumber: string, cedula: string) =>
     request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula }) }),
+  getAllAccounts: () => request('/api/consumer/all-accounts'),
+  getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
+  initiateDualScan: (amount: string, branchId?: string) =>
+    request('/api/merchant/dual-scan/initiate', { method: 'POST', body: JSON.stringify({ amount, branchId }) }),
+  confirmDualScan: (token: string) =>
+    request('/api/consumer/dual-scan/confirm', { method: 'POST', body: JSON.stringify({ token }) }),
+  getPlanUsage: () => request('/api/merchant/plan-usage'),
+  getMerchantSettings: () => request('/api/merchant/settings'),
+  updateMerchantSettings: (data: { welcomeBonusAmount?: number; rif?: string; preferredExchangeSource?: string | null; referenceCurrency?: string }) =>
+    request('/api/merchant/settings', { method: 'PUT', body: JSON.stringify(data) }),
+  getExchangeRates: () => request('/api/merchant/exchange-rates'),
   getAnalytics: () => request('/api/merchant/analytics'),
   getMerchantMetrics: (branchId?: string) => {
     const qs = branchId ? `?branchId=${branchId}` : '';

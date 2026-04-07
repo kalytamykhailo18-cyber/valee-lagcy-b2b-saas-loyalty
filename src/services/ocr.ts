@@ -70,22 +70,39 @@ export async function aiExtractInvoiceFields(ocrText: string): Promise<Extracted
         max_tokens: 1000,
         messages: [{
           role: 'user',
-          content: `Extract the following fields from this invoice/receipt text. Return ONLY a JSON object with these fields:
-- invoice_number: the invoice or order number (string or null)
-- total_amount: the total amount paid (number or null)
-- transaction_date: the date of the transaction in ISO format (string or null)
-- transaction_time: the time of the transaction if visible (string or null, e.g. "14:30")
-- customer_phone: the customer's phone number if present (string or null)
-- merchant_name: the merchant/store name if present (string or null)
-- order_items: an array of items ordered, each with { name: string, quantity: number, unit_price: number } (array or null). Extract every line item visible on the receipt.
-- confidence_score: how confident you are in the extraction from 0.0 to 1.0 (number)
+          content: `You are extracting data from a Latin American sales document. The text below is the raw OCR output.
+The document may be one of three types:
+- "fiscal_invoice": a traditional sales receipt (FACTURA DE VENTA, with invoice number, items, RIF, etc.)
+- "mobile_payment": a screenshot of a mobile bank payment confirmation (Pago Móvil, transferencia bancaria, with bank name, reference number, amount, beneficiary)
+- "voucher": a small printed voucher with just the amount and date, no items
 
-IMPORTANT: The order items are critical business data. Extract every product/item line you can find, including quantities and individual prices.
+CRITICAL RULES:
+1. NEVER invent, guess, or hallucinate values. If a field is not clearly visible in the OCR text, return null for that field.
+2. The invoice_number must be copied VERBATIM from the text. Do not normalize, reformat, or prepend anything (no "INV-" prefix unless it's literally in the text). Common Latin American formats include: "00-000000", "FAC-1234", "N. 123456", "Control: 01-0000123", "Factura No. 123".
+3. The total_amount must be the final amount in the document's native currency. Do not convert currencies. If you see both a Bs amount and a USD reference, use the Bs amount (it's the primary currency).
+4. For mobile_payment screenshots: invoice_number must be set to the bank reference number (the unique identifier the bank assigns to the transaction). bank_name must be the bank that processed the payment (Banesco, BDV, Mercantil, BBVA Provincial, Banco Plaza, Banco del Tesoro, etc.). payment_reference is the same as the bank reference.
+5. For voucher documents: invoice_number can be null if no number is printed. The system will generate a synthetic reference.
+6. Set confidence_score to 0.0-0.3 if the text is blurry or fields are missing; 0.4-0.7 if some fields are unclear; 0.8-1.0 only if everything is clearly readable.
 
-Receipt text:
+Return ONLY a JSON object with these exact fields:
+- document_type: one of "fiscal_invoice", "mobile_payment", "voucher" (string)
+- invoice_number: exact identifier as shown (string or null). For mobile_payment, use the bank reference number.
+- total_amount: final total in document's currency (number or null)
+- transaction_date: date in ISO format YYYY-MM-DD (string or null)
+- transaction_time: time if visible, e.g. "14:30" (string or null)
+- customer_phone: customer phone if printed (string or null)
+- merchant_name: business name or beneficiary name (string or null)
+- bank_name: bank that processed the payment (string or null, only for mobile_payment)
+- payment_reference: bank reference number (string or null, only for mobile_payment)
+- order_items: array of { name: string, quantity: number, unit_price: number } for each line item. Only for fiscal_invoice. (array or null)
+- confidence_score: 0.0 to 1.0 based on text clarity (number)
+
+OCR text:
+---
 ${ocrText}
+---
 
-Return ONLY the JSON object, no other text.`,
+Return ONLY the JSON object, no explanations.`,
         }],
       }),
     });
@@ -120,6 +137,9 @@ Return ONLY the JSON object, no other text.`,
       merchant_name: parsed.merchant_name || null,
       order_items: parsed.order_items || null,
       confidence_score: parsed.confidence_score != null ? Number(parsed.confidence_score) : 0,
+      document_type: parsed.document_type || null,
+      bank_name: parsed.bank_name || null,
+      payment_reference: parsed.payment_reference || null,
     };
   } catch (err) {
     console.error('[AI] Claude API call failed:', err);
@@ -140,6 +160,9 @@ export async function extractFromImage(imageBuffer: Buffer): Promise<{
   const imageBase64 = imageBuffer.toString('base64');
 
   const ocrRawText = await ocrExtractText(imageBase64);
+  if (ocrRawText) {
+    console.log('[OCR] Vision extracted text (first 500 chars):', ocrRawText.slice(0, 500).replace(/\n/g, ' | '));
+  }
 
   if (!ocrRawText) {
     return {

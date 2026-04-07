@@ -282,7 +282,7 @@ export async function processRedemption(params: {
   const poolAccount = await getSystemAccount(payload.tenantId, 'issued_value_pool');
   if (!poolAccount) throw new Error('issued_value_pool not found');
 
-  await writeDoubleEntry({
+  const confirmResult = await writeDoubleEntry({
     tenantId: payload.tenantId,
     eventType: 'REDEMPTION_CONFIRMED',
     debitAccountId: holdingAccount.id,
@@ -293,6 +293,14 @@ export async function processRedemption(params: {
     referenceType: 'redemption_token',
     branchId: params.branchId || null,
     metadata: { cashierId: params.cashierStaffId, productId: payload.productId },
+  });
+
+  // Record platform revenue (redemption fee) if configured
+  const { recordRedemptionFee } = await import('./platform-revenue.js');
+  await recordRedemptionFee({
+    tenantId: payload.tenantId,
+    redemptionValue: payload.amount,
+    ledgerEntryId: confirmResult.credit.id,
   });
 
   // 9. Decrement product stock

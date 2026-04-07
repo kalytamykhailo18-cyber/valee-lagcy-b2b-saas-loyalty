@@ -9,6 +9,7 @@ import { processCSV } from './csv-upload.js';
 import { runReconciliation } from './reconciliation.js';
 import { expireRedemption } from './redemption.js';
 import { runRecurrenceEngine } from './recurrence.js';
+import { fetchAllRates } from './exchange-rates.js';
 import prisma from '../db/client.js';
 
 function getRedisConnection() {
@@ -106,6 +107,14 @@ export function startWorkers() {
     return result;
   }, { connection });
 
+  // Exchange rate fetcher worker
+  new Worker('exchange-rates', async () => {
+    console.log('[Worker] Fetching exchange rates...');
+    const inserted = await fetchAllRates();
+    console.log(`[Worker] Exchange rates: ${inserted} new rates stored`);
+    return { inserted };
+  }, { connection });
+
   // Schedule reconciliation to run every 5 minutes
   const reconciliationIntervalMs = 5 * 60 * 1000;
   setInterval(async () => {
@@ -129,6 +138,39 @@ export function startWorkers() {
   }, recurrenceIntervalMs);
   // Also run once on startup
   recurrenceQueue.add('check-recurrence', {}).catch(() => {});
+
+  // Schedule exchange rate fetcher: at the configured times each day (default 09:00 and 13:00 local).
+  // Runs once on startup so the table is never empty.
+  const ratesQueue = new Queue('exchange-rates', { connection: getRedisConnection() });
+  ratesQueue.add('fetch-rates', {}).catch(() => {});
+
+  const fetchTimes = (process.env.EXCHANGE_RATE_FETCH_TIMES || '09:00,13:00')
+    .split(',')
+    .map((t) => t.trim())
+    .filter(Boolean);
+
+  function scheduleNextRateFetch() {
+    const now = new Date();
+    const upcoming: number[] = [];
+    for (const time of fetchTimes) {
+      const [hh, mm] = time.split(':').map(Number);
+      const target = new Date(now);
+      target.setHours(hh, mm, 0, 0);
+      if (target.getTime() <= now.getTime()) target.setDate(target.getDate() + 1);
+      upcoming.push(target.getTime() - now.getTime());
+    }
+    if (upcoming.length === 0) return;
+    const nextDelayMs = Math.min(...upcoming);
+    setTimeout(async () => {
+      try {
+        await ratesQueue.add('fetch-rates', {});
+      } catch (err) {
+        console.error('[Worker] Failed to enqueue exchange-rates:', err);
+      }
+      scheduleNextRateFetch(); // schedule the next one after this fires
+    }, nextDelayMs);
+  }
+  scheduleNextRateFetch();
 
   console.log('[Workers] All background workers started');
 }

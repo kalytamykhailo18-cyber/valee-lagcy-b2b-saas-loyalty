@@ -35,6 +35,7 @@ enum LedgerEventType {
   REVERSAL
   ADJUSTMENT_MANUAL
   TRANSFER_P2P
+  PRESENCE_VALIDATED
 }
 
 enum LedgerEntryType {
@@ -67,6 +68,11 @@ enum InvoiceStatus {
 enum InvoiceSource {
   csv_upload
   photo_submission
+  mobile_payment
+  voucher
+  dual_scan
+  pos_webhook
+  fudo_webhook
 }
 
 enum UploadBatchStatus {
@@ -134,6 +140,26 @@ enum DisputeResolverType {
   admin
 }
 
+enum ExchangeSource {
+  bcv
+  binance_p2p
+  bybit_p2p
+  promedio
+  euro_bcv
+}
+
+enum ReferenceCurrency {
+  usd
+  eur
+  bs
+}
+
+enum PlanTier {
+  basic
+  pro
+  x10
+}
+
 // ============================================================
 // 1. TENANTS
 // ============================================================
@@ -147,6 +173,18 @@ model Tenant {
   qrCodeUrl        String?      @map("qr_code_url")
   welcomeBonusAmount Int        @default(50) @map("welcome_bonus_amount")
   rif              String?      @db.VarChar(50)
+  preferredExchangeSource ExchangeSource? @map("preferred_exchange_source")
+  referenceCurrency       ReferenceCurrency @default(usd) @map("reference_currency")
+  dualScanCapPerCashier   Int      @default(50) @map("dual_scan_cap_per_cashier")
+  dualScanCapPerConsumer  Int      @default(5)  @map("dual_scan_cap_per_consumer")
+  dualScanTtlSeconds      Int      @default(60) @map("dual_scan_ttl_seconds")
+  plan                    PlanTier @default(basic)
+  redemptionFeePercent       Decimal? @map("redemption_fee_percent") @db.Decimal(5, 2)
+  attributedSaleFeePercent   Decimal? @map("attributed_sale_fee_percent") @db.Decimal(5, 2)
+  attributedCustomerFixedFee Decimal? @map("attributed_customer_fixed_fee") @db.Decimal(10, 2)
+  posWebhookSecret           String?  @map("pos_webhook_secret")
+  fudoApiKey                 String?  @map("fudo_api_key")
+  fudoWebhookSecret          String?  @map("fudo_webhook_secret")
   createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz
   updatedAt  DateTime     @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -616,4 +654,47 @@ model RecurrenceNotification {
   @@index([tenantId, consumerAccountId])
   @@index([tenantId, sentAt])
   @@map("recurrence_notifications")
+}
+
+// ============================================================
+// 19. EXCHANGE RATES (Venezuela multi-rate handling)
+// ============================================================
+
+model ExchangeRate {
+  id         String            @id @default(uuid()) @db.Uuid
+  source     ExchangeSource
+  currency   ReferenceCurrency
+  rateBs     Decimal           @map("rate_bs") @db.Decimal(18, 4)
+  fetchedAt  DateTime          @default(now()) @map("fetched_at") @db.Timestamptz
+  reportedAt DateTime          @map("reported_at") @db.Timestamptz
+
+  @@index([source, currency, fetchedAt(sort: Desc)])
+  @@map("exchange_rates")
+}
+
+// ============================================================
+// 20. PLATFORM REVENUE (Valee monetization)
+// ============================================================
+
+enum RevenueSource {
+  redemption_fee
+  attributed_sale_fee
+  attributed_customer_fee
+}
+
+model PlatformRevenue {
+  id            String        @id @default(uuid()) @db.Uuid
+  tenantId     String        @map("tenant_id") @db.Uuid
+  source        RevenueSource
+  amount        Decimal       @db.Decimal(18, 8)
+  currency      ReferenceCurrency
+  baseAmount    Decimal?      @map("base_amount") @db.Decimal(18, 8)
+  feePercent    Decimal?      @map("fee_percent") @db.Decimal(5, 2)
+  ledgerEntryId String?       @map("ledger_entry_id") @db.Uuid
+  metadata      Json?
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, source])
+  @@map("platform_revenue")
 }

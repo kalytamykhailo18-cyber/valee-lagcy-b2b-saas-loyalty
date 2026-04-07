@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import prisma from '../../db/client.js';
 import { generateOTP, verifyOTP, issueConsumerTokens, verifyConsumerToken } from '../../services/auth.js';
 import { findOrCreateConsumerAccount } from '../../services/accounts.js';
-import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
+import { getAccountBalance, getAccountBalanceBreakdown, getAccountHistory } from '../../services/ledger.js';
 import { validateInvoice } from '../../services/invoice-validation.js';
 import { initiateRedemption } from '../../services/redemption.js';
 import { requireConsumerAuth } from '../middleware/auth.js';
@@ -110,10 +110,18 @@ export default async function consumerRoutes(app: FastifyInstance) {
       ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
       : await prisma.assetType.findFirst();
 
-    if (!assetType) return { balance: '0', unitLabel: 'points' };
+    if (!assetType) {
+      return { balance: '0', confirmed: '0', provisional: '0', unitLabel: 'points' };
+    }
 
-    const balance = await getAccountBalance(accountId, assetType.id, tenantId);
-    return { balance, unitLabel: assetType.unitLabel, assetTypeId: assetType.id };
+    const breakdown = await getAccountBalanceBreakdown(accountId, assetType.id, tenantId);
+    return {
+      balance: breakdown.total,           // total displayed (confirmed + provisional)
+      confirmed: breakdown.confirmed,
+      provisional: breakdown.provisional,
+      unitLabel: assetType.unitLabel,
+      assetTypeId: assetType.id,
+    };
   });
 
   // ---- HISTORY ----
@@ -151,6 +159,80 @@ export default async function consumerRoutes(app: FastifyInstance) {
       accountType: account?.accountType,
       cedula: account?.cedula,
       merchantName: tenant?.name,
+    };
+  });
+
+  // ---- PUBLIC: List of affiliated merchants for the landing page (no auth) ----
+  app.get('/api/consumer/affiliated-merchants', async () => {
+    const tenants = await prisma.tenant.findMany({
+      where: { status: 'active' },
+      orderBy: { createdAt: 'desc' },
+      take: 24,
+      select: { id: true, name: true, slug: true, qrCodeUrl: true },
+    });
+    return { merchants: tenants };
+  });
+
+  // ---- ALL ACCOUNTS (cross-tenant for the same phone number) ----
+  // The authenticated consumer can have accounts in multiple merchants — same phone,
+  // different tenants. This endpoint returns all of them with balance + top 3 products
+  // per merchant. Used for the multicommerce landing page at valee.app.
+  app.get('/api/consumer/all-accounts', { preHandler: [requireConsumerAuth] }, async (request) => {
+    const { phoneNumber } = request.consumer!;
+
+    const accounts = await prisma.account.findMany({
+      where: { phoneNumber, accountType: { in: ['shadow', 'verified'] } },
+      include: { tenant: true },
+    });
+
+    const merchants = await Promise.all(accounts.map(async (acc) => {
+      // Pick the tenant's primary asset type
+      const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId: acc.tenantId } });
+      const assetType = assetConfig
+        ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+        : await prisma.assetType.findFirst();
+
+      let balance = '0';
+      let unitLabel = 'pts';
+      if (assetType) {
+        balance = await getAccountBalance(acc.id, assetType.id, acc.tenantId);
+        unitLabel = assetType.unitLabel;
+      }
+
+      // Top 3 products by lowest cost (entry-level redemptions are most attractive)
+      const topProducts = await prisma.product.findMany({
+        where: { tenantId: acc.tenantId, active: true, stock: { gt: 0 } },
+        orderBy: { redemptionCost: 'asc' },
+        take: 3,
+        select: { id: true, name: true, photoUrl: true, redemptionCost: true, stock: true },
+      });
+
+      return {
+        accountId: acc.id,
+        tenantId: acc.tenantId,
+        tenantName: acc.tenant.name,
+        tenantSlug: acc.tenant.slug,
+        accountType: acc.accountType,
+        balance,
+        unitLabel,
+        topProducts: topProducts.map(p => ({
+          id: p.id,
+          name: p.name,
+          photoUrl: p.photoUrl,
+          redemptionCost: p.redemptionCost.toString(),
+          stock: p.stock,
+        })),
+      };
+    }));
+
+    // Compute total balance across merchants (note: only meaningful if all use the same unit)
+    const totalBalance = merchants.reduce((sum, m) => sum + Number(m.balance), 0);
+
+    return {
+      phoneNumber,
+      merchantCount: merchants.length,
+      totalBalance: totalBalance.toFixed(8),
+      merchants,
     };
   });
 
@@ -345,6 +427,25 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
 
     return { success: true, url };
+  });
+
+  // ---- DUAL-SCAN: Consumer confirms a cashier-generated transaction QR ----
+  app.post('/api/consumer/dual-scan/confirm', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { phoneNumber } = request.consumer!;
+    const { token } = request.body as { token: string };
+
+    if (!token) {
+      return reply.status(400).send({ error: 'token is required' });
+    }
+
+    const { confirmDualScan } = await import('../../services/dual-scan.js');
+    const result = await confirmDualScan({ token, consumerPhone: phoneNumber });
+
+    if (!result.success) {
+      return reply.status(400).send({ error: result.message });
+    }
+
+    return result;
   });
 
   // ---- SUBMIT DISPUTE ----

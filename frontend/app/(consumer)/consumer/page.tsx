@@ -38,6 +38,8 @@ export default function ConsumerApp() {
   const [loading, setLoading] = useState(false)
 
   const [balance, setBalance] = useState('0')
+  const [confirmedBalance, setConfirmedBalance] = useState('0')
+  const [provisionalBalance, setProvisionalBalance] = useState('0')
   const [unitLabel, setUnitLabel] = useState('points')
   const [assetTypeId, setAssetTypeId] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -81,6 +83,8 @@ export default function ConsumerApp() {
         api.getAccount(),
       ])
       setBalance(balData.balance)
+      setConfirmedBalance(balData.confirmed || balData.balance)
+      setProvisionalBalance(balData.provisional || '0')
       setUnitLabel(balData.unitLabel)
       setAssetTypeId(balData.assetTypeId)
       setHistory(histData.entries)
@@ -246,6 +250,12 @@ export default function ConsumerApp() {
         <p className="text-indigo-200 text-sm">Tu saldo</p>
         <p className="text-4xl font-bold mt-1">{(parseFloat(balance) - getLocalPendingBalance()).toLocaleString()}</p>
         <p className="text-indigo-200 text-sm mt-1">{unitLabel}</p>
+        {parseFloat(provisionalBalance) > 0 && (
+          <div className="mt-3 inline-flex items-center gap-1.5 bg-indigo-500/40 backdrop-blur-sm rounded-lg px-2.5 py-1 text-xs">
+            <span>🔒</span>
+            <span>{parseFloat(provisionalBalance).toLocaleString()} {unitLabel} en verificacion</span>
+          </div>
+        )}
         {pendingCount > 0 && (
           <p className="text-indigo-300 text-xs mt-1">
             ({getLocalPendingBalance().toLocaleString()} pts en canjes pendientes)
@@ -254,7 +264,7 @@ export default function ConsumerApp() {
       </div>
 
       {/* Action Buttons */}
-      <div className="mx-4 mt-4 grid grid-cols-3 gap-3">
+      <div className="mx-4 mt-4 grid grid-cols-2 gap-3">
         <Link href="/scan" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
           <span className="text-2xl">📸</span>
           <p className="text-sm font-medium mt-1">Escanear factura</p>
@@ -262,6 +272,10 @@ export default function ConsumerApp() {
         <Link href="/catalog" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
           <span className="text-2xl">🎁</span>
           <p className="text-sm font-medium mt-1">Catalogo</p>
+        </Link>
+        <Link href="/dual-scan" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
+          <span className="text-2xl">📷</span>
+          <p className="text-sm font-medium mt-1">Escanear QR</p>
         </Link>
         <Link href="/disputes" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
           <span className="text-2xl">📋</span>
