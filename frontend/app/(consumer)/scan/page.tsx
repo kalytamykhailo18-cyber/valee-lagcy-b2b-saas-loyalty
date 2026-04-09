@@ -1,15 +1,17 @@
 'use client'
 
 import { useState, useRef } from 'react'
+import { MdCameraAlt, MdDescription, MdVerifiedUser, MdStars } from 'react-icons/md'
+import type { ComponentType } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 
 type Stage = 'idle' | 'processing' | 'result'
 
-const ANIMATION_STEPS = [
-  { label: 'Leyendo tu factura...', icon: '📄', duration: 500 },
-  { label: 'Verificando con el comercio...', icon: '🔍', duration: 500 },
-  { label: 'Agregando tus puntos...', icon: '💰', duration: 500 },
+const ANIMATION_STEPS: Array<{ label: string; Icon: ComponentType<{ className?: string }>; duration: number }> = [
+  { label: 'Leyendo tu factura...', Icon: MdDescription, duration: 500 },
+  { label: 'Verificando con el comercio...', Icon: MdVerifiedUser, duration: 500 },
+  { label: 'Agregando tus puntos...', Icon: MdStars, duration: 500 },
 ]
 
 export default function ScanInvoice() {
@@ -58,7 +60,7 @@ export default function ScanInvoice() {
         <div className="text-center text-white">
           {ANIMATION_STEPS.map((step, i) => (
             <div key={i} className={`transition-opacity duration-300 mb-4 ${i <= animStep ? 'opacity-100' : 'opacity-20'}`}>
-              <span className="text-3xl">{step.icon}</span>
+              <step.Icon className="w-8 h-8" />
               <p className="text-lg mt-1">{step.label}</p>
             </div>
           ))}
@@ -96,7 +98,7 @@ export default function ScanInvoice() {
       </div>
 
       <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-        <span className="text-5xl">📸</span>
+        <MdCameraAlt className="w-12 h-12 text-indigo-600 mx-auto" />
         <h2 className="text-lg font-semibold mt-4">Toma una foto de tu factura</h2>
         <p className="text-slate-500 text-sm mt-2">Puedes usar la camara o seleccionar una imagen de tu galeria</p>
 

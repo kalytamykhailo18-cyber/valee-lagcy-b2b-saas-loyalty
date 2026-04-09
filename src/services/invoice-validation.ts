@@ -65,8 +65,53 @@ export async function validateInvoice(params: {
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, assetTypeId } = params;
 
+  // STAGE 0: Trust-level gate
+  // Each tenant declares which source types they accept. A tenant on level_1_strict
+  // rejects voucher and mobile_payment entirely. A tenant on level_3_presence only
+  // accepts dual_scan events (which don't flow through this function at all).
+  // level_2_standard accepts everything and applies layered anti-fraud downstream.
+  const tenantForTrust = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (tenantForTrust) {
+    const trustLevel = tenantForTrust.trustLevel;
+
+    // level_3_presence rejects ALL image submissions regardless of type.
+    // Only dual_scan events are accepted and those use a different code path.
+    if (trustLevel === 'level_3_presence') {
+      return {
+        success: false,
+        stage: 'trust_level',
+        message: 'Este comercio no acepta fotos de factura. El cajero te va a generar un codigo QR para escanear.',
+      };
+    }
+
+    // level_1_strict requires fiscal_invoice. If we can determine the type now (from
+    // pre-extracted data), reject early. Otherwise re-check after OCR below.
+    if (trustLevel === 'level_1_strict') {
+      const preDocType = params.extractedData?.document_type || null;
+      if (preDocType && preDocType !== 'fiscal_invoice') {
+        return {
+          success: false,
+          stage: 'trust_level',
+          message: 'Este comercio solo acepta facturas fiscales. Envia una factura oficial con numero y tus datos.',
+        };
+      }
+    }
+  }
+
   // STAGE A: Extract data (real OCR+AI if image provided, or pre-extracted for tests)
   const { data: extracted, ocrRawText } = await extractInvoiceData(params.imageBuffer || null, params.extractedData);
+
+  // Post-OCR trust-level gate for level_1_strict (covers the case where pre-extracted
+  // document_type wasn't provided)
+  if (tenantForTrust && tenantForTrust.trustLevel === 'level_1_strict' && !params.extractedData?.document_type) {
+    if (extracted.document_type && extracted.document_type !== 'fiscal_invoice') {
+      return {
+        success: false,
+        stage: 'trust_level',
+        message: 'Este comercio solo acepta facturas fiscales. Envia una factura oficial con numero y tus datos.',
+      };
+    }
+  }
   console.log('[Validation] Extracted:', JSON.stringify({
     invoice_number: extracted.invoice_number,
     total_amount: extracted.total_amount,
@@ -82,12 +127,43 @@ export async function validateInvoice(params: {
     return { success: false, stage: 'extraction', message: 'No pudimos leer la factura con claridad. Por favor envia una foto mas clara.' };
   }
 
-  // For vouchers without an invoice number, generate a synthetic reference based on
-  // tenant + amount + date hash so duplicate submissions are still rejected.
+  // For vouchers without an invoice number, generate a ROBUST synthetic reference.
+  // Two real but different $10 vouchers on the same day at different times used to
+  // collide with the old hash (date+amount only). The robust hash now combines:
+  //   - tenant id (scoping)
+  //   - amount in cents (precision, no rounding drift)
+  //   - date YYYYMMDD
+  //   - time HHMMSS — required, not defaulted to 0000
+  //   - SHA-256 of the OCR raw text (captures any content difference between receipts)
+  //   - SHA-256 of the image buffer (perceptual fingerprint fallback)
+  // Without a time in the OCR we refuse to auto-generate and route to manual review.
   if (!extracted.invoice_number && extracted.document_type === 'voucher' && extracted.total_amount !== null) {
+    const crypto = await import('crypto');
     const dateKey = (extracted.transaction_date || new Date().toISOString().split('T')[0]).replace(/-/g, '');
-    const timeKey = (extracted.transaction_time || '0000').replace(/:/g, '');
-    extracted.invoice_number = `VOUCHER-${dateKey}-${timeKey}-${Math.round(extracted.total_amount * 100)}`;
+    const timeKey = (extracted.transaction_time || '').replace(/:/g, '');
+
+    if (!timeKey || timeKey.length < 4) {
+      // No time visible on the voucher — cannot build a safe synthetic reference.
+      // Route to manual review so a human decides.
+      return {
+        success: false,
+        stage: 'extraction',
+        message: 'El voucher no muestra hora. Por favor envia una foto mas clara o espera que un cajero lo valide.',
+        status: 'manual_review',
+      };
+    }
+
+    const amountCents = Math.round(extracted.total_amount * 100);
+    const ocrFingerprint = ocrRawText
+      ? crypto.createHash('sha256').update(ocrRawText).digest('hex').slice(0, 12)
+      : '000000000000';
+    const imageFingerprint = params.imageBuffer
+      ? crypto.createHash('sha256').update(params.imageBuffer).digest('hex').slice(0, 12)
+      : '000000000000';
+
+    extracted.invoice_number =
+      `VOUCHER-${dateKey}-${timeKey}-${amountCents}-${ocrFingerprint}-${imageFingerprint}`;
+
     console.log('[Validation] Generated synthetic voucher reference:', extracted.invoice_number);
   }
 
@@ -304,12 +380,48 @@ export async function validateInvoice(params: {
 
   // Store token signature on the invoice record (ledger is immutable — can't UPDATE it)
   // The token is linked to the ledger entry via outputToken.payload.ledgerEntryId
-  // Store token signature + full order details on the invoice record
+  //
+  // Items source strategy depends on document type:
+  //   - fiscal_invoice  → items extracted from the receipt image (customer's photo)
+  //   - voucher / mobile_payment → items come from the merchant's CSV row (payment
+  //                                receipts do not print itemized lists). We preserve
+  //                                whatever the CSV had and do not overwrite it.
+  //
+  // The CSV row's items (if any) live in invoice.orderDetails already because
+  // processCSV stores them at upload time. So we only write new orderDetails when
+  // the source is a fiscal_invoice and the image actually had items.
+  const isReceiptWithItems = extracted.document_type !== 'voucher'
+    && extracted.document_type !== 'mobile_payment'
+    && extracted.order_items
+    && extracted.order_items.length > 0;
+
+  const existingOrderDetails = invoice.orderDetails as any || null;
+  const hasCsvItems = existingOrderDetails?.items?.length > 0;
+
+  let finalOrderDetails;
+  if (hasCsvItems) {
+    // CSV provided items — preserve them, optionally enrich with image items if any
+    finalOrderDetails = {
+      ...existingOrderDetails,
+      source: 'csv',
+      confirmedAt: new Date().toISOString(),
+    };
+  } else if (isReceiptWithItems) {
+    // Fiscal invoice with line items from the image
+    finalOrderDetails = {
+      items: extracted.order_items,
+      source: 'image_extraction',
+      extractedAt: new Date().toISOString(),
+    };
+  } else {
+    finalOrderDetails = undefined;
+  }
+
   await prisma.invoice.update({
     where: { id: invoice.id },
     data: {
       extractedData: { ...(invoice.extractedData as any || {}), outputTokenSignature: outputToken.signature },
-      orderDetails: extracted.order_items ? { items: extracted.order_items, extractedAt: new Date().toISOString() } : undefined,
+      orderDetails: finalOrderDetails,
     },
   });
 

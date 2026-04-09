@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { MdCardGiftcard } from 'react-icons/md'
 import { api } from '@/lib/api'
-import Link from 'next/link'
 
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
@@ -95,139 +95,222 @@ export default function ProductManagement() {
   }
 
   return (
-    <div className="min-h-screen bg-emerald-50 p-4">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Link href="/merchant" className="text-emerald-700 text-2xl">&larr;</Link>
-          <h1 className="text-xl font-bold text-emerald-800">Productos</h1>
-        </div>
-        <button onClick={() => setShowForm(!showForm)} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium">
-          {showForm ? 'Cancelar' : '+ Nuevo'}
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm mb-4 space-y-3 animate-fade-in">
-          <input type="text" placeholder="Nombre del producto" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          <input type="text" placeholder="Descripcion" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          <div className="space-y-2">
-            <label className="text-xs text-slate-500 font-medium">Foto del producto</label>
-            <div className="flex items-center gap-3">
-              <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${uploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
-                {uploading ? 'Subiendo...' : 'Subir foto'}
-                <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
-                  disabled={uploading}
-                  onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'create'); e.target.value = '' }} />
-              </label>
-              {form.photoUrl && (
-                <img src={form.photoUrl} alt="Preview" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
-              )}
-            </div>
-            <details className="text-xs text-slate-400">
-              <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
-              <input type="text" placeholder="URL de foto (Cloudinary)" value={form.photoUrl} onChange={e => setForm({ ...form, photoUrl: e.target.value })}
-                className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </details>
+    <div className="min-h-screen bg-slate-50">
+      {/* Page header */}
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Catalogo de productos</h1>
+            <p className="text-sm text-slate-500 mt-1">Crea y gestiona los productos que tus clientes pueden canjear</p>
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="text-xs text-slate-500">Costo (pts)</label>
-              <input type="number" value={form.redemptionCost} onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Stock</label>
-              <input type="number" value={form.stock} onChange={e => setForm({ ...form, stock: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Nivel min.</label>
-              <input type="number" value={form.minLevel} onChange={e => setForm({ ...form, minLevel: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-          </div>
-          <button onClick={handleCreate} disabled={loading || !form.name || !form.redemptionCost}
-            className="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-            {loading ? 'Creando...' : 'Crear producto'}
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+          >
+            {showForm ? 'Cancelar' : '+ Nuevo producto'}
           </button>
         </div>
-      )}
+      </div>
 
-      <div className="space-y-3">
-        {products.map(p => (
-          <div key={p.id} className="bg-white rounded-xl p-4 shadow-sm">
-            {editingId === p.id ? (
-              <div className="space-y-2">
-                <input type="text" value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border text-sm" />
-                <input type="text" placeholder="Descripcion" value={editForm.description} onChange={e => setEditForm({ ...editForm, description: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg border text-sm" />
-                <div className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <label className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium cursor-pointer ${editUploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'}`}>
-                      {editUploading ? 'Subiendo...' : 'Cambiar foto'}
-                      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden"
-                        disabled={editUploading}
-                        onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'edit'); e.target.value = '' }} />
-                    </label>
-                    {editForm.photoUrl && (
-                      <img src={editForm.photoUrl} alt="Preview" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
-                    )}
-                  </div>
-                  <details className="text-xs text-slate-400">
-                    <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
-                    <input type="text" placeholder="URL foto" value={editForm.photoUrl} onChange={e => setEditForm({ ...editForm, photoUrl: e.target.value })}
-                      className="w-full mt-1 px-3 py-2 rounded-lg border text-sm" />
-                  </details>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <input type="number" placeholder="Costo" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })}
-                    className="px-3 py-2 rounded-lg border text-sm" />
-                  <input type="number" placeholder="Stock" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })}
-                    className="px-3 py-2 rounded-lg border text-sm" />
-                  <input type="number" placeholder="Nivel" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })}
-                    className="px-3 py-2 rounded-lg border text-sm" />
-                </div>
-                <div className="flex gap-2">
-                  <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm">Cancelar</button>
-                  <button onClick={() => handleSaveEdit(p.id)} disabled={loading}
-                    className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                    {loading ? 'Guardando...' : 'Guardar'}
-                  </button>
-                </div>
-              </div>
-            ) : (
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 pb-8">
+        {/* Create form */}
+        {showForm && (
+          <div className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100 mb-6 space-y-4 max-w-3xl">
+            <h2 className="text-lg font-semibold text-slate-800">Nuevo producto</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <div className="flex items-center justify-between">
-                  {p.photoUrl && (
-                    <img src={p.photoUrl} alt={p.name} className="w-12 h-12 rounded-lg object-cover border border-slate-200 mr-3 flex-shrink-0" />
-                  )}
-                  <div className="flex-1">
-                    <p className="font-medium">{p.name}</p>
-                    <p className="text-sm text-slate-500">
-                      {parseFloat(p.redemptionCost).toLocaleString()} pts | Stock: {p.stock}
-                      {p.minLevel > 1 ? ` | Nivel ${p.minLevel}+` : ''}
-                    </p>
-                    {p.description && <p className="text-xs text-slate-400 mt-1">{p.description}</p>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => startEdit(p)} className="text-xs text-indigo-600 hover:text-indigo-800">Editar</button>
-                    <button onClick={() => handleToggle(p.id)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${p.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                      {p.active ? 'Activo' : 'Inactivo'}
-                    </button>
-                  </div>
-                </div>
-                {p.stock === 0 && p.active && (
-                  <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+                <input
+                  type="text"
+                  placeholder="Ej: Cafe gratis"
+                  value={form.name}
+                  onChange={e => setForm({ ...form, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Descripcion</label>
+                <input
+                  type="text"
+                  placeholder="Breve descripcion"
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Foto del producto</label>
+              <div className="mt-2 flex items-center gap-3 flex-wrap">
+                <label className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition ${uploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                  {uploading ? 'Subiendo...' : 'Subir foto'}
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    className="hidden"
+                    disabled={uploading}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'create'); e.target.value = '' }}
+                  />
+                </label>
+                {form.photoUrl && (
+                  <img src={form.photoUrl} alt="Preview" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
                 )}
               </div>
-            )}
+              <details className="text-xs text-slate-400 mt-2">
+                <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
+                <input
+                  type="text"
+                  placeholder="URL de foto (Cloudinary)"
+                  value={form.photoUrl}
+                  onChange={e => setForm({ ...form, photoUrl: e.target.value })}
+                  className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-200 text-sm"
+                />
+              </details>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
+                <input
+                  type="number"
+                  value={form.redemptionCost}
+                  onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
+                <input
+                  type="number"
+                  value={form.stock}
+                  onChange={e => setForm({ ...form, stock: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min.</label>
+                <input
+                  type="number"
+                  value={form.minLevel}
+                  onChange={e => setForm({ ...form, minLevel: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+
+            <button
+              onClick={handleCreate}
+              disabled={loading || !form.name || !form.redemptionCost}
+              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
+            >
+              {loading ? 'Creando...' : 'Crear producto'}
+            </button>
           </div>
-        ))}
-        {products.length === 0 && <p className="text-center text-slate-400 mt-8">No hay productos creados</p>}
+        )}
+
+        {/* Product grid */}
+        {products.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
+            <p className="text-slate-400">No hay productos creados todavia</p>
+            <p className="text-sm text-slate-400 mt-1">Toca el boton Nuevo producto para empezar</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {products.map(p => (
+              <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-emerald-200 transition">
+                {editingId === p.id ? (
+                  <div className="p-4 space-y-3">
+                    <input
+                      type="text"
+                      value={editForm.name}
+                      onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Descripcion"
+                      value={editForm.description}
+                      onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <div className="flex items-center gap-2">
+                      <label className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer ${editUploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                        {editUploading ? '...' : 'Cambiar foto'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,image/gif"
+                          className="hidden"
+                          disabled={editUploading}
+                          onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'edit'); e.target.value = '' }}
+                        />
+                      </label>
+                      {editForm.photoUrl && (
+                        <img src={editForm.photoUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      <input type="number" placeholder="Costo" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
+                      <input type="number" placeholder="Stock" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
+                      <input type="number" placeholder="Nivel" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200 transition">Cancelar</button>
+                      <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700 transition">
+                        {loading ? '...' : 'Guardar'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {/* Product photo area */}
+                    <div className="relative bg-slate-100 aspect-square flex items-center justify-center">
+                      {p.photoUrl ? (
+                        <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
+                      ) : (
+                        <MdCardGiftcard className="w-12 h-12 text-slate-400" />
+                      )}
+                      <button
+                        onClick={() => handleToggle(p.id)}
+                        className={`absolute top-3 right-3 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm shadow-sm ${p.active ? 'bg-green-100/95 text-green-700' : 'bg-red-100/95 text-red-700'}`}
+                      >
+                        {p.active ? 'Activo' : 'Inactivo'}
+                      </button>
+                    </div>
+
+                    {/* Product info */}
+                    <div className="p-4">
+                      <p className="font-semibold text-slate-800 truncate">{p.name}</p>
+                      {p.description && (
+                        <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
+                      )}
+                      <div className="flex items-center justify-between mt-3">
+                        <p className="text-lg font-bold text-emerald-700">
+                          {parseFloat(p.redemptionCost).toLocaleString()} <span className="text-xs font-medium text-slate-500">pts</span>
+                        </p>
+                        <span className="text-xs text-slate-500">Stock: {p.stock}</span>
+                      </div>
+                      {p.minLevel > 1 && (
+                        <p className="text-xs text-indigo-600 mt-1">Requiere nivel {p.minLevel}+</p>
+                      )}
+                      {p.stock === 0 && p.active && (
+                        <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
+                      )}
+                      <button
+                        onClick={() => startEdit(p)}
+                        className="w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition"
+                      >
+                        Editar
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   )

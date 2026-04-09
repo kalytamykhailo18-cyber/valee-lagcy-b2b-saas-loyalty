@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { MdCheckCircle, MdCancel } from 'react-icons/md'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 
@@ -90,7 +91,7 @@ export default function ConsumerDualScanPage() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <div className="bg-slate-800 p-4 flex items-center gap-3">
-        <Link href="/consumer" className="text-white text-2xl">←</Link>
+        <Link href="/consumer" className="text-white text-2xl">&larr;</Link>
         <h1 className="text-lg font-bold">Escanear QR del comercio</h1>
       </div>
 
@@ -144,7 +145,7 @@ export default function ConsumerDualScanPage() {
 
       {state === 'success' && result && (
         <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-emerald-600">
-          <div className="text-7xl mb-4 animate-pulse">✓</div>
+          <MdCheckCircle className="w-20 h-20 mx-auto mb-4 animate-pulse" />
           <p className="text-2xl font-bold mb-2">Bienvenido!</p>
           <p className="text-emerald-100 text-center mb-6">{result.message}</p>
           {result.valueAssigned && (
@@ -159,7 +160,7 @@ export default function ConsumerDualScanPage() {
 
       {state === 'error' && (
         <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-red-600">
-          <div className="text-7xl mb-4">✗</div>
+          <MdCancel className="w-20 h-20 mx-auto mb-4" />
           <p className="text-2xl font-bold mb-2">No se pudo procesar</p>
           <p className="text-red-100 text-center max-w-xs">{errorMsg}</p>
         </div>

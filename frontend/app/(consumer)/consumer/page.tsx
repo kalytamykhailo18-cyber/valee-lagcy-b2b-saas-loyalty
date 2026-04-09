@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { MdCameraAlt, MdCardGiftcard, MdAssignment, MdLock } from 'react-icons/md'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { getLocalPendingBalance, getPendingCount, syncPendingActions, purgeExpiredActions, type QueuedAction } from '@/lib/offline-queue'
@@ -252,7 +253,7 @@ export default function ConsumerApp() {
         <p className="text-indigo-200 text-sm mt-1">{unitLabel}</p>
         {parseFloat(provisionalBalance) > 0 && (
           <div className="mt-3 inline-flex items-center gap-1.5 bg-indigo-500/40 backdrop-blur-sm rounded-lg px-2.5 py-1 text-xs">
-            <span>🔒</span>
+            <MdLock className="w-4 h-4 inline" />
             <span>{parseFloat(provisionalBalance).toLocaleString()} {unitLabel} en verificacion</span>
           </div>
         )}
@@ -266,19 +267,19 @@ export default function ConsumerApp() {
       {/* Action Buttons */}
       <div className="mx-4 mt-4 grid grid-cols-2 gap-3">
         <Link href="/scan" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
-          <span className="text-2xl">📸</span>
+          <MdCameraAlt className="w-6 h-6 mx-auto text-indigo-600" />
           <p className="text-sm font-medium mt-1">Escanear factura</p>
         </Link>
         <Link href="/catalog" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
-          <span className="text-2xl">🎁</span>
+          <MdCardGiftcard className="w-6 h-6 mx-auto text-indigo-600" />
           <p className="text-sm font-medium mt-1">Catalogo</p>
         </Link>
         <Link href="/dual-scan" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
-          <span className="text-2xl">📷</span>
+          <MdCameraAlt className="w-6 h-6 mx-auto text-indigo-600" />
           <p className="text-sm font-medium mt-1">Escanear QR</p>
         </Link>
         <Link href="/disputes" className="bg-white rounded-xl p-4 text-center shadow-sm hover:shadow-md transition">
-          <span className="text-2xl">📋</span>
+          <MdAssignment className="w-6 h-6 mx-auto text-indigo-600" />
           <p className="text-sm font-medium mt-1">Reclamo</p>
         </Link>
       </div>

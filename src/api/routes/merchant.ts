@@ -513,20 +513,23 @@ export default async function merchantRoutes(app: FastifyInstance) {
       name: tenant?.name || '',
       preferredExchangeSource: tenant?.preferredExchangeSource || null,
       referenceCurrency: tenant?.referenceCurrency || 'usd',
+      trustLevel: tenant?.trustLevel || 'level_2_standard',
     };
   });
 
   app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency } = request.body as {
+    const { welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel } = request.body as {
       welcomeBonusAmount?: number;
       rif?: string;
       preferredExchangeSource?: string | null;
       referenceCurrency?: string;
+      trustLevel?: string;
     };
 
     const validSources = ['bcv', 'binance_p2p', 'bybit_p2p', 'promedio', 'euro_bcv'];
     const validCurrencies = ['usd', 'eur', 'bs'];
+    const validTrustLevels = ['level_1_strict', 'level_2_standard', 'level_3_presence'];
 
     const data: any = {};
     if (welcomeBonusAmount !== undefined) {
@@ -550,6 +553,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
       }
       data.referenceCurrency = referenceCurrency;
     }
+    if (trustLevel !== undefined) {
+      if (!validTrustLevels.includes(trustLevel)) {
+        return reply.status(400).send({ error: `trustLevel must be one of: ${validTrustLevels.join(', ')}` });
+      }
+      data.trustLevel = trustLevel;
+    }
 
     const updated = await prisma.tenant.update({ where: { id: tenantId }, data });
     return {
@@ -558,6 +567,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       name: updated.name,
       preferredExchangeSource: updated.preferredExchangeSource,
       referenceCurrency: updated.referenceCurrency,
+      trustLevel: updated.trustLevel,
     };
   });
 

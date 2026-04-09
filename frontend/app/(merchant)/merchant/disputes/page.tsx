@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { MdAssignment } from 'react-icons/md'
 import { api } from '@/lib/api'
-import Link from 'next/link'
 
 interface Dispute {
   id: string
@@ -70,39 +70,42 @@ export default function DisputesPage() {
   }
 
   return (
-    <div className="min-h-screen bg-emerald-50 p-4">
-      <div className="flex items-center gap-3 mb-4">
-        <Link href="/merchant" className="text-emerald-700 text-2xl">&larr;</Link>
-        <h1 className="text-xl font-bold text-emerald-800">Disputas</h1>
+    <div className="min-h-screen bg-slate-50">
+      {/* Page header */}
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Disputas</h1>
+        <p className="text-sm text-slate-500 mt-1">Revisa y resuelve reclamos enviados por tus clientes</p>
       </div>
 
-      {/* Status Filter */}
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-        {['', 'open', 'escalated', 'approved', 'rejected'].map(s => (
-          <button key={s} onClick={() => setStatusFilter(s)}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap ${
-              statusFilter === s ? 'bg-emerald-600 text-white' : 'bg-white text-slate-600 shadow-sm'
-            }`}>
-            {s ? STATUS_LABELS[s] || s : 'Todas'}
-          </button>
-        ))}
-      </div>
-
-      {message && (
-        <div className="mb-4 bg-white rounded-xl p-3 shadow-sm text-sm text-emerald-700">{message}</div>
-      )}
-
-      {loading ? (
-        <p className="text-center text-slate-400 mt-8">Cargando...</p>
-      ) : disputes.length === 0 ? (
-        <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-          <span className="text-4xl">📋</span>
-          <p className="text-slate-500 mt-3">No hay disputas {statusFilter ? STATUS_LABELS[statusFilter]?.toLowerCase() + 's' : 'pendientes'}</p>
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 pb-8">
+        {/* Status filter */}
+        <div className="flex gap-2 mb-6 overflow-x-auto pb-1">
+          {['', 'open', 'escalated', 'approved', 'rejected'].map(s => (
+            <button key={s} onClick={() => setStatusFilter(s)}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition ${
+                statusFilter === s ? 'bg-emerald-600 text-white shadow-sm' : 'bg-white text-slate-600 border border-slate-200 hover:border-emerald-300'
+              }`}>
+              {s ? STATUS_LABELS[s] || s : 'Todas'}
+            </button>
+          ))}
         </div>
-      ) : (
-        <div className="space-y-3">
-          {disputes.map(d => (
-            <div key={d.id} className="bg-white rounded-xl p-4 shadow-sm">
+
+        {message && (
+          <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">{message}</div>
+        )}
+
+        {loading ? (
+          <p className="text-center text-slate-400 mt-8">Cargando...</p>
+        ) : disputes.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 border border-slate-100 text-center">
+            <MdAssignment className="w-12 h-12 text-slate-400 mx-auto" />
+            <p className="text-slate-500 mt-4">No hay disputas {statusFilter ? STATUS_LABELS[statusFilter]?.toLowerCase() + 's' : 'pendientes'}</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {disputes.map(d => (
+              <div key={d.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
@@ -196,10 +199,11 @@ export default function DisputesPage() {
                   )}
                 </div>
               )}
-            </div>
-          ))}
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

@@ -160,6 +160,12 @@ enum PlanTier {
   x10
 }
 
+enum TrustLevel {
+  level_1_strict
+  level_2_standard
+  level_3_presence
+}
+
 // ============================================================
 // 1. TENANTS
 // ============================================================
@@ -179,6 +185,7 @@ model Tenant {
   dualScanCapPerConsumer  Int      @default(5)  @map("dual_scan_cap_per_consumer")
   dualScanTtlSeconds      Int      @default(60) @map("dual_scan_ttl_seconds")
   plan                    PlanTier @default(basic)
+  trustLevel              TrustLevel @default(level_2_standard) @map("trust_level")
   redemptionFeePercent       Decimal? @map("redemption_fee_percent") @db.Decimal(5, 2)
   attributedSaleFeePercent   Decimal? @map("attributed_sale_fee_percent") @db.Decimal(5, 2)
   attributedCustomerFixedFee Decimal? @map("attributed_customer_fixed_fee") @db.Decimal(10, 2)

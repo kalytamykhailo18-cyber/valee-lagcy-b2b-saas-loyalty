@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
-import Link from 'next/link'
 
 export default function RecurrencePage() {
   const [rules, setRules] = useState<any[]>([])
@@ -44,83 +43,152 @@ export default function RecurrencePage() {
   }
 
   return (
-    <div className="min-h-screen bg-emerald-50 p-4">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <Link href="/merchant" className="text-emerald-700 text-2xl">&larr;</Link>
-          <h1 className="text-xl font-bold text-emerald-800">Recurrencia</h1>
-        </div>
-        <button onClick={() => setShowForm(!showForm)} className="bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium">
-          {showForm ? 'Cancelar' : '+ Nueva regla'}
-        </button>
-      </div>
-
-      {showForm && (
-        <div className="bg-white rounded-2xl p-4 shadow-sm mb-4 space-y-3 animate-fade-in">
-          <input type="text" placeholder="Nombre de la regla" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
-            className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-500">Intervalo (dias)</label>
-              <input type="number" value={form.intervalDays} onChange={e => setForm({ ...form, intervalDays: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500">Gracia (dias)</label>
-              <input type="number" value={form.graceDays} onChange={e => setForm({ ...form, graceDays: e.target.value })}
-                className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-            </div>
-          </div>
+    <div className="min-h-screen bg-slate-50">
+      {/* Page header */}
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <label className="text-xs text-slate-500">Mensaje WhatsApp (usa {'{name}'}, {'{days}'}, {'{bonus}'})</label>
-            <textarea value={form.messageTemplate} onChange={e => setForm({ ...form, messageTemplate: e.target.value })}
-              placeholder="Hola {name}! Hace {days} dias que no te vemos. Te regalamos {bonus} puntos!"
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm h-20 resize-none" />
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Recurrencia</h1>
+            <p className="text-sm text-slate-500 mt-1">Automatiza mensajes de reactivacion para clientes que no regresan</p>
           </div>
-          <div>
-            <label className="text-xs text-slate-500">Puntos de bono (opcional)</label>
-            <input type="number" placeholder="50" value={form.bonusAmount} onChange={e => setForm({ ...form, bonusAmount: e.target.value })}
-              className="w-full px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-          </div>
-          <button onClick={handleCreate} disabled={loading || !form.name || !form.messageTemplate}
-            className="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-            {loading ? 'Creando...' : 'Crear regla'}
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+          >
+            {showForm ? 'Cancelar' : '+ Nueva regla'}
           </button>
         </div>
-      )}
-
-      <div className="space-y-3 mb-6">
-        {rules.map(r => (
-          <div key={r.id} className="bg-white rounded-xl p-4 shadow-sm">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium">{r.name}</p>
-                <p className="text-xs text-slate-500">Cada {r.intervalDays} dias + {r.graceDays} de gracia | Bono: {r.bonusAmount ? `${Number(r.bonusAmount)} pts` : 'Sin bono'}</p>
-              </div>
-              <button onClick={() => handleToggle(r.id)}
-                className={`px-3 py-1 rounded-full text-xs font-medium ${r.active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {r.active ? 'Activa' : 'Inactiva'}
-              </button>
-            </div>
-            <p className="text-xs text-slate-400 mt-2 truncate">{r.messageTemplate}</p>
-          </div>
-        ))}
-        {rules.length === 0 && <p className="text-center text-slate-400 mt-4">No hay reglas de recurrencia creadas</p>}
       </div>
 
-      <h2 className="font-semibold text-slate-700 mb-3">Notificaciones enviadas</h2>
-      <div className="space-y-2">
-        {notifications.map((n: any) => (
-          <div key={n.id} className="bg-white rounded-lg p-3 shadow-sm text-sm">
-            <div className="flex justify-between">
-              <span className="text-slate-600">{n.consumerAccount?.phoneNumber}</span>
-              <span className="text-xs text-slate-400">{new Date(n.sentAt).toLocaleDateString('es-VE')}</span>
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 pb-8 space-y-8">
+        {/* Create form */}
+        {showForm && (
+          <div className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100 max-w-2xl space-y-4">
+            <h2 className="text-lg font-semibold text-slate-800">Nueva regla</h2>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+              <input
+                type="text"
+                placeholder="Ej: Recuperar clientes bisemanales"
+                value={form.name}
+                onChange={e => setForm({ ...form, name: e.target.value })}
+                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
             </div>
-            <p className="text-xs text-slate-500 mt-1">{n.daysSinceVisit} dias sin visitar | {n.bonusGranted ? 'Bono otorgado' : 'Solo mensaje'}</p>
-            <p className="text-xs text-slate-400 mt-1">{n.rule?.name}</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Intervalo (dias)</label>
+                <input
+                  type="number"
+                  value={form.intervalDays}
+                  onChange={e => setForm({ ...form, intervalDays: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Gracia (dias)</label>
+                <input
+                  type="number"
+                  value={form.graceDays}
+                  onChange={e => setForm({ ...form, graceDays: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Mensaje WhatsApp</label>
+              <textarea
+                value={form.messageTemplate}
+                onChange={e => setForm({ ...form, messageTemplate: e.target.value })}
+                placeholder="Hola {name}! Hace {days} dias que no te vemos. Te regalamos {bonus} puntos!"
+                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm h-24 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Variables disponibles: {'{name}'}, {'{days}'}, {'{bonus}'}
+              </p>
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos de bono (opcional)</label>
+              <input
+                type="number"
+                placeholder="50"
+                value={form.bonusAmount}
+                onChange={e => setForm({ ...form, bonusAmount: e.target.value })}
+                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <button
+              onClick={handleCreate}
+              disabled={loading || !form.name || !form.messageTemplate}
+              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
+            >
+              {loading ? 'Creando...' : 'Crear regla'}
+            </button>
           </div>
-        ))}
-        {notifications.length === 0 && <p className="text-center text-slate-400 text-sm mt-4">Sin notificaciones aun</p>}
+        )}
+
+        {/* Rules grid */}
+        <section>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">Reglas activas</h2>
+          {rules.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
+              <p className="text-slate-400">No hay reglas de recurrencia todavia</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {rules.map(r => (
+                <div key={r.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <p className="font-semibold text-slate-800 truncate">{r.name}</p>
+                    <button
+                      onClick={() => handleToggle(r.id)}
+                      className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold ${r.active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'} transition`}
+                    >
+                      {r.active ? 'Activa' : 'Inactiva'}
+                    </button>
+                  </div>
+                  <div className="text-xs text-slate-500 space-y-1">
+                    <p>Cada {r.intervalDays} dias + {r.graceDays} de gracia</p>
+                    <p>Bono: {r.bonusAmount ? `${Number(r.bonusAmount)} pts` : 'Sin bono'}</p>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-3 bg-slate-50 p-2 rounded line-clamp-3">
+                    {r.messageTemplate}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Notifications history */}
+        <section>
+          <h2 className="text-lg font-semibold text-slate-800 mb-4">Notificaciones enviadas</h2>
+          {notifications.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
+              <p className="text-slate-400">Sin notificaciones enviadas todavia</p>
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden">
+              <div className="divide-y divide-slate-100">
+                {notifications.map((n: any) => (
+                  <div key={n.id} className="p-4 flex items-center justify-between hover:bg-slate-50 transition">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{n.consumerAccount?.phoneNumber}</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {n.daysSinceVisit} dias sin visitar - {n.bonusGranted ? 'Bono otorgado' : 'Solo mensaje'}
+                      </p>
+                      <p className="text-xs text-slate-400">{n.rule?.name}</p>
+                    </div>
+                    <span className="text-xs text-slate-400 flex-shrink-0 ml-4">
+                      {new Date(n.sentAt).toLocaleDateString('es-VE')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
       </div>
     </div>
   )

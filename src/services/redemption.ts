@@ -1,7 +1,7 @@
 import { createHmac } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import prisma from '../db/client.js';
-import { writeDoubleEntry, getAccountBalance } from './ledger.js';
+import { writeDoubleEntry, getAccountBalance, getAccountBalanceBreakdown } from './ledger.js';
 import { getSystemAccount } from './accounts.js';
 import { enqueueExpiryJob } from './workers.js';
 
@@ -79,13 +79,21 @@ export async function initiateRedemption(params: {
     pointsToDeduct = fullPointsCost;
   }
 
-  // Final balance check (only for the points portion)
-  const balance = await getAccountBalance(consumerAccountId, assetTypeId, tenantId);
-  if (parseFloat(balance) < pointsToDeduct) {
+  // Final balance check (only for the points portion).
+  // Only CONFIRMED points are spendable. Provisional points (from invoices that
+  // have not been cross-referenced against the merchant CSV yet) cannot be used
+  // for redemptions until the reconciliation worker confirms them.
+  const breakdown = await getAccountBalanceBreakdown(consumerAccountId, assetTypeId, tenantId);
+  const confirmedBalance = parseFloat(breakdown.confirmed);
+  if (confirmedBalance < pointsToDeduct) {
+    const provisional = parseFloat(breakdown.provisional);
+    const provisionalNote = provisional > 0
+      ? ` Tienes ${provisional.toLocaleString()} puntos en verificacion que aun no estan disponibles para canjear.`
+      : '';
     if (isHybrid) {
-      return { success: false, message: `Insufficient points. With $${cashPortion} cash, you still need ${pointsToDeduct} points but have ${balance}.` };
+      return { success: false, message: `Saldo confirmado insuficiente. Con $${cashPortion} en efectivo todavia necesitas ${pointsToDeduct} puntos pero tienes ${confirmedBalance.toLocaleString()} confirmados.${provisionalNote}` };
     }
-    return { success: false, message: `Insufficient balance. You need ${fullPointsCost} points but have ${balance}. You can also pay partially with cash.` };
+    return { success: false, message: `Saldo confirmado insuficiente. Necesitas ${fullPointsCost} puntos pero tienes ${confirmedBalance.toLocaleString()} confirmados.${provisionalNote}` };
   }
 
   // Get holding account

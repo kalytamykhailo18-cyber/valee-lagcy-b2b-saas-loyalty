@@ -12,8 +12,9 @@ export default function AdminDashboard() {
   const router = useRouter()
 
   useEffect(() => {
-    const name = localStorage.getItem('adminName')
-    if (!name) { router.push('/admin/login'); return }
+    const name = localStorage.getItem('adminName') || 'Admin'
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    if (!token) { router.push('/admin/login'); return }
     setAdminName(name)
     loadData()
   }, [router])
@@ -28,76 +29,101 @@ export default function AdminDashboard() {
     }
   }
 
-  function logout() {
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('adminName')
-    router.push('/admin/login')
-  }
-
   return (
-    <div className="min-h-screen bg-slate-100">
-      <div className="bg-slate-900 text-white p-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold">Admin Panel</h1>
-          <p className="text-slate-400 text-sm">{adminName}</p>
-        </div>
-        <button onClick={logout} className="text-sm text-slate-400 hover:text-white">Logout</button>
+    <div className="min-h-screen bg-slate-50">
+      {/* Page header */}
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Panel de administracion</h1>
+        <p className="text-sm text-slate-500 mt-1">Bienvenido {adminName}</p>
       </div>
 
-      {/* Metrics */}
-      {metrics && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4">
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Active Tenants</p>
-            <p className="text-2xl font-bold">{metrics.activeTenants}</p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Total Consumers</p>
-            <p className="text-2xl font-bold">{metrics.totalConsumers}</p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Value in Circulation</p>
-            <p className="text-2xl font-bold">{parseFloat(metrics.totalValueInCirculation).toLocaleString()}</p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Validations (30d)</p>
-            <p className="text-2xl font-bold">{metrics.validationsLast30Days}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Navigation */}
-      <div className="p-4 space-y-3">
-        <Link href="/admin/tenants" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-          <p className="font-medium">🏪 Tenant Management</p>
-          <p className="text-xs text-slate-500">Create, view, and deactivate merchants</p>
-        </Link>
-        <Link href="/admin/ledger" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-          <p className="font-medium">📒 Global Ledger Audit</p>
-          <p className="text-xs text-slate-500">View and verify ledger across all tenants</p>
-        </Link>
-        <Link href="/admin/adjustments" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-          <p className="font-medium">⚖️ Manual Adjustments</p>
-          <p className="text-xs text-slate-500">Apply manual corrections to consumer accounts</p>
-        </Link>
-      </div>
-
-      {/* Tenants List */}
-      <div className="p-4">
-        <h2 className="font-semibold mb-3">Tenants ({tenants.length})</h2>
-        <div className="space-y-2">
-          {tenants.map(t => (
-            <div key={t.id} className="bg-white rounded-xl p-4 shadow-sm flex items-center justify-between">
-              <div>
-                <p className="font-medium">{t.name}</p>
-                <p className="text-xs text-slate-500">{t.slug} | {t.ownerEmail}</p>
-              </div>
-              <span className={`text-xs px-2 py-1 rounded-full ${t.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {t.status}
-              </span>
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 pb-8 space-y-6">
+        {/* Metrics */}
+        {metrics && (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Comercios activos</p>
+              <p className="text-3xl font-bold text-indigo-700 mt-2">{metrics.activeTenants}</p>
             </div>
-          ))}
-        </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Consumidores</p>
+              <p className="text-3xl font-bold text-indigo-700 mt-2">{metrics.totalConsumers}</p>
+            </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">En circulacion</p>
+              <p className="text-3xl font-bold text-emerald-700 mt-2 truncate">
+                {parseFloat(metrics.totalValueInCirculation).toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Validaciones 30d</p>
+              <p className="text-3xl font-bold text-slate-800 mt-2">{metrics.validationsLast30Days}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Navigation cards */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">Acciones rapidas</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <Link
+              href="/admin/tenants"
+              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+            >
+              <p className="font-semibold text-slate-800">Gestion de comercios</p>
+              <p className="text-xs text-slate-500 mt-1">Crear, ver y desactivar merchants</p>
+            </Link>
+            <Link
+              href="/admin/ledger"
+              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+            >
+              <p className="font-semibold text-slate-800">Ledger global</p>
+              <p className="text-xs text-slate-500 mt-1">Auditoria de transacciones cross-tenant</p>
+            </Link>
+            <Link
+              href="/admin/adjustments"
+              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+            >
+              <p className="font-semibold text-slate-800">Ajustes manuales</p>
+              <p className="text-xs text-slate-500 mt-1">Correcciones directas al ledger</p>
+            </Link>
+          </div>
+        </section>
+
+        {/* Tenants list */}
+        <section>
+          <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">
+            Comercios ({tenants.length})
+          </h2>
+          {tenants.length === 0 ? (
+            <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
+              <p className="text-slate-400">No hay comercios registrados todavia</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {tenants.map(t => (
+                <div
+                  key={t.id}
+                  className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-800 truncate">{t.name}</p>
+                      <p className="text-xs text-slate-500 mt-0.5 truncate">{t.slug}</p>
+                      <p className="text-xs text-slate-500 mt-1 truncate">{t.ownerEmail}</p>
+                    </div>
+                    <span className={`flex-shrink-0 text-xs px-3 py-1 rounded-full font-semibold ${
+                      t.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    }`}>
+                      {t.status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
       </div>
     </div>
   )

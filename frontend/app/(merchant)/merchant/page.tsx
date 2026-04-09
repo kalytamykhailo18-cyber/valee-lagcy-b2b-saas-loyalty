@@ -194,8 +194,9 @@ export default function MerchantDashboard() {
   if (role === 'cashier') return null
 
   return (
-    <div className="min-h-screen bg-emerald-50">
-      <div className="bg-emerald-700 text-white p-4 flex items-center justify-between">
+    <div className="min-h-screen bg-slate-50">
+      {/* Mobile-only header */}
+      <div className="lg:hidden bg-emerald-700 text-white px-4 py-4 flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold">Dashboard</h1>
           <p className="text-emerald-200 text-sm">{staffName} (owner)</p>
@@ -203,132 +204,162 @@ export default function MerchantDashboard() {
         <button onClick={logout} className="text-sm text-emerald-200 hover:text-white">Salir</button>
       </div>
 
-      {/* Branch selector */}
-      {branches.length > 0 && (
-        <div className="mx-4 mt-4 bg-white rounded-xl p-3 shadow-sm">
-          <label className="text-xs text-slate-500 font-medium">Sucursal</label>
-          <select
-            value={selectedBranch}
-            onChange={e => setSelectedBranch(e.target.value)}
-            className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          >
-            <option value="">Todas las sucursales</option>
-            {branches.filter(b => b.active).map(b => (
-              <option key={b.id} value={b.id}>{b.name}</option>
-            ))}
-          </select>
-        </div>
-      )}
-
-      {/* Multiplier Control */}
-      {multiplier && (
-        <div className="mx-4 mt-4 bg-white rounded-xl p-4 shadow-sm">
-          <p className="text-sm font-medium text-slate-700">Multiplicador de puntos</p>
-          <p className="text-2xl font-bold text-emerald-700 mt-1">{parseFloat(multiplier.currentRate)}x</p>
-          <div className="flex gap-2 mt-3">
-            {['1', '1.5', '2', '3'].map(m => (
-              <button key={m} onClick={() => setNewMultiplier(m)}
-                className={`px-3 py-1 rounded-lg text-sm font-medium ${newMultiplier === m ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700'}`}>
-                {m}x
-              </button>
-            ))}
-            <input type="number" step="0.1" min="0.1" placeholder="Otro" value={!['1','1.5','2','3'].includes(newMultiplier) ? newMultiplier : ''}
-              onChange={e => setNewMultiplier(e.target.value)}
-              className="w-16 px-2 py-1 rounded-lg border text-sm" />
-          </div>
-          {newMultiplier && (
-            <button onClick={handleSetMultiplier} className="mt-2 bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium w-full">
-              Aplicar {newMultiplier}x
-            </button>
-          )}
-          {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
-        </div>
-      )}
-
-      {/* Metrics Cards */}
-      {(metrics || analytics) && (
-        <div className="grid grid-cols-2 gap-3 p-4">
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Valor emitido</p>
-            <p className="text-xl font-bold text-emerald-700">
-              {parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0').toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Valor canjeado</p>
-            <p className="text-xl font-bold text-emerald-700">
-              {parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0').toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">En circulacion</p>
-            <p className="text-xl font-bold text-indigo-600">
-              {parseFloat(metrics?.netCirculation || analytics?.netBalance || '0').toLocaleString()}
-            </p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Consumidores activos (30d)</p>
-            <p className="text-xl font-bold">{metrics?.activeConsumers30d ?? analytics?.consumerCount ?? 0}</p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Canjes totales</p>
-            <p className="text-xl font-bold">{metrics?.totalRedemptions ?? 0}</p>
-          </div>
-          <div className="bg-white rounded-xl p-4 shadow-sm">
-            <p className="text-xs text-slate-500">Canjes (30d)</p>
-            <p className="text-xl font-bold">{metrics?.redemptions30d ?? 0}</p>
-          </div>
-        </div>
-      )}
-
-      {/* Tabs: Overview / Products / Transactions */}
-      <div className="mx-4 flex bg-white rounded-xl p-1 shadow-sm">
-        {(['overview', 'products', 'transactions'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${
-              activeTab === tab ? 'bg-emerald-600 text-white' : 'text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            {tab === 'overview' ? 'General' : tab === 'products' ? 'Productos' : 'Transacciones'}
-          </button>
-        ))}
+      {/* Page title (desktop only) */}
+      <div className="hidden lg:block px-8 pt-8 pb-4">
+        <h1 className="text-3xl font-bold text-slate-800">Dashboard</h1>
+        <p className="text-slate-500 text-sm mt-1">Bienvenido {staffName}</p>
       </div>
 
-      {/* Tab Content */}
-      {activeTab === 'overview' && (
-        <div className="p-4 space-y-3">
-          <Link href="/merchant/scanner" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Escaner QR</p>
-            <p className="text-xs text-slate-500">Escanear codigos de canje de clientes</p>
-          </Link>
-          <Link href="/merchant/dual-scan" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Transaccion sin factura</p>
-            <p className="text-xs text-slate-500">Generar QR para clientes (Pago Movil, efectivo, sin recibo)</p>
-          </Link>
-          <Link href="/merchant/products" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Catalogo de productos</p>
-            <p className="text-xs text-slate-500">Agregar, editar y gestionar productos</p>
-          </Link>
-          <Link href="/merchant/customers" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Buscar cliente</p>
-            <p className="text-xs text-slate-500">Consultar cuentas y vincular cedula</p>
-          </Link>
-          <Link href="/merchant/disputes" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Disputas</p>
-            <p className="text-xs text-slate-500">Resolver reclamos de clientes</p>
-          </Link>
-          <Link href="/merchant/recurrence" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Recurrencia</p>
-            <p className="text-xs text-slate-500">Reglas de retencion automatica por WhatsApp</p>
-          </Link>
-          <Link href="/merchant/settings" className="block bg-white rounded-xl p-4 shadow-sm hover:shadow-md transition">
-            <p className="font-medium">Configuracion</p>
-            <p className="text-xs text-slate-500">Bienvenida, RIF, tasa de cambio Bs/USD</p>
-          </Link>
+      {/* Content */}
+      <div className="px-4 sm:px-6 lg:px-8 pb-8">
+        {/* Top row: Branch selector (if exists) + Multiplier card side by side */}
+        <div className={`grid gap-4 mt-4 lg:mt-0 ${branches.length > 0 ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
+          {branches.length > 0 && (
+            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 lg:col-span-1">
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
+              <select
+                value={selectedBranch}
+                onChange={e => setSelectedBranch(e.target.value)}
+                className="w-full mt-2 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                <option value="">Todas las sucursales</option>
+                {branches.filter(b => b.active).map(b => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {multiplier && (
+            <div className={`bg-white rounded-xl p-5 shadow-sm border border-slate-100 ${branches.length > 0 ? 'lg:col-span-2' : ''}`}>
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Multiplicador de puntos</p>
+                  <p className="text-4xl font-bold text-emerald-700 mt-1">{parseFloat(multiplier.currentRate)}x</p>
+                </div>
+                <div className="flex flex-wrap gap-2 items-center">
+                  {['1', '1.5', '2', '3'].map(m => (
+                    <button key={m} onClick={() => setNewMultiplier(m)}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition ${newMultiplier === m ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                      {m}x
+                    </button>
+                  ))}
+                  <input type="number" step="0.1" min="0.1" placeholder="Otro"
+                    value={!['1','1.5','2','3'].includes(newMultiplier) ? newMultiplier : ''}
+                    onChange={e => setNewMultiplier(e.target.value)}
+                    className="w-20 px-2 py-2 rounded-lg border border-slate-200 text-sm" />
+                  {newMultiplier && (
+                    <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
+                      Aplicar
+                    </button>
+                  )}
+                </div>
+              </div>
+              {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
+            </div>
+          )}
         </div>
-      )}
+
+        {/* Metrics Cards — 2 cols mobile, 3 cols tablet, 6 cols desktop */}
+        {(metrics || analytics) && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 lg:gap-4 mt-6">
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Emitido</p>
+              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
+                {parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0').toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Canjeado</p>
+              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
+                {parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0').toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Circulacion</p>
+              <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate">
+                {parseFloat(metrics?.netCirculation || analytics?.netBalance || '0').toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Activos 30d</p>
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+                {metrics?.activeConsumers30d ?? analytics?.consumerCount ?? 0}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Canjes tot.</p>
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+                {metrics?.totalRedemptions ?? 0}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Canjes 30d</p>
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+                {metrics?.redemptions30d ?? 0}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-slate-100 mt-6 w-full">
+          {(['overview', 'products', 'transactions'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-3 px-4 rounded-lg text-sm font-semibold transition-all ${
+                activeTab === tab
+                  ? 'bg-emerald-600 text-white shadow-md'
+                  : 'text-slate-600 hover:bg-emerald-50 hover:text-emerald-700'
+              }`}
+            >
+              {tab === 'overview' ? 'General' : tab === 'products' ? 'Productos' : 'Transacciones'}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab Content */}
+        {activeTab === 'overview' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
+            <Link href="/merchant/scanner" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Escaner QR</p>
+              <p className="text-xs text-slate-500 mt-1">Escanear codigos de canje de clientes</p>
+            </Link>
+            <Link href="/merchant/dual-scan" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Transaccion sin factura</p>
+              <p className="text-xs text-slate-500 mt-1">Generar QR para clientes (Pago Movil, efectivo, sin recibo)</p>
+            </Link>
+            <Link href="/merchant/csv-upload" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Cargar CSV de facturas</p>
+              <p className="text-xs text-slate-500 mt-1">Subir el archivo diario de transacciones del POS</p>
+            </Link>
+            <Link href="/merchant/products" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Catalogo de productos</p>
+              <p className="text-xs text-slate-500 mt-1">Agregar, editar y gestionar productos</p>
+            </Link>
+            <Link href="/merchant/customers" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Buscar cliente</p>
+              <p className="text-xs text-slate-500 mt-1">Consultar cuentas y vincular cedula</p>
+            </Link>
+            <Link href="/merchant/branches" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Sucursales</p>
+              <p className="text-xs text-slate-500 mt-1">Gestionar sucursales y sus QRs</p>
+            </Link>
+            <Link href="/merchant/disputes" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Disputas</p>
+              <p className="text-xs text-slate-500 mt-1">Resolver reclamos de clientes</p>
+            </Link>
+            <Link href="/merchant/recurrence" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Recurrencia</p>
+              <p className="text-xs text-slate-500 mt-1">Reglas de retencion automatica por WhatsApp</p>
+            </Link>
+            <Link href="/merchant/settings" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Configuracion</p>
+              <p className="text-xs text-slate-500 mt-1">Bienvenida, RIF, tasa de cambio Bs/USD</p>
+            </Link>
+          </div>
+        )}
 
       {activeTab === 'products' && (
         <div className="p-4">
@@ -477,6 +508,7 @@ export default function MerchantDashboard() {
           )}
         </div>
       )}
+      </div>
     </div>
   )
 }

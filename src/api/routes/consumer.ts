@@ -347,11 +347,14 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     const total = await prisma.product.count({ where });
 
-    // Get consumer balance
+    // Get consumer balance — split into confirmed (spendable) and provisional (in verification, not yet spendable).
+    // Affordability is computed on confirmed points only — provisional points cannot be redeemed
+    // until the merchant CSV cross-reference confirms them.
     const assetType = await prisma.assetType.findFirst();
-    const balance = assetType
-      ? await getAccountBalance(accountId, assetType.id, tenantId)
-      : '0';
+    const breakdown = assetType
+      ? await getAccountBalanceBreakdown(accountId, assetType.id, tenantId)
+      : { confirmed: '0', provisional: '0', total: '0' };
+    const confirmedBalance = parseFloat(breakdown.confirmed);
 
     return {
       products: products.map(p => ({
@@ -364,10 +367,12 @@ export default async function consumerRoutes(app: FastifyInstance) {
         hybridEnabled: p.cashPrice !== null && Number(p.cashPrice) > 0,
         stock: p.stock,
         minLevel: p.minLevel,
-        canAfford: parseFloat(balance) >= Number(p.redemptionCost),
+        canAfford: confirmedBalance >= Number(p.redemptionCost),
       })),
       total,
-      balance,
+      balance: breakdown.total,
+      confirmed: breakdown.confirmed,
+      provisional: breakdown.provisional,
       consumerLevel,
     };
   });
