@@ -185,9 +185,10 @@ export default function BranchesPage() {
                     </div>
                     <button
                       onClick={() => handleToggle(b.id)}
-                      className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-semibold ${b.active ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'} transition`}
+                      className={`flex-shrink-0 relative w-12 h-7 rounded-full transition-colors ${b.active ? 'bg-emerald-500' : 'bg-slate-300'}`}
+                      aria-label={b.active ? 'Desactivar sucursal' : 'Activar sucursal'}
                     >
-                      {b.active ? 'Activa' : 'Inactiva'}
+                      <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${b.active ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
                 </div>

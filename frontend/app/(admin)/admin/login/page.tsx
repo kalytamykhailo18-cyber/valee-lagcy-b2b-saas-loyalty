@@ -31,7 +31,12 @@ export default function AdminLogin() {
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-br from-slate-800 to-slate-900">
       <header className="py-6 text-center">
-        <Link href="/" className="text-3xl font-bold text-white">Valee</Link>
+        <Link
+          href="/"
+          className="inline-block text-3xl font-extrabold tracking-tight text-white hover:text-indigo-200 transition-colors"
+        >
+          Valee
+        </Link>
       </header>
 
       <main className="flex-1 flex items-center justify-center p-4">
@@ -75,9 +80,31 @@ export default function AdminLogin() {
         </div>
       </main>
 
-      <footer className="py-6 text-center text-xs text-slate-500 space-x-4">
-        <Link href="/" className="hover:text-slate-300">Inicio</Link>
-        <Link href="/merchant/login" className="hover:text-slate-300">Acceso comercio</Link>
+      <footer className="py-8 text-center text-sm font-medium text-slate-400 space-x-6">
+        <Link
+          href="/"
+          className="hover:text-indigo-300 hover:underline underline-offset-4 transition-colors"
+        >
+          Inicio
+        </Link>
+        <Link
+          href="/merchant/login"
+          className="hover:text-indigo-300 hover:underline underline-offset-4 transition-colors"
+        >
+          Acceso comercio
+        </Link>
+        <Link
+          href="/privacy"
+          className="hover:text-indigo-300 hover:underline underline-offset-4 transition-colors"
+        >
+          Privacidad
+        </Link>
+        <Link
+          href="/terms"
+          className="hover:text-indigo-300 hover:underline underline-offset-4 transition-colors"
+        >
+          Terminos
+        </Link>
       </footer>
     </div>
   )

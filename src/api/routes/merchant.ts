@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import prisma from '../../db/client.js';
-import { authenticateStaff, issueStaffTokens } from '../../services/auth.js';
+import { authenticateStaff, issueStaffTokens, verifyStaffToken } from '../../services/auth.js';
 import { processCSV } from '../../services/csv-upload.js';
 import { enqueueCsvJob } from '../../services/workers.js';
 import { processRedemption } from '../../services/redemption.js';
@@ -61,6 +61,25 @@ export default async function merchantRoutes(app: FastifyInstance) {
     });
 
     return { success: true, ...tokens, staff: { id: staff.id, name: staff.name, role: staff.role } };
+  });
+
+  // ---- AUTH: Refresh staff token ----
+  app.post('/api/merchant/auth/refresh', async (request, reply) => {
+    const refreshToken = (request.body as any)?.refreshToken;
+    if (!refreshToken) return reply.status(400).send({ error: 'refreshToken required' });
+
+    try {
+      const payload = verifyStaffToken(refreshToken);
+      const tokens = issueStaffTokens({
+        staffId: payload.staffId,
+        tenantId: payload.tenantId,
+        role: payload.role,
+        type: 'staff',
+      });
+      return { success: true, ...tokens };
+    } catch {
+      return reply.status(401).send({ error: 'Invalid refresh token' });
+    }
   });
 
   // ---- CSV UPLOAD (Owner only) ----
@@ -321,6 +340,75 @@ export default async function merchantRoutes(app: FastifyInstance) {
   });
 
   // ---- CUSTOMER LOOKUP (Cashier + Owner) ----
+  // ---- CUSTOMERS LIST (all consumers who have interacted with this merchant) ----
+  app.get('/api/merchant/customers', { preHandler: [requireStaffAuth] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { limit = '50', offset = '0', search = '' } = request.query as { limit?: string; offset?: string; search?: string };
+
+    const lim = Math.min(parseInt(limit) || 50, 200);
+    const off = parseInt(offset) || 0;
+
+    const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = assetConfig
+      ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+      : await prisma.assetType.findFirst();
+
+    const where: any = {
+      tenantId,
+      accountType: { in: ['shadow', 'verified'] },
+    };
+    if (search) {
+      where.OR = [
+        { phoneNumber: { contains: search } },
+        { cedula: { contains: search } },
+      ];
+    }
+
+    const [accounts, total] = await Promise.all([
+      prisma.account.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: lim,
+        skip: off,
+      }),
+      prisma.account.count({ where }),
+    ]);
+
+    const customers = await Promise.all(accounts.map(async (acc) => {
+      let balance = '0';
+      if (assetType) {
+        balance = await getAccountBalance(acc.id, assetType.id, tenantId);
+      }
+      const invoiceCount = await prisma.invoice.count({
+        where: { tenantId, consumerAccountId: acc.id },
+      });
+      const lastInvoice = await prisma.invoice.findFirst({
+        where: { tenantId, consumerAccountId: acc.id },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, invoiceNumber: true, amount: true, status: true },
+      });
+
+      return {
+        id: acc.id,
+        phoneNumber: acc.phoneNumber,
+        accountType: acc.accountType,
+        cedula: acc.cedula,
+        level: acc.level,
+        balance,
+        invoiceCount,
+        lastInvoice: lastInvoice ? {
+          invoiceNumber: lastInvoice.invoiceNumber,
+          amount: lastInvoice.amount.toString(),
+          status: lastInvoice.status,
+          date: lastInvoice.createdAt,
+        } : null,
+        createdAt: acc.createdAt,
+      };
+    }));
+
+    return { customers, total, unitLabel: assetType?.unitLabel || 'pts' };
+  });
+
   app.get('/api/merchant/customer-lookup/:phoneNumber', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { tenantId } = request.staff!;
     const { phoneNumber } = request.params as { phoneNumber: string };
@@ -381,7 +469,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- IDENTITY UPGRADE (Cashier + Owner) ----
   app.post('/api/merchant/identity-upgrade', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
-    const { phoneNumber, cedula } = request.body as { phoneNumber: string; cedula: string };
+    const { phoneNumber, cedula, force } = request.body as { phoneNumber: string; cedula: string; force?: boolean };
 
     if (!phoneNumber || !cedula) {
       return reply.status(400).send({ error: 'phoneNumber and cedula are required' });
@@ -402,11 +490,24 @@ export default async function merchantRoutes(app: FastifyInstance) {
     });
 
     if (existing && existing.id !== account.id) {
-      return reply.status(409).send({
-        error: 'This cedula is already linked to another phone number',
-        existingPhone: existing.phoneNumber,
-        requiresConfirmation: true,
+      if (!force) {
+        return reply.status(409).send({
+          error: 'This cedula is already linked to another phone number',
+          existingPhone: existing.phoneNumber,
+          requiresConfirmation: true,
+        });
+      }
+      // Force-override: unlink the cedula from the previous account
+      await prisma.account.update({
+        where: { id: existing.id },
+        data: { cedula: null },
       });
+      await prisma.$executeRaw`
+        INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, consumer_account_id, outcome, metadata, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff',
+          ${request.staff!.role}::"AuditActorRole", 'IDENTITY_UPGRADE', ${existing.id}::uuid, 'success',
+          ${JSON.stringify({ action: 'cedula_unlinked_for_override', cedula, transferredTo: account.id })}::jsonb, now())
+      `;
     }
 
     const upgraded = await upgradeToVerified(account.id, tenantId, cedula);
@@ -415,7 +516,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, consumer_account_id, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff',
         ${request.staff!.role}::"AuditActorRole", 'IDENTITY_UPGRADE', ${account.id}::uuid, 'success',
-        ${JSON.stringify({ cedula })}::jsonb, now())
+        ${JSON.stringify({ cedula, forced: !!force })}::jsonb, now())
     `;
 
     return { success: true, account: { id: upgraded.id, accountType: upgraded.accountType, cedula: upgraded.cedula } };
@@ -507,6 +608,10 @@ export default async function merchantRoutes(app: FastifyInstance) {
   app.get('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = assetConfig
+      ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+      : await prisma.assetType.findFirst();
     return {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
       rif: tenant?.rif || null,
@@ -514,6 +619,9 @@ export default async function merchantRoutes(app: FastifyInstance) {
       preferredExchangeSource: tenant?.preferredExchangeSource || null,
       referenceCurrency: tenant?.referenceCurrency || 'usd',
       trustLevel: tenant?.trustLevel || 'level_2_standard',
+      assetTypeId: assetType?.id || null,
+      assetTypeName: assetType?.name || null,
+      unitLabel: assetType?.unitLabel || 'pts',
     };
   });
 
@@ -939,12 +1047,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
       paramIndex++;
     }
     if (eventType) {
-      conditions.push(`le.event_type = $${paramIndex}`);
+      conditions.push(`le.event_type = $${paramIndex}::"LedgerEventType"`);
       params.push(eventType);
       paramIndex++;
     }
     if (status) {
-      conditions.push(`le.status = $${paramIndex}`);
+      conditions.push(`le.status = $${paramIndex}::"LedgerStatus"`);
       params.push(status);
       paramIndex++;
     }

@@ -234,8 +234,8 @@ export default function Catalog() {
           <h2 className="text-lg font-bold">Confirmar canje</h2>
           <div className="mt-4 space-y-2">
             <p className="text-slate-600"><span className="font-medium">Producto:</span> {selectedProduct.name}</p>
-            <p className="text-slate-600"><span className="font-medium">Costo:</span> {parseFloat(selectedProduct.redemptionCost).toLocaleString()} pts</p>
-            <p className="text-slate-600"><span className="font-medium">Saldo despues:</span> {parseFloat(balanceAfter).toLocaleString()} pts</p>
+            <p className="text-slate-600"><span className="font-medium">Costo:</span> {Math.round(parseFloat(selectedProduct.redemptionCost)).toLocaleString()} pts</p>
+            <p className="text-slate-600"><span className="font-medium">Saldo despues:</span> {Math.round(parseFloat(balanceAfter)).toLocaleString()} pts</p>
           </div>
           {redeemResult && !redeemResult.success && !redeemResult.queued && (
             <p className="text-red-500 text-sm mt-3">{redeemResult.message}</p>
@@ -315,7 +315,7 @@ export default function Catalog() {
               </div>
               <div className="p-3">
                 <p className="font-medium text-sm truncate">{product.name}</p>
-                <p className="text-indigo-600 font-bold text-sm">{parseFloat(product.redemptionCost).toLocaleString()} pts</p>
+                <p className="text-indigo-600 font-bold text-sm">{Math.round(parseFloat(product.redemptionCost)).toLocaleString()} pts</p>
                 <p className="text-xs text-slate-400">{product.stock} disponibles</p>
                 {canAfford ? (
                   <button className="w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
@@ -349,12 +349,40 @@ export default function Catalog() {
 
 // Simple QR display using canvas
 function QRDisplay({ value }: { value: string }) {
+  const [qrUrl, setQrUrl] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => {
+    import('qrcode').then(QRCode => {
+      QRCode.toDataURL(value, { width: 280, margin: 2, errorCorrectionLevel: 'M' })
+        .then(url => setQrUrl(url))
+        .catch(() => {})
+    })
+  }, [value])
+
+  function copyToken() {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }).catch(() => {})
+  }
+
   return (
-    <div className="w-48 h-48 bg-white flex items-center justify-center border-2 border-slate-200 rounded-lg">
-      <div className="text-center">
-        <p className="text-xs text-slate-400 break-all px-2">{value.slice(0, 30)}...</p>
-        <p className="text-xs text-slate-500 mt-2">QR Code</p>
-      </div>
+    <div className="flex flex-col items-center">
+      {qrUrl ? (
+        <img src={qrUrl} alt="QR de canje" className="w-56 h-56 rounded-lg border-2 border-slate-200" />
+      ) : (
+        <div className="w-56 h-56 bg-slate-100 rounded-lg flex items-center justify-center">
+          <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+      <button
+        onClick={copyToken}
+        className="mt-3 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-lg transition flex items-center gap-1"
+      >
+        {copied ? 'Copiado!' : 'Copiar codigo manual'}
+      </button>
+      <p className="text-[10px] text-slate-400 mt-1 max-w-[240px] break-all text-center select-all">{value.slice(0, 40)}...</p>
     </div>
   )
 }

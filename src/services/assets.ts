@@ -56,5 +56,9 @@ export async function convertToLoyaltyValue(
 ): Promise<string> {
   const rate = await getConversionRate(tenantId, assetTypeId);
   const value = parseFloat(invoiceAmount) * parseFloat(rate);
-  return value.toFixed(8);
+  // Round to whole numbers — cleaner for consumers, avoids confusing decimals.
+  // Minimum 1 point: the ledger has a chk_ledger_amount_positive constraint
+  // that rejects zero-value entries. Any positive invoice earns at least 1 pt.
+  const rounded = Math.round(value);
+  return Math.max(1, rounded).toFixed(0);
 }

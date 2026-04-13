@@ -29,8 +29,8 @@ const EVENT_TYPES = [
 const STATUS_OPTIONS = [
   { value: '', label: 'Todos' },
   { value: 'confirmed', label: 'Confirmado' },
+  { value: 'provisional', label: 'En verificacion' },
   { value: 'reversed', label: 'Revertido' },
-  { value: 'pending', label: 'Pendiente' },
 ]
 
 interface ProductPerf {
@@ -337,6 +337,10 @@ export default function MerchantDashboard() {
             <Link href="/merchant/products" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
               <p className="font-semibold text-slate-800">Catalogo de productos</p>
               <p className="text-xs text-slate-500 mt-1">Agregar, editar y gestionar productos</p>
+            </Link>
+            <Link href="/merchant/hybrid-deals" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+              <p className="font-semibold text-slate-800">Promociones hibridas</p>
+              <p className="text-xs text-slate-500 mt-1">Ofertas combinadas de efectivo + puntos</p>
             </Link>
             <Link href="/merchant/customers" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
               <p className="font-semibold text-slate-800">Buscar cliente</p>

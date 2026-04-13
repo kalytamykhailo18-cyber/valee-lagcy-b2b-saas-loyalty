@@ -24,7 +24,7 @@ const NAV_ITEMS: NavItem[] = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname()
   const router = useRouter()
-  const [mounted, setMounted] = useState(() => typeof window !== 'undefined')
+  const [mounted, setMounted] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
@@ -45,8 +45,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const sidebarContent = (
     <>
       <div className="h-16 flex items-center px-6 border-b border-slate-700 flex-shrink-0">
-        <h1 className="text-2xl font-bold text-white">Valee</h1>
-        <span className="ml-3 text-xs text-slate-400 uppercase tracking-wide font-semibold">Admin</span>
+        <Link
+          href="/admin"
+          className="text-2xl font-extrabold tracking-tight text-white hover:text-indigo-200 transition-colors"
+        >
+          Valee
+        </Link>
+        <span className="ml-3 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">Admin</span>
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">

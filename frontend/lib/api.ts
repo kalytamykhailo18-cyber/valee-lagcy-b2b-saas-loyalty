@@ -1,5 +1,37 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
+let isRefreshing = false;
+
+async function tryRefreshToken(): Promise<boolean> {
+  if (isRefreshing) return false;
+  const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+  if (!refreshToken) return false;
+
+  isRefreshing = true;
+  try {
+    // Try consumer refresh first, then merchant refresh
+    for (const endpoint of ['/api/consumer/auth/refresh', '/api/merchant/auth/refresh']) {
+      try {
+        const res = await fetch(`${API_BASE}${endpoint}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ refreshToken }),
+        });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (data.accessToken) {
+          localStorage.setItem('accessToken', data.accessToken);
+          if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+          return true;
+        }
+      } catch { continue; }
+    }
+    return false;
+  } finally {
+    isRefreshing = false;
+  }
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
 
@@ -12,6 +44,25 @@ async function request(path: string, options: RequestInit = {}) {
     },
   });
 
+  // Auto-refresh on 401: try refreshing the token and retry ONCE
+  if (res.status === 401 && !path.includes('/auth/')) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      const newToken = localStorage.getItem('accessToken');
+      const retryRes = await fetch(`${API_BASE}${path}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
+          ...options.headers,
+        },
+      });
+      const retryData = await retryRes.json();
+      if (!retryRes.ok) throw { status: retryRes.status, ...retryData };
+      return retryData;
+    }
+  }
+
   const data = await res.json();
   if (!res.ok) throw { status: res.status, ...data };
   return data;
@@ -19,11 +70,14 @@ async function request(path: string, options: RequestInit = {}) {
 
 export const api = {
   // Consumer Auth
-  requestOTP: (phoneNumber: string, tenantSlug: string) =>
+  requestOTP: (phoneNumber: string, tenantSlug?: string) =>
     request('/api/consumer/auth/request-otp', { method: 'POST', body: JSON.stringify({ phoneNumber, tenantSlug }) }),
 
-  verifyOTP: (phoneNumber: string, otp: string, tenantSlug: string) =>
+  verifyOTP: (phoneNumber: string, otp: string, tenantSlug?: string) =>
     request('/api/consumer/auth/verify-otp', { method: 'POST', body: JSON.stringify({ phoneNumber, otp, tenantSlug }) }),
+
+  selectMerchant: (tenantSlug: string) =>
+    request('/api/consumer/auth/select-merchant', { method: 'POST', body: JSON.stringify({ tenantSlug }) }),
 
   // Consumer Data
   getBalance: () => request('/api/consumer/balance'),
@@ -107,10 +161,17 @@ export const api = {
     request(`/api/merchant/products/${id}/toggle`, { method: 'PATCH' }),
   scanRedemption: (token: string) =>
     request('/api/merchant/scan-redemption', { method: 'POST', body: JSON.stringify({ token }) }),
+  getCustomers: (params?: { limit?: number; offset?: number; search?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    if (params?.offset) qs.set('offset', String(params.offset));
+    if (params?.search) qs.set('search', params.search);
+    return request(`/api/merchant/customers?${qs}`);
+  },
   lookupCustomer: (phoneNumber: string) =>
     request(`/api/merchant/customer-lookup/${encodeURIComponent(phoneNumber)}`),
-  upgradeIdentity: (phoneNumber: string, cedula: string) =>
-    request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula }) }),
+  upgradeIdentity: (phoneNumber: string, cedula: string, force?: boolean) =>
+    request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula, force }) }),
   getAllAccounts: () => request('/api/consumer/all-accounts'),
   getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
   initiateDualScan: (amount: string, branchId?: string) =>

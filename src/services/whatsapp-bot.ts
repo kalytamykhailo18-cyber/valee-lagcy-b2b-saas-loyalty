@@ -86,14 +86,14 @@ export function getStateGreeting(
 
     case 'returning_with_history':
       return [
-        `¡Hola de nuevo! Tu saldo actual es de ${balance} puntos.`,
+        `¡Hola de nuevo! Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
         `¿Tienes una nueva factura para escanear? 📸 Envíala aquí.`,
       ];
 
     case 'active_purchase':
       return [
         `¡Acabas de visitar ${merchantName}! No olvides enviar tu factura para ganar tus puntos. 📸`,
-        `Tu saldo actual: ${balance} puntos.`,
+        `Tu saldo actual: ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
       ];
 
     case 'registered_never_scanned':
@@ -159,11 +159,11 @@ export async function handleSupportIntent(
       const balance = assetType
         ? await getAccountBalance(accountId, assetType.id, tenantId)
         : '0';
-      return [`Tu saldo actual es de ${balance} puntos. 💰`];
+      return [`Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString()} puntos. 💰`];
     }
 
     case 'receipt_status': {
-      if (!accountId) return ['No tienes facturas registradas aún.'];
+      if (!accountId) return ['No tienes facturas registradas aun.'];
       const lastInvoice = await prisma.invoice.findFirst({
         where: { tenantId, consumerAccountId: accountId },
         orderBy: { createdAt: 'desc' },
@@ -171,16 +171,29 @@ export async function handleSupportIntent(
       if (!lastInvoice) return ['No encontramos facturas recientes asociadas a tu cuenta.'];
       const statusMap: Record<string, string> = {
         'available': 'disponible',
-        'claimed': 'reclamada ✅',
-        'pending_validation': 'en verificación ⏳',
-        'rejected': 'rechazada ❌',
-        'manual_review': 'en revisión manual 🔍',
+        'claimed': 'reclamada',
+        'pending_validation': 'en verificacion',
+        'rejected': 'rechazada',
+        'manual_review': 'en revision manual',
       };
-      return [
-        `Tu última factura (${lastInvoice.invoiceNumber}):`,
+      const ext = lastInvoice.extractedData as any;
+      const currency = ext?.currency || 'BS';
+      const lines: string[] = [
+        `Tu ultima factura:`,
         `Estado: ${statusMap[lastInvoice.status] || lastInvoice.status}`,
-        `Monto: $${lastInvoice.amount}`,
+        `Factura #: ${lastInvoice.invoiceNumber}`,
+        `Monto: ${currency === 'USD' ? '$' : 'Bs'} ${lastInvoice.amount}`,
+        `Cliente: ${lastInvoice.customerPhone || phoneNumber}`,
       ];
+      if (ext) {
+        if (ext.merchant_name) lines.push(`Comercio: ${ext.merchant_name}`);
+        if (ext.merchant_rif) lines.push(`RIF: ${ext.merchant_rif}`);
+        if (ext.transaction_date) lines.push(`Fecha: ${ext.transaction_date}`);
+        if (ext.order_items && ext.order_items.length > 0) {
+          lines.push(`Items: ${ext.order_items.length} producto${ext.order_items.length > 1 ? 's' : ''}`);
+        }
+      }
+      return lines;
     }
 
     case 'how_to_redeem':
@@ -279,6 +292,7 @@ export async function handleIncomingMessage(params: {
   messageType: 'text' | 'image';
   messageText?: string;
   imageBuffer?: Buffer;
+  senderProfileName?: string | null;
 }): Promise<string[]> {
   const { phoneNumber, tenantId, messageType, messageText } = params;
 
@@ -286,7 +300,7 @@ export async function handleIncomingMessage(params: {
   const { state, accountId, balance } = await detectConversationState(phoneNumber, tenantId);
 
   // Now ensure account exists
-  const { account, created } = await findOrCreateConsumerAccount(tenantId, phoneNumber);
+  const { account, created } = await findOrCreateConsumerAccount(tenantId, phoneNumber, params.senderProfileName);
 
   // Grant welcome bonus on first contact
   if (created) {
@@ -356,45 +370,44 @@ export async function handleIncomingMessage(params: {
       ];
     }
 
-    // Check confidence threshold with retry tracking
-    const confidenceThreshold = parseFloat(process.env.OCR_CONFIDENCE_THRESHOLD || '0.7');
-    if (extractedData.confidence_score < confidenceThreshold) {
-      const retryCount = incrementOcrRetry(tenantId, phoneNumber);
+    // Confidence gate is now handled inside validateInvoice (Stage A) using the
+    // unified threshold + essentials bypass. We still keep the retry tracker so
+    // the user gets a "X intentos restantes" message after repeated failures.
 
-      if (retryCount >= MAX_OCR_RETRIES) {
-        resetOcrRetry(tenantId, phoneNumber);
-        return [
-          '❌ No pudimos leer tu factura después de varios intentos.',
-          'La validación no puede completarse con esta imagen. Por favor visita el comercio para asistencia.',
-        ];
-      }
-
-      const remaining = MAX_OCR_RETRIES - retryCount;
-      return [
-        '📸 No pudimos leer tu factura claramente.',
-        `Por favor envía una foto más clara. Te ${remaining === 1 ? 'queda 1 intento' : `quedan ${remaining} intentos`}.`,
-      ];
-    }
-
-    // Reset retry count on successful extraction
-    resetOcrRetry(tenantId, phoneNumber);
-
-    // Run full validation (Stages B through E)
+    // Run full validation (Stages B through E). Pass the imageBuffer (for the
+    // SHA-256 dedup gate), the extractedData (so validateInvoice does not re-run
+    // OCR), AND the ocrRawText (critical for Stage A1 Jaccard dedup — without
+    // this, the stored invoice rows have empty ocr_raw_text and the fuzzy dedup
+    // has nothing to compare against).
     const result = await validateInvoice({
       tenantId,
       senderPhone: phoneNumber,
       assetTypeId: assetType.id,
       extractedData,
+      ocrRawText: ocrRawText || undefined,
+      imageBuffer: params.imageBuffer,
     });
 
     if (result.success) {
+      const isPending = result.stage === 'pending';
+      if (isPending) {
+        return [
+          `✅ Factura validada!`,
+          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
+          `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
+        ];
+      }
       return [
-        `✅ ¡Factura validada!`,
-        `Has ganado ${parseFloat(result.valueAssigned!).toLocaleString()} ${assetType.unitLabel}.`,
-        `Tu saldo total: ${parseFloat(result.newBalance!).toLocaleString()} ${assetType.unitLabel}.`,
+        `✅ Factura validada!`,
+        `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
+        `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
       ];
     } else {
-      return [`❌ ${result.message}`];
+      // On failure, hint about typing "factura" for details
+      return [
+        result.message,
+        `Si tienes dudas acerca del escaneo envia la palabra: factura`,
+      ];
     }
   }
 

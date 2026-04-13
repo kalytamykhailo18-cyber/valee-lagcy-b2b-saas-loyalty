@@ -15,11 +15,14 @@ export async function requireConsumerAuth(request: FastifyRequest, reply: Fastif
   const token = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken;
 
   if (!token) {
+    console.log(`[Auth][401] No token | url=${request.url}`);
     return reply.status(401).send({ error: 'Authentication required' });
   }
   try {
     request.consumer = verifyConsumerToken(token);
-  } catch {
+  } catch (err: any) {
+    const reason = err?.message || 'unknown';
+    console.log(`[Auth][401] Token rejected | url=${request.url} reason=${reason}`);
     return reply.status(401).send({ error: 'Invalid or expired token' });
   }
 }

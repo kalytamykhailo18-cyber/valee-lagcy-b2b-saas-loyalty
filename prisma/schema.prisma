@@ -286,6 +286,7 @@ model Account {
   id                String             @id @default(uuid()) @db.Uuid
   tenantId          String             @map("tenant_id") @db.Uuid
   phoneNumber       String?            @map("phone_number") @db.VarChar(30)
+  displayName       String?            @map("display_name") @db.VarChar(100)
   cedula            String?            @db.VarChar(20)
   accountType          AccountType        @map("account_type")
   systemAccountType    SystemAccountType? @map("system_account_type")

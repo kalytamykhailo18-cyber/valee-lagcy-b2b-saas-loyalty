@@ -15,7 +15,7 @@ const JWT_SECRET = () => {
 export async function generateOTP(phoneNumber: string): Promise<string> {
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
   const otpHash = await bcrypt.hash(otp, 10);
-  const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+  const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes (matches WhatsApp auth template valee_otp)
 
   await prisma.otpSession.create({
     data: { phoneNumber, otpHash, expiresAt },
@@ -52,6 +52,9 @@ export async function verifyOTP(phoneNumber: string, otp: string): Promise<boole
 // ============================================================
 
 export interface ConsumerTokenPayload {
+  // Empty string for "global" tokens issued via tenantless OTP login. The user
+  // must call /api/consumer/auth/select-merchant to get a tenant-bound token
+  // before hitting per-tenant endpoints.
   accountId: string;
   tenantId: string;
   phoneNumber: string;

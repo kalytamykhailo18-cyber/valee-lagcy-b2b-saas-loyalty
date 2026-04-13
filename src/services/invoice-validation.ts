@@ -14,6 +14,8 @@ export interface ExtractedInvoiceData {
   transaction_time?: string | null;
   customer_phone: string | null;
   merchant_name: string | null;
+  merchant_rif?: string | null;       // Venezuelan tax ID format: J/V/E/G/P-XXXXXXXX(-X)
+  currency?: string | null;            // ISO-ish: "BS","USD","EUR","COP","MXN"...
   order_items?: Array<{ name: string; quantity: number; unit_price: number }> | null;
   confidence_score: number;
   // For mobile_payment screenshots:
@@ -58,6 +60,7 @@ export async function validateInvoice(params: {
   senderPhone: string;
   imageBuffer?: Buffer | null;
   extractedData?: ExtractedInvoiceData;
+  ocrRawText?: string | null;
   latitude?: string | null;
   longitude?: string | null;
   deviceId?: string | null;
@@ -98,8 +101,125 @@ export async function validateInvoice(params: {
     }
   }
 
+  // STAGE 0.5: Image-hash deduplication.
+  // LLM extraction is probabilistic — even with temperature=0 the same photo may
+  // produce slightly different invoice_number strings if OCR output varies. The
+  // only bulletproof dedup key is the image content itself. If this tenant already
+  // has a ledger entry referencing this exact image hash, reject.
+  let imageHash: string | null = null;
+  if (params.imageBuffer) {
+    const crypto = await import('crypto');
+    imageHash = crypto.createHash('sha256').update(params.imageBuffer).digest('hex');
+    const existingByHash = await prisma.ledgerEntry.findFirst({
+      where: {
+        tenantId,
+        eventType: 'INVOICE_CLAIMED',
+        entryType: 'CREDIT',
+        metadata: { path: ['imageHash'], equals: imageHash },
+      },
+      select: { id: true, referenceId: true, status: true, accountId: true },
+    });
+    if (existingByHash) {
+      // Was the original credit on the same user that is now sending the photo?
+      let isOriginalSubmitter = false;
+      const senderAccount = await prisma.account.findUnique({
+        where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+        select: { id: true },
+      });
+      if (senderAccount && senderAccount.id === existingByHash.accountId) {
+        isOriginalSubmitter = true;
+      }
+      console.log(`[Validation] Duplicate image hash blocked: tenant=${tenantId} hash=${imageHash.slice(0, 12)} existingRef=${existingByHash.referenceId} status=${existingByHash.status} sameUser=${isOriginalSubmitter}`);
+      return {
+        success: false,
+        stage: 'cross_reference',
+        message: isOriginalSubmitter
+          ? 'Ya enviaste esta foto antes. La factura ya esta registrada en tu cuenta.'
+          : 'Esta factura ya fue enviada por otro cliente. No se puede reclamar dos veces.',
+        invoiceNumber: existingByHash.referenceId,
+      };
+    }
+  }
+
   // STAGE A: Extract data (real OCR+AI if image provided, or pre-extracted for tests)
-  const { data: extracted, ocrRawText } = await extractInvoiceData(params.imageBuffer || null, params.extractedData);
+  const extractResult = await extractInvoiceData(params.imageBuffer || null, params.extractedData);
+  const extracted = extractResult.data;
+  // Prefer passed-in ocrRawText (for testing or WhatsApp pipeline), fall back to OCR result
+  const ocrRawText = params.ocrRawText ?? extractResult.ocrRawText;
+
+  // STAGE A1: OCR-text-based fuzzy dedup via Jaccard similarity.
+  //
+  // Google Vision is NOT deterministic across WhatsApp re-encodings — it often
+  // misreads individual characters (8↔0, 1↔l, etc.). A simple hash-equality
+  // check fails because even one mis-OCRed char produces a different hash.
+  //
+  // Instead we tokenize the OCR text into word tokens and compare the SET of
+  // tokens between two receipts. If ≥70% of tokens are shared (Jaccard index),
+  // it's the same physical receipt. Typical OCR variations only affect a few
+  // tokens out of hundreds, so a re-submission of the same photo scores >95%.
+  // A different receipt (even at the same merchant/amount) has totally
+  // different items/time/control numbers and scores <30%.
+  //
+  // This still does NOT block legitimate promo cases where many customers buy
+  // the same thing — each receipt has different items/time/cashier/control
+  // numbers, producing distinct token sets.
+  if (ocrRawText && ocrRawText.length > 50) {
+    const tokenize = (s: string): Set<string> =>
+      new Set(
+        s.toLowerCase()
+          .replace(/[^a-z0-9\s]/g, ' ')
+          .split(/\s+/)
+          .filter(t => t.length >= 2)
+      );
+    const newTokens = tokenize(ocrRawText);
+
+    const candidates = await prisma.invoice.findMany({
+      where: {
+        tenantId,
+        ocrRawText: { not: null },
+        status: { in: ['pending_validation', 'claimed', 'manual_review', 'rejected'] },
+      },
+      select: { id: true, invoiceNumber: true, ocrRawText: true, consumerAccountId: true, status: true },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    });
+
+    let best: { candidate: typeof candidates[number]; similarity: number } | null = null;
+    for (const candidate of candidates) {
+      if (!candidate.ocrRawText) continue;
+      const candidateTokens = tokenize(candidate.ocrRawText);
+      if (candidateTokens.size === 0 || newTokens.size === 0) continue;
+      let intersect = 0;
+      for (const t of newTokens) if (candidateTokens.has(t)) intersect++;
+      const union = newTokens.size + candidateTokens.size - intersect;
+      const similarity = intersect / union;
+      if (!best || similarity > best.similarity) {
+        best = { candidate, similarity };
+      }
+    }
+
+    if (best && best.similarity >= 0.55) {
+      console.log(`[Validation] OCR Jaccard match: extracted=${extracted.invoice_number} matches existing=${best.candidate.invoiceNumber} similarity=${best.similarity.toFixed(3)} status=${best.candidate.status}`);
+      let isOriginalSubmitter = false;
+      if (best.candidate.consumerAccountId) {
+        const senderAccount = await prisma.account.findUnique({
+          where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+          select: { id: true },
+        });
+        if (senderAccount && senderAccount.id === best.candidate.consumerAccountId) {
+          isOriginalSubmitter = true;
+        }
+      }
+      return {
+        success: false,
+        stage: 'cross_reference',
+        message: isOriginalSubmitter
+          ? 'Ya enviaste esta misma factura antes. No se puede procesar dos veces.'
+          : 'Esta factura ya fue enviada anteriormente por otro cliente. No se puede usar dos veces.',
+        invoiceNumber: best.candidate.invoiceNumber,
+      };
+    }
+  }
 
   // Post-OCR trust-level gate for level_1_strict (covers the case where pre-extracted
   // document_type wasn't provided)
@@ -121,10 +241,15 @@ export async function validateInvoice(params: {
     bank_name: extracted.bank_name,
     confidence_score: extracted.confidence_score,
   }));
-  const confidenceThreshold = parseFloat(process.env.OCR_CONFIDENCE_THRESHOLD || '0.7');
+  const confidenceThreshold = parseFloat(process.env.OCR_CONFIDENCE_THRESHOLD || '0.5');
 
-  if (extracted.confidence_score < confidenceThreshold) {
-    return { success: false, stage: 'extraction', message: 'No pudimos leer la factura con claridad. Por favor envia una foto mas clara.' };
+  // If we got BOTH essential fields (invoice_number and total_amount), trust them and
+  // skip the confidence gate. Stage C (CSV match) is the real filter — if the number
+  // is wrong, it will not be found and will be routed to provisional/manual review.
+  // We only reject on low confidence when we are missing one of the essential fields.
+  const hasEssentials = extracted.invoice_number && extracted.total_amount !== null;
+  if (!hasEssentials && extracted.confidence_score < confidenceThreshold) {
+    return { success: false, stage: 'extraction', message: 'No logre identificar los datos completos. Por favor toma la foto de nuevo asegurandote de que se vea el RIF, el numero de factura y el total.' };
   }
 
   // For vouchers without an invoice number, generate a ROBUST synthetic reference.
@@ -167,28 +292,104 @@ export async function validateInvoice(params: {
     console.log('[Validation] Generated synthetic voucher reference:', extracted.invoice_number);
   }
 
-  if (!extracted.invoice_number || extracted.total_amount === null) {
-    return { success: false, stage: 'extraction', message: 'No pudimos extraer el numero de factura o el monto de la imagen. Por favor intenta de nuevo.' };
+  // If the AI couldn't find an invoice number but we DO have a total amount and
+  // some other content (merchant name or OCR text), synthesize a stable reference
+  // from the normalized OCR text. WhatsApp re-encoding causes minor OCR variations,
+  // so the same receipt can produce different extractions across submissions — the
+  // synthetic reference + Stage A1 OCR fingerprint dedup still catch duplicates.
+  if (!extracted.invoice_number && extracted.total_amount !== null && ocrRawText) {
+    const cryptoMod = await import('crypto');
+    const normalized = ocrRawText.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const ocrHash = cryptoMod.createHash('sha256').update(normalized).digest('hex').slice(0, 16);
+    const amountCents = Math.round(extracted.total_amount * 100);
+    extracted.invoice_number = `AUTO-${amountCents}-${ocrHash}`;
+    console.log('[Validation] Generated synthetic invoice reference from OCR hash:', extracted.invoice_number);
   }
 
-  // STAGE B: Identity cross-check
+  if (!extracted.invoice_number || extracted.total_amount === null) {
+    return { success: false, stage: 'extraction', message: 'No logre identificar los datos completos. Por favor toma la foto de nuevo asegurandote de que se vea el RIF, el numero de factura y el total.' };
+  }
+
+  // STAGE B0: Merchant identity check via RIF + currency.
+  // Names vary too much to compare reliably (a "Farmatodo CARACAS" vs the tenant
+  // "Farmatodo Las Mercedes" should both match). The RIF (Venezuelan tax ID) is a
+  // stable, exact identifier — if Claude extracted one and the tenant has one,
+  // they must match. Currency is a coarse country gate: only Bs / USD / EUR pass.
+  // The real anti-fraud check is still Stage C (CSV match), this just catches
+  // obvious cross-tenant or foreign-country submissions early.
+  const ALLOWED_CURRENCIES = new Set(['BS', 'BSS', 'VES', 'VEF', 'USD', 'EUR']);
+  if (extracted.currency && !ALLOWED_CURRENCIES.has(extracted.currency.toUpperCase())) {
+    console.log(`[Validation] Currency rejected: extracted=${extracted.currency}`);
+    return {
+      success: false,
+      stage: 'merchant_check',
+      message: `Esta factura esta en ${extracted.currency}. Solo se aceptan facturas en bolivares, dolares o euros.`,
+      invoiceNumber: extracted.invoice_number,
+    };
+  }
+
+  // RIF validation: if the tenant has a RIF configured and the document is a fiscal_invoice,
+  // the RIF MUST be visible in the image. This prevents submitting receipts from other
+  // merchants (e.g. a Burger Bar receipt to a Pizzeria bot).
+  if (tenantForTrust?.rif && extracted.document_type === 'fiscal_invoice' && !extracted.merchant_rif) {
+    console.log(`[Validation] RIF not found in fiscal invoice image. Tenant requires RIF: ${tenantForTrust.rif}`);
+    return {
+      success: false,
+      stage: 'merchant_check',
+      message: 'No logramos identificar el RIF del comercio en la foto. Por favor toma la foto completa donde se vea el encabezado con el RIF y el total.',
+      invoiceNumber: extracted.invoice_number,
+    };
+  }
+
+  if (extracted.merchant_rif && tenantForTrust?.rif) {
+    const normRif = (s: string) => s.replace(/[\s-]/g, '').toUpperCase();
+    const extractedRif = normRif(extracted.merchant_rif);
+    const tenantRif = normRif(tenantForTrust.rif);
+
+    // Compare the digit body (the letter prefix and check digit may be slightly
+    // misread by OCR). If both have at least 7 digits and they don't match,
+    // reject.
+    const extractedDigits = extractedRif.replace(/\D/g, '');
+    const tenantDigits = tenantRif.replace(/\D/g, '');
+
+    if (
+      extractedDigits.length >= 7 &&
+      tenantDigits.length >= 7 &&
+      !extractedDigits.includes(tenantDigits) &&
+      !tenantDigits.includes(extractedDigits)
+    ) {
+      console.log(`[Validation] RIF mismatch: tenant=${tenantForTrust.rif} extracted=${extracted.merchant_rif}`);
+      return {
+        success: false,
+        stage: 'merchant_check',
+        message: `El RIF de la factura (${extracted.merchant_rif}) no coincide con el RIF del comercio. Solo se aceptan facturas de este comercio.`,
+        invoiceNumber: extracted.invoice_number,
+      };
+    }
+  }
+
+  // STAGE B: Identity cross-check (soft mode).
+  // Claude often returns the merchant's printed phone as customer_phone (there is
+  // no reliable label on Venezuelan receipts). We still log mismatches for audit,
+  // but do NOT hard-reject here — Stage C (match against the merchant's CSV) is
+  // the real anti-fraud gate: no one can claim an invoice that the merchant
+  // hasn't uploaded or that has already been claimed.
   if (extracted.customer_phone) {
-    // Normalize by stripping all non-digits then comparing the last 10 digits.
-    // This handles variations: local format (04140446569), international (+584140446569),
-    // with or without country code, with or without leading 0.
-    // Last 10 digits = the actual phone number without country code, which is globally unique within a country.
     const digitsExtracted = extracted.customer_phone.replace(/[^\d]/g, '');
     const digitsSender = senderPhone.replace(/[^\d]/g, '');
     const last10Extracted = digitsExtracted.slice(-10);
     const last10Sender = digitsSender.slice(-10);
 
     if (last10Extracted.length >= 7 && last10Sender.length >= 7 && last10Extracted !== last10Sender) {
-      console.log(`[Identity] Phone mismatch: invoice=${digitsExtracted} sender=${digitsSender} (last10: ${last10Extracted} vs ${last10Sender})`);
-      return { success: false, stage: 'identity_check', message: 'El numero de telefono en la factura no coincide con tu cuenta. Esta factura no puede ser reclamada desde este numero.', invoiceNumber: extracted.invoice_number };
+      console.log(`[Identity][soft-warn] Phone on invoice does not match sender: invoice=${digitsExtracted} sender=${digitsSender} — letting it continue to Stage C.`);
     }
   }
 
   // STAGE C: Merchant data cross-reference
+  // The invoice number is THE uniqueness key. Once an invoice number has been
+  // processed (in any state) it cannot be re-used, ever. Amount is NEVER used
+  // as a dedup signal because legitimate customers can have the same amount
+  // (promotions, fixed-price items, etc.) and that must not be blocked.
   const invoice = await prisma.invoice.findUnique({
     where: { tenantId_invoiceNumber: { tenantId, invoiceNumber: extracted.invoice_number } },
   });
@@ -205,11 +406,45 @@ export async function validateInvoice(params: {
       extractedData: extracted,
       latitude: params.latitude,
       longitude: params.longitude,
+      imageHash: imageHash || undefined,
     });
     return provisional;
   }
-  if (invoice.status === 'claimed') {
-    return { success: false, stage: 'cross_reference', message: 'Esta factura ya fue usada para reclamar puntos anteriormente.', invoiceNumber: extracted.invoice_number };
+  // Only 'available' invoices can be claimed. Everything else means the invoice
+  // has already been touched by this tenant in some way and re-processing it would
+  // cause a double-credit.
+  if (invoice.status !== 'available') {
+    // Distinguish "this is YOUR pending submission" from "someone else already
+    // claimed/locked this invoice". The latter must NOT sound like "te
+    // confirmamos en breve" — that misleads the user into thinking they will
+    // receive points, when in reality the original submitter will.
+    let isOriginalSubmitter = false;
+    if (invoice.consumerAccountId) {
+      const senderAccount = await prisma.account.findUnique({
+        where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+        select: { id: true },
+      });
+      if (senderAccount && senderAccount.id === invoice.consumerAccountId) {
+        isOriginalSubmitter = true;
+      }
+    }
+
+    const msgByStatus: Record<string, string> = isOriginalSubmitter
+      ? {
+          claimed: 'Esta factura ya fue usada por ti para reclamar puntos anteriormente.',
+          pending_validation: 'Esta factura ya esta en verificacion (tu la enviaste antes). Te confirmamos en breve cuando se valide.',
+          manual_review: 'Esta factura esta en revision por el comercio. Te avisamos el resultado.',
+          rejected: 'Esta factura fue rechazada previamente y no se puede reclamar.',
+        }
+      : {
+          claimed: 'Esta factura ya fue usada por otro cliente para reclamar puntos. No se puede usar dos veces.',
+          pending_validation: 'Esta factura ya fue enviada por otro cliente y esta en verificacion. No se puede reclamar dos veces.',
+          manual_review: 'Esta factura esta en revision por el comercio porque otro cliente la envio. No se puede reclamar dos veces.',
+          rejected: 'Esta factura fue rechazada previamente y no se puede reclamar.',
+        };
+    const message = msgByStatus[invoice.status] || `Esta factura no puede ser reclamada (estado: ${invoice.status}).`;
+    console.log(`[Validation] Rejecting duplicate submission: invoice=${extracted.invoice_number} status=${invoice.status} sameUser=${isOriginalSubmitter}`);
+    return { success: false, stage: 'cross_reference', message, invoiceNumber: extracted.invoice_number };
   }
 
   const tolerance = parseFloat(process.env.INVOICE_AMOUNT_TOLERANCE || '0.05');
@@ -240,7 +475,7 @@ export async function validateInvoice(params: {
     const newBalance = await getAccountBalance(consumerAccount.id, assetTypeId, tenantId);
     return {
       success: true, stage: 'pending',
-      message: `Recibimos tu factura. Ganaste ${parseFloat(loyaltyValue).toLocaleString()} puntos (en verificacion). Tu saldo: ${parseFloat(newBalance).toLocaleString()} puntos. Te confirmamos en breve.`,
+      message: `Recibimos tu factura. Ganaste ${Math.round(parseFloat(loyaltyValue)).toLocaleString()} puntos (en verificacion). Tu saldo: ${Math.round(parseFloat(newBalance)).toLocaleString()} puntos. Te confirmamos en breve.`,
       valueAssigned: loyaltyValue, newBalance, invoiceNumber: extracted.invoice_number, status: 'manual_review',
     };
   }
@@ -289,27 +524,34 @@ export async function validateInvoice(params: {
   if (tenantConfig?.preferredExchangeSource) {
     const { convertBsToReference, getRateAtDate } = await import('./exchange-rates.js');
     const txDate = invoice.transactionDate || invoice.createdAt;
-    const converted = await convertBsToReference(
+    let converted = await convertBsToReference(
       Number(invoice.amount),
       tenantConfig.preferredExchangeSource,
       tenantConfig.referenceCurrency,
       txDate
     );
+    let sourceUsed: string = tenantConfig.preferredExchangeSource;
+    if (converted === null) {
+      // Fallback to BCV if the preferred source has no rate available
+      converted = await convertBsToReference(Number(invoice.amount), 'bcv', tenantConfig.referenceCurrency, txDate);
+      if (converted !== null) {
+        sourceUsed = 'bcv';
+        console.log(`[Validation] Using BCV fallback (preferred source "${tenantConfig.preferredExchangeSource}" had no rate)`);
+      }
+    }
     if (converted !== null) {
       normalizedAmount = converted.toFixed(8);
-      const rateInfo = await getRateAtDate(
-        tenantConfig.preferredExchangeSource,
-        tenantConfig.referenceCurrency,
-        txDate
-      );
+      const rateInfo = await getRateAtDate(sourceUsed as any, tenantConfig.referenceCurrency, txDate);
       if (rateInfo) {
         exchangeRateUsed = {
-          source: tenantConfig.preferredExchangeSource,
+          source: sourceUsed,
           currency: tenantConfig.referenceCurrency,
           rateBs: rateInfo.rateBs,
         };
       }
       console.log(`[Validation] BS→${tenantConfig.referenceCurrency.toUpperCase()} normalization: Bs ${invoice.amount} ÷ ${exchangeRateUsed?.rateBs} = ${normalizedAmount}`);
+    } else {
+      console.error(`[Validation] No exchange rate available — using raw Bs amount (likely wrong)`);
     }
   }
 
@@ -324,6 +566,9 @@ export async function validateInvoice(params: {
 
   // Build the metadata payload merging exchange rate + attribution info
   const ledgerMetadata: Record<string, unknown> = {};
+  if (imageHash) {
+    ledgerMetadata.imageHash = imageHash;
+  }
   if (exchangeRateUsed) {
     ledgerMetadata.originalAmount = invoice.amount.toString();
     ledgerMetadata.originalCurrency = 'bs';
@@ -356,7 +601,12 @@ export async function validateInvoice(params: {
 
   await prisma.invoice.update({
     where: { id: invoice.id },
-    data: { status: 'claimed', consumerAccountId: consumerAccount.id, ledgerEntryId: ledgerResult.credit.id },
+    data: {
+      status: 'claimed',
+      consumerAccountId: consumerAccount.id,
+      ledgerEntryId: ledgerResult.credit.id,
+      ocrRawText: ocrRawText || undefined,
+    },
   });
 
   // Record platform revenue if this was an attributed sale
@@ -420,7 +670,7 @@ export async function validateInvoice(params: {
   await prisma.invoice.update({
     where: { id: invoice.id },
     data: {
-      extractedData: { ...(invoice.extractedData as any || {}), outputTokenSignature: outputToken.signature },
+      extractedData: { ...(invoice.extractedData as any || {}), ...extracted, outputTokenSignature: outputToken.signature },
       orderDetails: finalOrderDetails,
     },
   });
@@ -429,7 +679,7 @@ export async function validateInvoice(params: {
   const newBalance = await getAccountBalance(consumerAccount.id, assetTypeId, tenantId);
   const levelResult = await checkAndUpdateLevel(consumerAccount.id, tenantId);
 
-  let message = `Factura validada! Ganaste ${loyaltyValue} puntos. Tu nuevo saldo es ${newBalance} puntos.`;
+  let message = `Factura validada! Ganaste ${Math.round(parseFloat(loyaltyValue)).toLocaleString()} puntos. Tu nuevo saldo es ${Math.round(parseFloat(newBalance)).toLocaleString()} puntos.`;
   if (levelResult.leveled) {
     message += ` Felicidades — alcanzaste el nivel ${levelResult.newLevel}!`;
   }
@@ -451,28 +701,130 @@ export async function createPendingValidation(params: {
   extractedData?: ExtractedInvoiceData;
   latitude?: string | null;
   longitude?: string | null;
+  imageHash?: string;
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, invoiceNumber, totalAmount, assetTypeId } = params;
+
+  // Guard 1: if an invoice row for this number already exists (any state), do not
+  // create a second provisional credit.
+  const existingInvoice = await prisma.invoice.findUnique({
+    where: { tenantId_invoiceNumber: { tenantId, invoiceNumber } },
+  });
+  if (existingInvoice) {
+    const msgByStatus: Record<string, string> = {
+      claimed: 'Esta factura ya fue usada para reclamar puntos anteriormente.',
+      pending_validation: 'Esta factura ya esta en verificacion. Te confirmamos en breve cuando se valide.',
+      manual_review: 'Esta factura esta en revision por el comercio. Te avisamos el resultado.',
+      rejected: 'Esta factura fue rechazada previamente y no se puede reclamar.',
+      available: 'Esta factura ya esta registrada pero no pudimos acreditar puntos en este momento. Intenta de nuevo en unos minutos.',
+    };
+    const message = msgByStatus[existingInvoice.status] || `Esta factura ya fue procesada (estado: ${existingInvoice.status}).`;
+    console.log(`[PendingValidation] Duplicate provisional blocked (invoice row): invoice=${invoiceNumber} existingStatus=${existingInvoice.status}`);
+    return { success: false, stage: 'cross_reference', message, invoiceNumber };
+  }
+
+  // Guard 2: check the LEDGER directly for any existing entry with the same
+  // reference_id. This catches orphan cases where a previous submission wrote
+  // the ledger entry but failed (crashed or 500) before creating the invoice
+  // row. Without this guard, writeDoubleEntry below throws a UNIQUE constraint
+  // violation and crashes the request with 500 — which is exactly what was
+  // happening in production for retries of the same invoice.
+  const pendingRef = `PENDING-${invoiceNumber}`;
+  const confirmedRef = invoiceNumber;
+  const orphanEntry = await prisma.ledgerEntry.findFirst({
+    where: {
+      tenantId,
+      eventType: 'INVOICE_CLAIMED',
+      referenceId: { in: [pendingRef, confirmedRef] },
+    },
+    select: { referenceId: true, status: true, accountId: true },
+  });
+  if (orphanEntry) {
+    let isOriginalSubmitter = false;
+    const senderAccount = await prisma.account.findUnique({
+      where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+      select: { id: true },
+    });
+    if (senderAccount && senderAccount.id === orphanEntry.accountId) {
+      isOriginalSubmitter = true;
+    }
+    console.log(`[PendingValidation] Duplicate provisional blocked (ledger): invoice=${invoiceNumber} existingRef=${orphanEntry.referenceId} sameUser=${isOriginalSubmitter}`);
+    return {
+      success: false,
+      stage: 'cross_reference',
+      message: isOriginalSubmitter
+        ? 'Esta factura ya esta en verificacion. Te confirmamos en breve cuando se valide.'
+        : 'Esta factura ya fue enviada anteriormente por otro cliente. No se puede usar dos veces.',
+      invoiceNumber,
+    };
+  }
 
   const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
   const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
   if (!poolAccount) throw new Error('issued_value_pool not found');
 
-  const loyaltyValue = await convertToLoyaltyValue(totalAmount.toString(), tenantId, assetTypeId);
+  // BS → reference currency normalization (same logic as Stage D)
+  let normalizedAmount = totalAmount.toString();
+  const tenantConfig = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (tenantConfig?.preferredExchangeSource) {
+    const { convertBsToReference } = await import('./exchange-rates.js');
+    const converted = await convertBsToReference(
+      totalAmount,
+      tenantConfig.preferredExchangeSource,
+      tenantConfig.referenceCurrency,
+      new Date()
+    );
+    if (converted !== null) {
+      normalizedAmount = converted.toFixed(8);
+      console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()}: Bs ${totalAmount} → ${normalizedAmount}`);
+    } else {
+      // Fallback: the preferred source has no rate available. Try BCV as a safe
+      // default (it's always fetched) instead of silently using the raw Bs
+      // amount, which would multiply by the tenant's conversion_rate and
+      // produce absurd point values.
+      const fallback = await convertBsToReference(totalAmount, 'bcv', tenantConfig.referenceCurrency, new Date());
+      if (fallback !== null) {
+        normalizedAmount = fallback.toFixed(8);
+        console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()} via BCV fallback: Bs ${totalAmount} → ${normalizedAmount} (preferred source "${tenantConfig.preferredExchangeSource}" had no rate)`);
+      } else {
+        console.error(`[PendingValidation] No exchange rate available for preferred source "${tenantConfig.preferredExchangeSource}" or fallback bcv — using raw Bs amount (likely wrong)`);
+      }
+    }
+  }
 
-  const ledgerResult = await writeDoubleEntry({
-    tenantId,
-    eventType: 'INVOICE_CLAIMED',
-    debitAccountId: poolAccount.id,
-    creditAccountId: consumerAccount.id,
-    amount: loyaltyValue,
-    assetTypeId,
-    referenceId: `PENDING-${invoiceNumber}`,
-    referenceType: 'invoice',
-    status: 'provisional',
-    latitude: params.latitude || null,
-    longitude: params.longitude || null,
-  });
+  const loyaltyValue = await convertToLoyaltyValue(normalizedAmount, tenantId, assetTypeId);
+
+  let ledgerResult;
+  try {
+    ledgerResult = await writeDoubleEntry({
+      tenantId,
+      eventType: 'INVOICE_CLAIMED',
+      debitAccountId: poolAccount.id,
+      creditAccountId: consumerAccount.id,
+      amount: loyaltyValue,
+      assetTypeId,
+      referenceId: `PENDING-${invoiceNumber}`,
+      referenceType: 'invoice',
+      status: 'provisional',
+      latitude: params.latitude || null,
+      longitude: params.longitude || null,
+      metadata: params.imageHash ? { imageHash: params.imageHash } : undefined,
+    });
+  } catch (err: any) {
+    // Unique constraint violation (P2002): another request committed the same
+    // reference in a race, or a prior crash left an orphan. Return a clean
+    // rejection instead of letting it crash to 500.
+    if (err?.code === 'P2002') {
+      console.log(`[PendingValidation] Unique constraint race caught: invoice=${invoiceNumber}`);
+      return {
+        success: false,
+        stage: 'cross_reference',
+        message: 'Esta factura ya esta en verificacion. Te confirmamos en breve cuando se valide.',
+        invoiceNumber,
+      };
+    }
+    throw err;
+  }
 
   // Determine source from extracted data: mobile_payment, voucher, or default photo_submission
   const docType = params.extractedData?.document_type;
@@ -505,7 +857,7 @@ export async function createPendingValidation(params: {
 
   return {
     success: true, stage: 'pending',
-    message: `Recibimos tu factura. Ganaste ${parseFloat(loyaltyValue).toLocaleString()} puntos (en verificacion). Tu saldo: ${parseFloat(newBalance).toLocaleString()} puntos. Te confirmamos en breve.`,
+    message: `Recibimos tu factura. Ganaste ${Math.round(parseFloat(loyaltyValue)).toLocaleString()} puntos (en verificacion). Tu saldo: ${Math.round(parseFloat(newBalance)).toLocaleString()} puntos. Te confirmamos en breve.`,
     valueAssigned: loyaltyValue, newBalance, invoiceNumber, status: 'pending_validation',
   };
 }

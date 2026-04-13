@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { MdCameraAlt, MdDescription, MdVerifiedUser, MdStars } from 'react-icons/md'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { MdCameraAlt, MdDescription, MdVerifiedUser, MdStars, MdQrCodeScanner, MdPhotoLibrary } from 'react-icons/md'
 import type { ComponentType } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -14,22 +14,37 @@ const ANIMATION_STEPS: Array<{ label: string; Icon: ComponentType<{ className?: 
   { label: 'Agregando tus puntos...', Icon: MdStars, duration: 500 },
 ]
 
-export default function ScanInvoice() {
+const SCANNER_ID = 'scan-unified-camera'
+
+export default function ScanPage() {
   const [stage, setStage] = useState<Stage>('idle')
   const [animStep, setAnimStep] = useState(0)
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
+  const [cameraError, setCameraError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  const scannerRef = useRef<any>(null)
+  const isProcessingRef = useRef(false)
 
-  async function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
+  // ----------------------------------------------------------------
+  // QR scanner — runs continuously while idle. If a QR is detected
+  // we route it as a dual-scan token. If the user instead taps the
+  // shutter, we treat the captured frame as an invoice photo.
+  // ----------------------------------------------------------------
 
+  const stopScanner = useCallback(async () => {
+    if (scannerRef.current) {
+      try { await scannerRef.current.stop() } catch {}
+      try { scannerRef.current.clear() } catch {}
+      scannerRef.current = null
+    }
+  }, [])
+
+  const processInvoiceImage = useCallback(async (file: File) => {
     setStage('processing')
     setAnimStep(0)
     setError('')
 
-    // Start animation (1.5s minimum)
     const animPromise = new Promise<void>(resolve => {
       let step = 0
       const interval = setInterval(() => {
@@ -42,25 +57,93 @@ export default function ScanInvoice() {
       }, 500)
     })
 
-    // Upload actual image for OCR + AI extraction + validation
     const assetTypeId = localStorage.getItem('assetTypeId') || ''
     const apiPromise = api.uploadInvoiceImage(file, assetTypeId)
-      .catch(err => ({ success: false, message: err.error || 'Error processing invoice' }))
+      .catch(err => ({ success: false, message: err.error || 'Error procesando la factura' }))
 
-    // Wait for both animation and API
     const [, apiResult] = await Promise.all([animPromise, apiPromise])
-
-    setResult(apiResult)
+    setResult({ kind: 'invoice', ...apiResult })
     setStage('result')
+  }, [])
+
+  const processQrToken = useCallback(async (token: string) => {
+    if (isProcessingRef.current) return
+    isProcessingRef.current = true
+    setStage('processing')
+    setAnimStep(ANIMATION_STEPS.length)
+    await stopScanner()
+
+    try {
+      const res: any = await api.confirmDualScan(token)
+      setResult({ kind: 'qr', success: true, ...res })
+    } catch (e: any) {
+      setResult({ kind: 'qr', success: false, message: e.error || 'No se pudo procesar el QR' })
+    }
+    setStage('result')
+  }, [stopScanner])
+
+  const startScanner = useCallback(async () => {
+    setCameraError(null)
+    try {
+      const { Html5Qrcode } = await import('html5-qrcode')
+      await stopScanner()
+      await new Promise(resolve => setTimeout(resolve, 100))
+
+      const container = document.getElementById(SCANNER_ID)
+      if (!container) return
+
+      const scanner = new Html5Qrcode(SCANNER_ID)
+      scannerRef.current = scanner
+
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 200, height: 200 }, disableFlip: false },
+        (decodedText: string) => {
+          if (!isProcessingRef.current && decodedText.trim()) {
+            processQrToken(decodedText.trim())
+          }
+        },
+        () => {}
+      )
+    } catch (err: any) {
+      const msg = typeof err === 'string' ? err : err?.message || 'No se pudo acceder a la camara'
+      setCameraError(msg)
+    }
+  }, [stopScanner, processQrToken])
+
+  useEffect(() => {
+    if (stage === 'idle') {
+      startScanner()
+    }
+    return () => { stopScanner() }
+  }, [stage, startScanner, stopScanner])
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    stopScanner()
+    processInvoiceImage(file)
   }
+
+  function reset() {
+    isProcessingRef.current = false
+    setResult(null)
+    setError('')
+    setAnimStep(0)
+    setStage('idle')
+  }
+
+  // ----------------------------------------------------------------
+  // RENDER
+  // ----------------------------------------------------------------
 
   if (stage === 'processing') {
     return (
       <div className="min-h-screen flex items-center justify-center bg-indigo-600">
-        <div className="text-center text-white">
+        <div className="text-center text-white space-y-4">
           {ANIMATION_STEPS.map((step, i) => (
-            <div key={i} className={`transition-opacity duration-300 mb-4 ${i <= animStep ? 'opacity-100' : 'opacity-20'}`}>
-              <step.Icon className="w-8 h-8" />
+            <div key={i} className={`transition-opacity duration-300 ${i <= animStep ? 'opacity-100' : 'opacity-20'}`}>
+              <step.Icon className="w-8 h-8 mx-auto" />
               <p className="text-lg mt-1">{step.label}</p>
             </div>
           ))}
@@ -70,50 +153,105 @@ export default function ScanInvoice() {
   }
 
   if (stage === 'result' && result) {
+    const isSuccess = result.success
     return (
-      <div className={`min-h-screen flex items-center justify-center ${result.success ? 'bg-green-500' : 'bg-red-500'}`}>
-        <div className="text-center text-white animate-fade-in">
-          <span className="text-6xl">{result.success ? '✅' : '❌'}</span>
-          <h2 className="text-2xl font-bold mt-4">{result.success ? 'Factura validada!' : 'No se pudo validar'}</h2>
-          <p className="mt-2 text-white/80">{result.message}</p>
+      <div className={`min-h-screen flex items-center justify-center p-6 ${isSuccess ? 'bg-emerald-600' : 'bg-red-600'} text-white`}>
+        <div className="text-center space-y-4 max-w-sm">
+          {result.kind === 'qr' ? (
+            <MdQrCodeScanner className="w-20 h-20 mx-auto" />
+          ) : (
+            <MdDescription className="w-20 h-20 mx-auto" />
+          )}
+          <h2 className="text-3xl font-bold">
+            {isSuccess
+              ? (result.kind === 'qr' ? 'Canje procesado!' : 'Factura validada!')
+              : 'No se pudo procesar'}
+          </h2>
+          {result.message && <p className="text-white/90">{result.message}</p>}
           {result.valueAssigned && (
-            <p className="text-3xl font-bold mt-4">+{parseFloat(result.valueAssigned).toLocaleString()} pts</p>
+            <p className="text-4xl font-extrabold tracking-tight">
+              +{parseFloat(result.valueAssigned).toLocaleString()} pts
+            </p>
           )}
           {result.newBalance && (
-            <p className="mt-2 text-white/80">Nuevo saldo: {parseFloat(result.newBalance).toLocaleString()} pts</p>
+            <p className="text-white/80">Nuevo saldo: {parseFloat(result.newBalance).toLocaleString()} pts</p>
           )}
-          <Link href="/consumer" className="inline-block mt-8 bg-white/20 backdrop-blur px-6 py-3 rounded-xl font-medium">
-            Volver al inicio
-          </Link>
+          <div className="flex flex-col gap-3 pt-4">
+            <button
+              onClick={reset}
+              className="bg-white/20 backdrop-blur px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition"
+            >
+              Escanear otra
+            </button>
+            <Link
+              href="/consumer"
+              className="bg-white text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-slate-100 transition"
+            >
+              Volver al inicio
+            </Link>
+          </div>
         </div>
       </div>
     )
   }
 
+  // IDLE: live camera with QR detection + invoice photo capture
   return (
-    <div className="min-h-screen p-4">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href="/consumer" className="text-indigo-600 text-2xl">&larr;</Link>
-        <h1 className="text-xl font-bold">Escanear factura</h1>
+    <div className="h-screen bg-slate-900 text-white flex flex-col overflow-hidden">
+      <header className="px-4 py-2 flex items-center gap-3 flex-shrink-0 absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/60 to-transparent">
+        <Link href="/consumer" className="text-2xl">&larr;</Link>
+        <h1 className="text-lg font-bold">Escanear</h1>
+      </header>
+
+      <div className="flex-1 relative bg-black overflow-hidden">
+        <div id={SCANNER_ID} className="w-full h-full" />
+        {cameraError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-800/90 p-6">
+            <p className="text-red-300 text-sm text-center">{cameraError}</p>
+          </div>
+        )}
       </div>
 
-      <div className="bg-white rounded-2xl p-8 shadow-sm text-center">
-        <MdCameraAlt className="w-12 h-12 text-indigo-600 mx-auto" />
-        <h2 className="text-lg font-semibold mt-4">Toma una foto de tu factura</h2>
-        <p className="text-slate-500 text-sm mt-2">Puedes usar la camara o seleccionar una imagen de tu galeria</p>
+      <div className="flex-shrink-0 bg-slate-900 px-4 pt-2 pb-4 space-y-2">
+        <p className="text-center text-xs text-slate-400">Apunta al QR del cajero o toma foto de tu factura</p>
 
-        <input type="file" ref={fileRef} accept="image/*" capture="environment" onChange={handleFileSelect} className="hidden" />
+        <input
+          type="file"
+          ref={fileRef}
+          accept="image/*"
+          capture="environment"
+          onChange={handleFileSelect}
+          className="hidden"
+        />
 
-        <div className="mt-6 space-y-3">
-          <button onClick={() => fileRef.current?.click()} className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 transition">
+        <div className="grid grid-cols-2 gap-3">
+          <button
+            onClick={() => {
+              if (fileRef.current) {
+                fileRef.current.setAttribute('capture', 'environment')
+                fileRef.current.click()
+              }
+            }}
+            className="bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition"
+          >
+            <MdCameraAlt className="w-5 h-5" />
             Tomar foto
           </button>
-          <button onClick={() => { if (fileRef.current) { fileRef.current.removeAttribute('capture'); fileRef.current.click(); }}} className="w-full bg-slate-100 text-slate-700 py-3 rounded-xl font-medium hover:bg-slate-200 transition">
-            Seleccionar de galeria
+          <button
+            onClick={() => {
+              if (fileRef.current) {
+                fileRef.current.removeAttribute('capture')
+                fileRef.current.click()
+              }
+            }}
+            className="bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition"
+          >
+            <MdPhotoLibrary className="w-5 h-5" />
+            Galeria
           </button>
         </div>
 
-        {error && <p className="text-red-500 text-sm mt-4">{error}</p>}
+        {error && <p className="text-red-400 text-sm text-center">{error}</p>}
       </div>
     </div>
   )

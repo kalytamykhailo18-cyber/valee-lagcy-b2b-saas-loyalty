@@ -1,18 +1,64 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { MdCardGiftcard } from 'react-icons/md'
+import { MdLocalOffer } from 'react-icons/md'
 import { api } from '@/lib/api'
 
-export default function ProductManagement() {
-  const [products, setProducts] = useState<any[]>([])
+interface Product {
+  id: string
+  name: string
+  description: string | null
+  photoUrl: string | null
+  redemptionCost: string
+  cashPrice: string | null
+  stock: number
+  active: boolean
+  minLevel: number
+}
+
+export default function HybridDealsPage() {
+  const [allProducts, setAllProducts] = useState<Product[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1' })
-  const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '' })
+  const [form, setForm] = useState({
+    name: '',
+    description: '',
+    photoUrl: '',
+    cashPrice: '',
+    redemptionCost: '',
+    stock: '0',
+    assetTypeId: '',
+    minLevel: '1',
+  })
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    photoUrl: '',
+    cashPrice: '',
+    redemptionCost: '',
+    stock: '',
+    minLevel: '',
+  })
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
+  const [assetTypeId, setAssetTypeId] = useState('')
+
+  useEffect(() => { loadProducts() }, [])
+
+  async function loadProducts() {
+    try {
+      const data = await api.getProducts()
+      setAllProducts(data.products)
+      // Pick the first product's assetTypeId for new deals
+      if (data.products.length > 0 && !assetTypeId) {
+        setAssetTypeId(data.products[0].assetTypeId || '')
+      }
+    } catch {}
+  }
+
+  // Only deals with a cashPrice set are considered hybrid
+  const hybridDeals = allProducts.filter(p => p.cashPrice !== null && Number(p.cashPrice) > 0)
 
   async function handleImageUpload(file: File, target: 'create' | 'edit') {
     const setUploadState = target === 'create' ? setUploading : setEditUploading
@@ -26,50 +72,26 @@ export default function ProductManagement() {
           setEditForm(prev => ({ ...prev, photoUrl: result.url }))
         }
       }
-    } catch (err) {
-      console.error('Image upload failed:', err)
-    }
+    } catch {}
     setUploadState(false)
   }
 
-  useEffect(() => {
-    loadProducts()
-    // Auto-set assetTypeId from the merchant's product list or settings
-    api.getProducts().then(data => {
-      const firstProduct = data.products?.[0]
-      if (firstProduct?.assetTypeId) {
-        setForm(prev => ({ ...prev, assetTypeId: firstProduct.assetTypeId }))
-      }
-    }).catch(() => {})
-    // Fallback: fetch from merchant settings
-    api.getMerchantSettings().then((s: any) => {
-      if (s.assetTypeId) setForm(prev => prev.assetTypeId ? prev : { ...prev, assetTypeId: s.assetTypeId })
-    }).catch(() => {})
-  }, [])
-
-  async function loadProducts() {
-    try {
-      const data = await api.getProducts()
-      setProducts(data.products)
-    } catch {}
-  }
-
   async function handleCreate() {
-    if (!form.name || !form.redemptionCost) return
+    if (!form.name || !form.cashPrice || !form.redemptionCost) return
     setLoading(true)
     try {
       await api.createProduct({
         name: form.name,
         description: form.description,
         photoUrl: form.photoUrl || undefined,
+        cashPrice: form.cashPrice,
         redemptionCost: form.redemptionCost,
-        cashPrice: form.cashPrice || undefined,
         stock: parseInt(form.stock) || 0,
-        assetTypeId: form.assetTypeId,
+        assetTypeId: assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
       })
       setShowForm(false)
-      setForm({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1' })
+      setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1' })
       loadProducts()
     } catch {}
     setLoading(false)
@@ -79,13 +101,14 @@ export default function ProductManagement() {
     try { await api.toggleProduct(id); loadProducts() } catch {}
   }
 
-  function startEdit(p: any) {
+  function startEdit(p: Product) {
     setEditingId(p.id)
     setEditForm({
       name: p.name,
       description: p.description || '',
       photoUrl: p.photoUrl || '',
-      redemptionCost: p.redemptionCost?.toString() || '',
+      cashPrice: p.cashPrice || '',
+      redemptionCost: p.redemptionCost || '',
       stock: p.stock?.toString() || '0',
       minLevel: p.minLevel?.toString() || '1',
     })
@@ -98,6 +121,7 @@ export default function ProductManagement() {
         name: editForm.name,
         description: editForm.description,
         photoUrl: editForm.photoUrl || undefined,
+        cashPrice: editForm.cashPrice || undefined,
         redemptionCost: editForm.redemptionCost,
         stock: parseInt(editForm.stock),
         minLevel: parseInt(editForm.minLevel) || 1,
@@ -114,31 +138,43 @@ export default function ProductManagement() {
       <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Catalogo de productos</h1>
-            <p className="text-sm text-slate-500 mt-1">Crea y gestiona los productos que tus clientes pueden canjear</p>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Promociones hibridas</h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Ofertas combinadas de efectivo + puntos. El cliente paga una parte en efectivo y el resto con sus puntos.
+            </p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
             className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
           >
-            {showForm ? 'Cancelar' : '+ Nuevo producto'}
+            {showForm ? 'Cancelar' : '+ Nueva promocion'}
           </button>
         </div>
       </div>
 
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
+        {/* Info banner */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 max-w-3xl">
+          <p className="text-sm text-amber-800 font-semibold mb-1">Como funciona</p>
+          <p className="text-xs text-amber-700 leading-relaxed">
+            El cliente paga el precio en efectivo al cajero, despues escanea el QR de canje con su saldo de puntos.
+            El cajero recibe primero el efectivo, luego entrega el premio. Las promociones hibridas son perfectas para
+            que clientes nuevos canjeen aunque no tengan suficientes puntos todavia.
+          </p>
+        </div>
+
         {/* Create form */}
         {showForm && (
           <div className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100 mb-6 space-y-4 max-w-3xl">
-            <h2 className="text-lg font-semibold text-slate-800">Nuevo producto</h2>
+            <h2 className="text-lg font-semibold text-slate-800">Nueva promocion hibrida</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
                 <input
                   type="text"
-                  placeholder="Ej: Cafe gratis"
+                  placeholder="Ej: Pizza familiar 2x1"
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
                   className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -148,7 +184,7 @@ export default function ProductManagement() {
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Descripcion</label>
                 <input
                   type="text"
-                  placeholder="Breve descripcion"
+                  placeholder="Detalle de la oferta"
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
                   className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -157,7 +193,7 @@ export default function ProductManagement() {
             </div>
 
             <div>
-              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Foto del producto</label>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Foto de la promocion</label>
               <div className="mt-2 flex items-center gap-3 flex-wrap">
                 <label className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer transition ${uploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
                   {uploading ? 'Subiendo...' : 'Subir foto'}
@@ -173,39 +209,39 @@ export default function ProductManagement() {
                   <img src={form.photoUrl} alt="Preview" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
                 )}
               </div>
-              <details className="text-xs text-slate-400 mt-2">
-                <summary className="cursor-pointer hover:text-slate-600">O ingresar URL manualmente</summary>
-                <input
-                  type="text"
-                  placeholder="URL de foto (Cloudinary)"
-                  value={form.photoUrl}
-                  onChange={e => setForm({ ...form, photoUrl: e.target.value })}
-                  className="w-full mt-2 px-3 py-2 rounded-lg border border-slate-200 text-sm"
-                />
-              </details>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Parte en efectivo</label>
+                <div className="relative mt-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    placeholder="3.00"
+                    value={form.cashPrice}
+                    onChange={e => setForm({ ...form, cashPrice: e.target.value })}
+                    className="w-full pl-7 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Lo que el cliente paga en efectivo al cajero</p>
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Parte en puntos</label>
                 <input
                   type="number"
+                  placeholder="800"
                   value={form.redemptionCost}
                   onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
                   className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
+                <p className="text-xs text-slate-400 mt-1">Lo que descuenta del saldo del cliente</p>
               </div>
-              <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Parte en $ (opcional)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0"
-                  value={form.cashPrice}
-                  onChange={e => setForm({ ...form, cashPrice: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-amber-200 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400"
-                />
-              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
                 <input
@@ -228,23 +264,24 @@ export default function ProductManagement() {
 
             <button
               onClick={handleCreate}
-              disabled={loading || !form.name || !form.redemptionCost}
+              disabled={loading || !form.name || !form.cashPrice || !form.redemptionCost}
               className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
             >
-              {loading ? 'Creando...' : 'Crear producto'}
+              {loading ? 'Creando...' : 'Crear promocion'}
             </button>
           </div>
         )}
 
-        {/* Product grid */}
-        {products.length === 0 ? (
+        {/* Hybrid deals grid */}
+        {hybridDeals.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
-            <p className="text-slate-400">No hay productos creados todavia</p>
-            <p className="text-sm text-slate-400 mt-1">Toca el boton Nuevo producto para empezar</p>
+            <MdLocalOffer className="w-12 h-12 text-slate-400 mx-auto" />
+            <p className="text-slate-500 mt-4">No hay promociones hibridas todavia</p>
+            <p className="text-sm text-slate-400 mt-1">Crea tu primera oferta combinada de efectivo + puntos</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {products.map(p => (
+            {hybridDeals.map(p => (
               <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-emerald-200 transition">
                 {editingId === p.id ? (
                   <div className="p-4 space-y-3">
@@ -276,8 +313,17 @@ export default function ProductManagement() {
                         <img src={editForm.photoUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
                       )}
                     </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      <input type="number" placeholder="Costo" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-slate-500">Cash $</label>
+                        <input type="number" step="0.01" placeholder="Cash" value={editForm.cashPrice} onChange={e => setEditForm({ ...editForm, cashPrice: e.target.value })} className="w-full px-2 py-2 rounded-lg border text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500">Puntos</label>
+                        <input type="number" placeholder="Puntos" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="w-full px-2 py-2 rounded-lg border text-sm" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
                       <input type="number" placeholder="Stock" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
                       <input type="number" placeholder="Nivel" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
                     </div>
@@ -290,49 +336,56 @@ export default function ProductManagement() {
                   </div>
                 ) : (
                   <>
-                    {/* Product photo area */}
-                    <div className="relative bg-slate-100 aspect-square flex items-center justify-center">
+                    {/* Photo */}
+                    <div className="relative bg-gradient-to-br from-amber-50 to-emerald-50 aspect-square flex items-center justify-center">
                       {p.photoUrl ? (
                         <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                       ) : (
-                        <MdCardGiftcard className="w-12 h-12 text-slate-400" />
+                        <MdLocalOffer className="w-16 h-16 text-amber-400" />
                       )}
+                      {/* Hybrid badge */}
+                      <div className="absolute top-3 left-3 bg-amber-500 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">
+                        HIBRIDA
+                      </div>
                       <button
                         onClick={() => handleToggle(p.id)}
                         className={`absolute top-3 right-3 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm shadow-sm ${p.active ? 'bg-green-100/95 text-green-700' : 'bg-red-100/95 text-red-700'}`}
                       >
-                        {p.active ? 'Activo' : 'Inactivo'}
+                        {p.active ? 'Activa' : 'Inactiva'}
                       </button>
                     </div>
 
-                    {/* Product info */}
+                    {/* Info */}
                     <div className="p-4">
                       <p className="font-semibold text-slate-800 truncate">{p.name}</p>
                       {p.description && (
                         <p className="text-xs text-slate-500 mt-1 line-clamp-2">{p.description}</p>
                       )}
-                      <div className="flex items-center justify-between mt-3">
-                        <div>
-                          <p className="text-lg font-bold text-emerald-700">
-                            {parseFloat(p.redemptionCost).toLocaleString()} <span className="text-xs font-medium text-slate-500">pts</span>
-                          </p>
-                          {p.cashPrice && Number(p.cashPrice) > 0 && (
-                            <p className="text-sm font-bold text-amber-600">+ ${Number(p.cashPrice).toLocaleString()}</p>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <span className="text-xs text-slate-500">Stock: {p.stock}</span>
-                          {p.cashPrice && Number(p.cashPrice) > 0 && (
-                            <span className="block text-[10px] text-amber-600 font-semibold mt-0.5">HIBRIDA</span>
-                          )}
+
+                      {/* Hybrid pricing breakdown */}
+                      <div className="mt-3 bg-slate-50 rounded-lg p-3">
+                        <div className="flex justify-between items-center">
+                          <div className="text-center flex-1">
+                            <p className="text-xs text-slate-500">Efectivo</p>
+                            <p className="text-base font-bold text-amber-600">${parseFloat(p.cashPrice || '0').toFixed(2)}</p>
+                          </div>
+                          <span className="text-slate-400 text-xs px-1">+</span>
+                          <div className="text-center flex-1">
+                            <p className="text-xs text-slate-500">Puntos</p>
+                            <p className="text-base font-bold text-emerald-700">{parseFloat(p.redemptionCost).toLocaleString()}</p>
+                          </div>
                         </div>
                       </div>
-                      {p.minLevel > 1 && (
-                        <p className="text-xs text-indigo-600 mt-1">Requiere nivel {p.minLevel}+</p>
-                      )}
+
+                      <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
+                        <span>Stock: {p.stock}</span>
+                        {p.minLevel > 1 && <span className="text-indigo-600">Nivel {p.minLevel}+</span>}
+                      </div>
+
                       {p.stock === 0 && p.active && (
                         <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
                       )}
+
                       <button
                         onClick={() => startEdit(p)}
                         className="w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition"

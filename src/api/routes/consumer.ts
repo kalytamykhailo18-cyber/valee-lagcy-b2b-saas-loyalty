@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import prisma from '../../db/client.js';
 import { generateOTP, verifyOTP, issueConsumerTokens, verifyConsumerToken } from '../../services/auth.js';
-import { findOrCreateConsumerAccount } from '../../services/accounts.js';
+import { findOrCreateConsumerAccount, normalizeVenezuelanPhone, phoneTail } from '../../services/accounts.js';
 import { getAccountBalance, getAccountBalanceBreakdown, getAccountHistory } from '../../services/ledger.js';
 import { validateInvoice } from '../../services/invoice-validation.js';
 import { initiateRedemption } from '../../services/redemption.js';
@@ -10,46 +10,138 @@ import { sendWhatsAppOTP } from '../../services/whatsapp.js';
 import { checkIdempotencyKey, storeIdempotencyKey } from '../../services/idempotency.js';
 import { createDispute } from '../../services/disputes.js';
 import { uploadImage } from '../../services/cloudinary.js';
+import { grantWelcomeBonus } from '../../services/welcome-bonus.js';
 
 export default async function consumerRoutes(app: FastifyInstance) {
 
   // ---- AUTH: Request OTP ----
+  // tenantSlug is optional. With slug → legacy per-merchant flow.
+  // Without slug → tenantless "global" login. The OTP itself is per phone number,
+  // so we send it the same way regardless.
   app.post('/api/consumer/auth/request-otp', async (request, reply) => {
-    const { phoneNumber, tenantSlug } = request.body as { phoneNumber: string; tenantSlug: string };
+    const { phoneNumber: rawPhone, tenantSlug } = request.body as { phoneNumber: string; tenantSlug?: string };
 
-    if (!phoneNumber || !tenantSlug) {
-      return reply.status(400).send({ error: 'phoneNumber and tenantSlug are required' });
+    if (!rawPhone) {
+      return reply.status(400).send({ error: 'phoneNumber is required' });
     }
+
+    const phoneNumber = normalizeVenezuelanPhone(rawPhone);
+
+    if (tenantSlug) {
+      const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+      if (!tenant || tenant.status !== 'active') {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+    }
+
+    const otp = await generateOTP(phoneNumber);
+
+    await sendWhatsAppOTP(phoneNumber, otp);
+
+    console.log(`[Auth] OTP requested: phone=${phoneNumber} slug=${tenantSlug || '(global)'}`);
+    return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV !== 'production' ? otp : undefined };
+  });
+
+  // ---- AUTH: Verify OTP ----
+  // tenantSlug optional. With slug → tenant-bound token. Without slug → "global"
+  // token (accountId='', tenantId=''). The user must call /select-merchant to
+  // upgrade it before using per-tenant endpoints.
+  app.post('/api/consumer/auth/verify-otp', async (request, reply) => {
+    const { phoneNumber: rawPhone, otp, tenantSlug } = request.body as { phoneNumber: string; otp: string; tenantSlug?: string };
+
+    if (!rawPhone || !otp) {
+      return reply.status(400).send({ error: 'phoneNumber and otp are required' });
+    }
+
+    const phoneNumber = normalizeVenezuelanPhone(rawPhone);
+
+    const valid = await verifyOTP(phoneNumber, otp);
+    if (!valid) return reply.status(401).send({ error: 'Invalid or expired OTP' });
+
+    if (tenantSlug) {
+      const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+      if (!tenant) return reply.status(404).send({ error: 'Merchant not found' });
+
+      const { account } = await findOrCreateConsumerAccount(tenant.id, phoneNumber);
+
+      try {
+        const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId: tenant.id } });
+        const assetType = assetConfig
+          ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+          : await prisma.assetType.findFirst();
+        if (assetType) {
+          await grantWelcomeBonus(account.id, tenant.id, assetType.id);
+        }
+      } catch (err) {
+        app.log.error({ err }, 'welcome bonus grant failed on consumer OTP login');
+      }
+
+      const tokens = issueConsumerTokens({
+        accountId: account.id,
+        tenantId: tenant.id,
+        phoneNumber,
+        type: 'consumer',
+      });
+
+      reply.setCookie('accessToken', tokens.accessToken, {
+        httpOnly: true, secure: true, sameSite: 'lax', path: '/',
+        maxAge: 15 * 60,
+      });
+      reply.setCookie('refreshToken', tokens.refreshToken, {
+        httpOnly: true, secure: true, sameSite: 'lax', path: '/api/consumer/auth/refresh',
+        maxAge: 30 * 24 * 60 * 60,
+      });
+
+      console.log(`[Auth] OTP verified (tenant): phone=${phoneNumber} slug=${tenantSlug} accountId=${account.id}`);
+      return { success: true, ...tokens, account: { id: account.id, type: account.accountType, phoneNumber }, scope: 'tenant' };
+    }
+
+    // Tenantless / "global" login. Token has the phone but no tenant binding.
+    console.log(`[Auth] OTP verified (global): phone=${phoneNumber}`);
+    const tokens = issueConsumerTokens({
+      accountId: '',
+      tenantId: '',
+      phoneNumber,
+      type: 'consumer',
+    });
+
+    reply.setCookie('accessToken', tokens.accessToken, {
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/',
+      maxAge: 15 * 60,
+    });
+    reply.setCookie('refreshToken', tokens.refreshToken, {
+      httpOnly: true, secure: true, sameSite: 'lax', path: '/api/consumer/auth/refresh',
+      maxAge: 30 * 24 * 60 * 60,
+    });
+
+    return { success: true, ...tokens, scope: 'global' };
+  });
+
+  // ---- AUTH: Select merchant (upgrade global → tenant token) ----
+  app.post('/api/consumer/auth/select-merchant', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { phoneNumber } = request.consumer!;
+    const { tenantSlug } = request.body as { tenantSlug: string };
+
+    if (!tenantSlug) return reply.status(400).send({ error: 'tenantSlug is required' });
 
     const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
     if (!tenant || tenant.status !== 'active') {
       return reply.status(404).send({ error: 'Merchant not found' });
     }
 
-    const otp = await generateOTP(phoneNumber);
-
-    // Send OTP via WhatsApp (Evolution API)
-    await sendWhatsAppOTP(phoneNumber, otp);
-
-    // Only expose OTP in dev mode for testing
-    return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV !== 'production' ? otp : undefined };
-  });
-
-  // ---- AUTH: Verify OTP ----
-  app.post('/api/consumer/auth/verify-otp', async (request, reply) => {
-    const { phoneNumber, otp, tenantSlug } = request.body as { phoneNumber: string; otp: string; tenantSlug: string };
-
-    if (!phoneNumber || !otp || !tenantSlug) {
-      return reply.status(400).send({ error: 'phoneNumber, otp, and tenantSlug are required' });
-    }
-
-    const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
-    if (!tenant) return reply.status(404).send({ error: 'Merchant not found' });
-
-    const valid = await verifyOTP(phoneNumber, otp);
-    if (!valid) return reply.status(401).send({ error: 'Invalid or expired OTP' });
-
     const { account } = await findOrCreateConsumerAccount(tenant.id, phoneNumber);
+
+    try {
+      const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId: tenant.id } });
+      const assetType = assetConfig
+        ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+        : await prisma.assetType.findFirst();
+      if (assetType) {
+        await grantWelcomeBonus(account.id, tenant.id, assetType.id);
+      }
+    } catch (err) {
+      app.log.error({ err }, 'welcome bonus grant failed on select-merchant');
+    }
 
     const tokens = issueConsumerTokens({
       accountId: account.id,
@@ -58,17 +150,30 @@ export default async function consumerRoutes(app: FastifyInstance) {
       type: 'consumer',
     });
 
-    // Set HTTP-only secure cookies
     reply.setCookie('accessToken', tokens.accessToken, {
       httpOnly: true, secure: true, sameSite: 'lax', path: '/',
-      maxAge: 15 * 60, // 15 minutes
+      maxAge: 15 * 60,
     });
     reply.setCookie('refreshToken', tokens.refreshToken, {
       httpOnly: true, secure: true, sameSite: 'lax', path: '/api/consumer/auth/refresh',
-      maxAge: 30 * 24 * 60 * 60, // 30 days
+      maxAge: 30 * 24 * 60 * 60,
     });
 
-    return { success: true, ...tokens, account: { id: account.id, type: account.accountType, phoneNumber } };
+    return {
+      success: true,
+      ...tokens,
+      account: { id: account.id, type: account.accountType, phoneNumber },
+      tenant: { id: tenant.id, slug: tenant.slug, name: tenant.name },
+      scope: 'tenant',
+    };
+  });
+
+  // ---- AUTH: Log event (client-side debug beacon) ----
+  app.post('/api/consumer/log-event', async (request) => {
+    const { event, detail } = request.body as { event: string; detail?: string };
+    const token = request.headers.authorization ? 'yes' : 'no';
+    console.log(`[ClientEvent] ${event} | token=${token} | ${detail || ''}`);
+    return { ok: true };
   });
 
   // ---- AUTH: Refresh token ----
@@ -153,12 +258,52 @@ export default async function consumerRoutes(app: FastifyInstance) {
     const account = await prisma.account.findUnique({ where: { id: accountId } });
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
+    // Level thresholds (could be moved to DB/config later)
+    const LEVEL_THRESHOLDS = [
+      { level: 1, name: 'Bronce', min: 0 },
+      { level: 2, name: 'Plata', min: 1000 },
+      { level: 3, name: 'Oro', min: 5000 },
+      { level: 4, name: 'Platino', min: 15000 },
+    ];
+
+    // Get balance and auto-upgrade level if needed
+    const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+    const assetType = assetConfig
+      ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+      : await prisma.assetType.findFirst();
+    let totalEarned = 0;
+    if (assetType && accountId) {
+      const bal = await getAccountBalance(accountId, assetType.id, tenantId);
+      totalEarned = parseFloat(bal);
+    }
+
+    // Auto-upgrade: find the highest level the user qualifies for
+    let correctLevel = 1;
+    for (const t of LEVEL_THRESHOLDS) {
+      if (totalEarned >= t.min) correctLevel = t.level;
+    }
+    if (account && correctLevel > account.level) {
+      await prisma.account.update({ where: { id: accountId }, data: { level: correctLevel } });
+    }
+
+    const currentLevel = Math.max(account?.level || 1, correctLevel);
+    const currentLevelInfo = LEVEL_THRESHOLDS.find(l => l.level === currentLevel) || LEVEL_THRESHOLDS[0];
+    const nextLevelInfo = LEVEL_THRESHOLDS.find(l => l.level === currentLevel + 1);
+
     return {
       id: account?.id,
       phoneNumber: account?.phoneNumber,
+      displayName: account?.displayName || null,
       accountType: account?.accountType,
       cedula: account?.cedula,
+      level: currentLevel,
+      levelName: currentLevelInfo.name,
+      nextLevelName: nextLevelInfo?.name || null,
+      pointsToNextLevel: nextLevelInfo ? Math.max(0, nextLevelInfo.min - totalEarned) : 0,
+      nextLevelMin: nextLevelInfo?.min || null,
       merchantName: tenant?.name,
+      merchantSlug: tenant?.slug,
+      merchantLogo: tenant?.qrCodeUrl || null,
     };
   });
 
@@ -179,9 +324,14 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // per merchant. Used for the multicommerce landing page at valee.app.
   app.get('/api/consumer/all-accounts', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { phoneNumber } = request.consumer!;
+    const tail = phoneTail(phoneNumber);
 
+    // Use last-10-digit matching so legacy accounts stored in any phone format
+    // (with/without +, with/without leading 0, with separators) still resolve.
     const accounts = await prisma.account.findMany({
-      where: { phoneNumber, accountType: { in: ['shadow', 'verified'] } },
+      where: tail.length === 10
+        ? { phoneNumber: { endsWith: tail }, accountType: { in: ['shadow', 'verified'] } }
+        : { phoneNumber, accountType: { in: ['shadow', 'verified'] } },
       include: { tenant: true },
     });
 
@@ -281,9 +431,9 @@ export default async function consumerRoutes(app: FastifyInstance) {
         deviceId,
       });
 
-      // Store idempotency after successful validation (key will be set once invoice_number is known)
+      // Store idempotency after successful validation (per-user)
       if (result.success && result.invoiceNumber) {
-        const idempotencyKey = `invoice:${tenantId}:${result.invoiceNumber}`;
+        const idempotencyKey = `invoice:${tenantId}:${phoneNumber}:${result.invoiceNumber}`;
         await storeIdempotencyKey(idempotencyKey, 'invoice_validation', result);
       }
 
@@ -291,15 +441,19 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
 
     // --- JSON path (pre-extracted data, used by tests or WhatsApp pipeline) ---
-    const { extractedData, latitude, longitude, deviceId, assetTypeId } = request.body as any;
+    const { extractedData, latitude, longitude, deviceId, assetTypeId, ocrRawText } = request.body as any;
 
     if (!extractedData || !assetTypeId) {
       return reply.status(400).send({ error: 'extractedData and assetTypeId are required' });
     }
 
-    // Idempotency check: if we have an invoice number from extracted data, check before processing
+    // Idempotency check: per-user. The key includes the phone number so that
+    // a second user submitting the same invoice number gets the full
+    // validation flow (and the correct rejection message), not the first
+    // user's cached success. Same-user double-submissions still hit the
+    // cache and return the original result without creating duplicate entries.
     if (extractedData?.invoice_number) {
-      const idempotencyKey = `invoice:${tenantId}:${extractedData.invoice_number}`;
+      const idempotencyKey = `invoice:${tenantId}:${phoneNumber}:${extractedData.invoice_number}`;
       const cached = await checkIdempotencyKey(idempotencyKey);
       if (cached) {
         return cached;
@@ -311,15 +465,16 @@ export default async function consumerRoutes(app: FastifyInstance) {
       senderPhone: phoneNumber,
       assetTypeId,
       extractedData,
+      ocrRawText,
       latitude,
       longitude,
       deviceId,
     });
 
-    // Store idempotency after successful validation
+    // Store idempotency after successful validation (per-user)
     if (result.success && (result.invoiceNumber || extractedData?.invoice_number)) {
       const invoiceNum = result.invoiceNumber || extractedData.invoice_number;
-      const idempotencyKey = `invoice:${tenantId}:${invoiceNum}`;
+      const idempotencyKey = `invoice:${tenantId}:${phoneNumber}:${invoiceNum}`;
       await storeIdempotencyKey(idempotencyKey, 'invoice_validation', result);
     }
 

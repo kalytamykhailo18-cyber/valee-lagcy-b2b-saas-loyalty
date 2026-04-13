@@ -173,6 +173,6 @@ export async function downloadWhatsAppMedia(mediaId: string): Promise<Buffer | n
 export async function sendWhatsAppOTP(phoneNumber: string, otp: string): Promise<boolean> {
   return sendWhatsAppMessage(
     phoneNumber,
-    `Tu codigo de verificacion es: *${otp}*\n\nEste codigo expira en 5 minutos. No lo compartas con nadie.`
+    `Tu codigo de verificacion es: *${otp}*\n\nEste codigo expira en 10 minutos. No lo compartas con nadie.`
   );
 }

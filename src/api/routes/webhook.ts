@@ -57,9 +57,13 @@ export default async function webhookRoutes(app: FastifyInstance) {
     const change = entry?.changes?.[0];
     const value = change?.value;
 
-    // Status updates (delivery receipts, read receipts) — acknowledge and skip
+    // Status updates (delivery receipts, read receipts) — log them to debug delivery issues
     if (value?.statuses) {
-      return reply.status(200).send({ status: 'ignored', reason: 'status update' });
+      for (const s of value.statuses) {
+        const errs = s.errors ? ` errors=${JSON.stringify(s.errors)}` : '';
+        console.log(`[Webhook][status] msgid=${s.id} to=${s.recipient_id} status=${s.status} ts=${s.timestamp}${errs}`);
+      }
+      return reply.status(200).send({ status: 'ok', reason: 'status update logged' });
     }
 
     const message = value?.messages?.[0];
@@ -67,10 +71,14 @@ export default async function webhookRoutes(app: FastifyInstance) {
       return reply.status(200).send({ status: 'ignored', reason: 'no message' });
     }
 
+    // Extract WhatsApp profile name from contacts array
+    const senderProfileName: string | null = value?.contacts?.[0]?.profile?.name || null;
+
     console.log('[Webhook] Received:', JSON.stringify({
       from: message.from,
       type: message.type,
       id: message.id,
+      profileName: senderProfileName,
     }));
 
     // Meta sends `from` as phone number in international format without +
@@ -150,12 +158,12 @@ export default async function webhookRoutes(app: FastifyInstance) {
       messageType,
       messageText: messageType === 'text' ? messageText : undefined,
       imageBuffer,
+      senderProfileName,
     });
 
-    // Send all response messages back via WhatsApp
-    for (const msg of responses) {
-      await sendWhatsAppMessage(formattedPhone, msg);
-    }
+    // Send all response lines as a single WhatsApp message
+    const combinedMessage = responses.join('\n');
+    await sendWhatsAppMessage(formattedPhone, combinedMessage);
 
     return reply.status(200).send({ status: 'ok', responses: responses.length });
   });

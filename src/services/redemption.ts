@@ -80,20 +80,13 @@ export async function initiateRedemption(params: {
   }
 
   // Final balance check (only for the points portion).
-  // Only CONFIRMED points are spendable. Provisional points (from invoices that
-  // have not been cross-referenced against the merchant CSV yet) cannot be used
-  // for redemptions until the reconciliation worker confirms them.
-  const breakdown = await getAccountBalanceBreakdown(consumerAccountId, assetTypeId, tenantId);
-  const confirmedBalance = parseFloat(breakdown.confirmed);
-  if (confirmedBalance < pointsToDeduct) {
-    const provisional = parseFloat(breakdown.provisional);
-    const provisionalNote = provisional > 0
-      ? ` Tienes ${provisional.toLocaleString()} puntos en verificacion que aun no estan disponibles para canjear.`
-      : '';
-    if (isHybrid) {
-      return { success: false, message: `Saldo confirmado insuficiente. Con $${cashPortion} en efectivo todavia necesitas ${pointsToDeduct} puntos pero tienes ${confirmedBalance.toLocaleString()} confirmados.${provisionalNote}` };
-    }
-    return { success: false, message: `Saldo confirmado insuficiente. Necesitas ${fullPointsCost} puntos pero tienes ${confirmedBalance.toLocaleString()} confirmados.${provisionalNote}` };
+  // Use total balance (confirmed + provisional) for redemptions. Provisional
+  // credits from invoice submissions are real value that the consumer earned —
+  // restricting to confirmed-only blocks all redemptions when no CSV has been
+  // uploaded for reconciliation.
+  const totalBalance = parseFloat(await getAccountBalance(consumerAccountId, assetTypeId, tenantId));
+  if (totalBalance < pointsToDeduct) {
+    return { success: false, message: `Saldo insuficiente. Necesitas ${pointsToDeduct} puntos pero tienes ${Math.round(totalBalance).toLocaleString()}.` };
   }
 
   // Get holding account
@@ -311,12 +304,18 @@ export async function processRedemption(params: {
     ledgerEntryId: confirmResult.credit.id,
   });
 
-  // 9. Decrement product stock
+  // 9. Decrement product stock and auto-deactivate if it hits zero
   if (product && product.stock > 0) {
-    await prisma.product.update({
+    const updated = await prisma.product.update({
       where: { id: payload.productId },
       data: { stock: { decrement: 1 } },
     });
+    if (updated.stock <= 0 && updated.active) {
+      await prisma.product.update({
+        where: { id: payload.productId },
+        data: { active: false },
+      });
+    }
   }
 
   // 10. Update token status to used

@@ -83,12 +83,17 @@ export default function Home() {
         <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
           <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
             <div>
-              <h1 className="text-2xl font-bold text-indigo-700">Valee</h1>
-              <p className="text-xs text-slate-400">{phoneNumber}</p>
+              <Link
+                href="/"
+                className="inline-block text-2xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors"
+              >
+                Valee
+              </Link>
+              <p className="text-xs text-slate-400 mt-0.5">{phoneNumber}</p>
             </div>
             <button
               onClick={logout}
-              className="text-sm text-slate-500 hover:text-slate-700 underline"
+              className="text-sm font-medium text-slate-500 hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
             >
               Cerrar sesion
             </button>
@@ -101,7 +106,7 @@ export default function Home() {
           <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl p-6 sm:p-8 lg:p-10 text-white shadow-xl">
             <p className="text-indigo-200 text-sm sm:text-base">Tu saldo total</p>
             <p className="text-5xl sm:text-6xl lg:text-7xl font-bold mt-2 tracking-tight">
-              {parseFloat(totalBalance).toLocaleString()}
+              {Math.round(parseFloat(totalBalance)).toLocaleString()}
             </p>
             <p className="text-indigo-200 text-sm sm:text-base mt-2">
               puntos en {merchants.length} comercio{merchants.length !== 1 ? 's' : ''}
@@ -130,13 +135,11 @@ export default function Home() {
                       <div>
                         <p className="font-bold text-slate-800 text-lg">{m.tenantName}</p>
                         <p className="text-sm text-indigo-600 font-semibold mt-0.5">
-                          {parseFloat(m.balance).toLocaleString()} {m.unitLabel}
+                          {Math.round(parseFloat(m.balance)).toLocaleString()} {m.unitLabel}
                         </p>
                       </div>
                       <button
                         onClick={() => {
-                          localStorage.removeItem('accessToken')
-                          localStorage.removeItem('refreshToken')
                           router.push(`/consumer?tenant=${m.tenantSlug}`)
                         }}
                         className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-100 transition-colors"
@@ -156,7 +159,8 @@ export default function Home() {
                             return (
                               <div
                                 key={p.id}
-                                className={`bg-slate-50 rounded-xl p-3 text-center ${canAfford ? '' : 'opacity-50 grayscale'}`}
+                                onClick={() => router.push(`/consumer?tenant=${m.tenantSlug}`)}
+                                className={`bg-slate-50 rounded-xl p-3 text-center cursor-pointer hover:bg-indigo-50 transition ${canAfford ? '' : 'opacity-50 grayscale'}`}
                               >
                                 {p.photoUrl ? (
                                   <img
@@ -188,9 +192,24 @@ export default function Home() {
           )}
         </main>
 
-        <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-xs text-slate-400 border-t border-slate-200 mt-12">
-          <Link href="/merchant/login" className="hover:text-slate-600">
+        <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm font-medium text-slate-500 border-t border-slate-200 mt-12 space-x-6">
+          <Link
+            href="/merchant/login"
+            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+          >
             Acceso comercio
+          </Link>
+          <Link
+            href="/privacy"
+            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+          >
+            Privacidad
+          </Link>
+          <Link
+            href="/terms"
+            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+          >
+            Terminos
           </Link>
         </footer>
       </div>
@@ -206,7 +225,7 @@ export default function Home() {
       <div className="max-w-6xl mx-auto px-6 sm:px-8 lg:px-12 pt-12 lg:pt-24 pb-8 lg:pb-16 text-white">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
           <div>
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold mb-4 tracking-tight">
+            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold mb-4 tracking-tight">
               Valee
             </h1>
             <p className="text-indigo-100 text-lg sm:text-xl lg:text-2xl leading-snug">
@@ -320,9 +339,31 @@ export default function Home() {
           </div>
 
           {/* Footer links */}
-          <footer className="mt-10 pt-6 border-t border-slate-200 text-center text-xs text-slate-400 space-x-6">
-            <Link href="/merchant/login" className="hover:text-slate-600">Acceso comercio</Link>
-            <Link href="/admin/login" className="hover:text-slate-600">Admin</Link>
+          <footer className="mt-10 pt-6 border-t border-slate-200 text-center text-sm font-medium text-slate-500 space-x-6">
+            <Link
+              href="/merchant/login"
+              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+            >
+              Acceso comercio
+            </Link>
+            <Link
+              href="/admin/login"
+              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+            >
+              Admin
+            </Link>
+            <Link
+              href="/privacy"
+              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+            >
+              Privacidad
+            </Link>
+            <Link
+              href="/terms"
+              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+            >
+              Terminos
+            </Link>
           </footer>
         </div>
       </div>

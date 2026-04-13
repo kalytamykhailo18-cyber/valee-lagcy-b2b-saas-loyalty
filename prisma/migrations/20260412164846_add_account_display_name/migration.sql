@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "accounts" ADD COLUMN     "display_name" VARCHAR(100);
