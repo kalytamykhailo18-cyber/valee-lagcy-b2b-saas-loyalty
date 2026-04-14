@@ -183,9 +183,11 @@ export async function handleSupportIntent(
         `Estado: ${statusMap[lastInvoice.status] || lastInvoice.status}`,
         `Factura #: ${lastInvoice.invoiceNumber}`,
         `Monto: ${currency === 'USD' ? '$' : 'Bs'} ${lastInvoice.amount}`,
-        `Cliente: ${lastInvoice.customerPhone || phoneNumber}`,
       ];
       if (ext) {
+        if (ext.customer_name) lines.push(`Nombre: ${ext.customer_name}`);
+        if (ext.customer_cedula) lines.push(`Cedula: ${ext.customer_cedula}`);
+        if (ext.customer_phone) lines.push(`Telefono factura: ${ext.customer_phone}`);
         if (ext.merchant_name) lines.push(`Comercio: ${ext.merchant_name}`);
         if (ext.merchant_rif) lines.push(`RIF: ${ext.merchant_rif}`);
         if (ext.transaction_date) lines.push(`Fecha: ${ext.transaction_date}`);

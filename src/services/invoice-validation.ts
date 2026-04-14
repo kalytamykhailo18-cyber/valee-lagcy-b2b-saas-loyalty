@@ -13,6 +13,8 @@ export interface ExtractedInvoiceData {
   transaction_date: string | null;
   transaction_time?: string | null;
   customer_phone: string | null;
+  customer_cedula?: string | null;     // Venezuelan ID: V-XXXXXXXX, E-XXXXXXXX
+  customer_name?: string | null;       // Customer name if printed on receipt
   merchant_name: string | null;
   merchant_rif?: string | null;       // Venezuelan tax ID format: J/V/E/G/P-XXXXXXXX(-X)
   currency?: string | null;            // ISO-ish: "BS","USD","EUR","COP","MXN"...
@@ -198,7 +200,7 @@ export async function validateInvoice(params: {
       }
     }
 
-    if (best && best.similarity >= 0.55) {
+    if (best && best.similarity >= 0.70) {
       console.log(`[Validation] OCR Jaccard match: extracted=${extracted.invoice_number} matches existing=${best.candidate.invoiceNumber} similarity=${best.similarity.toFixed(3)} status=${best.candidate.status}`);
       let isOriginalSubmitter = false;
       if (best.candidate.consumerAccountId) {
@@ -249,7 +251,12 @@ export async function validateInvoice(params: {
   // We only reject on low confidence when we are missing one of the essential fields.
   const hasEssentials = extracted.invoice_number && extracted.total_amount !== null;
   if (!hasEssentials && extracted.confidence_score < confidenceThreshold) {
-    return { success: false, stage: 'extraction', message: 'No logre identificar los datos completos. Por favor toma la foto de nuevo asegurandote de que se vea el RIF, el numero de factura y el total.' };
+    const missing: string[] = [];
+    if (!extracted.invoice_number) missing.push('numero de factura');
+    if (extracted.total_amount === null) missing.push('monto total');
+    if (!extracted.merchant_rif) missing.push('RIF del comercio');
+    const missingText = missing.length > 0 ? missing.join(', ') : 'datos completos';
+    return { success: false, stage: 'extraction', message: `No logre leer: ${missingText}. Por favor toma la foto de nuevo asegurandote de que se vea completa.` };
   }
 
   // For vouchers without an invoice number, generate a ROBUST synthetic reference.
@@ -307,7 +314,10 @@ export async function validateInvoice(params: {
   }
 
   if (!extracted.invoice_number || extracted.total_amount === null) {
-    return { success: false, stage: 'extraction', message: 'No logre identificar los datos completos. Por favor toma la foto de nuevo asegurandote de que se vea el RIF, el numero de factura y el total.' };
+    const missing: string[] = [];
+    if (!extracted.invoice_number) missing.push('numero de factura');
+    if (extracted.total_amount === null) missing.push('monto total');
+    return { success: false, stage: 'extraction', message: `No logre leer: ${missing.join(', ')}. Por favor toma la foto de nuevo asegurandote de que se vea completa.` };
   }
 
   // STAGE B0: Merchant identity check via RIF + currency.
@@ -509,6 +519,23 @@ export async function validateInvoice(params: {
 
   // STAGE D: Value assignment
   const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
+
+  // Auto-upgrade shadow to verified if cedula was extracted from the invoice
+  if (extracted.customer_cedula && consumerAccount.accountType === 'shadow' && !consumerAccount.cedula) {
+    const normCedula = extracted.customer_cedula.replace(/[\s.-]/g, '').toUpperCase();
+    // Check cedula not already used by another account in this tenant
+    const existingCedula = await prisma.account.findUnique({
+      where: { tenantId_cedula: { tenantId, cedula: normCedula } },
+    });
+    if (!existingCedula) {
+      await prisma.account.update({
+        where: { id: consumerAccount.id },
+        data: { cedula: normCedula, accountType: 'verified' },
+      });
+      console.log(`[Validation] Auto-verified account ${consumerAccount.id} with cedula ${normCedula}`);
+    }
+  }
+
   const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
   if (!poolAccount) throw new Error(`System account 'issued_value_pool' not found for tenant ${tenantId}`);
 
