@@ -14,12 +14,18 @@ import QRCode from 'qrcode';
 
 /**
  * Generate the WhatsApp deep link URL for a merchant.
- * Format: https://wa.me/{botPhone}?text={merchantSlug}
+ * The pre-filled message is user-friendly with the merchant name visible,
+ * and includes a hidden slug tag at the end that the bot parses.
  */
-export function generateWhatsAppDeepLink(merchantSlug: string): string {
-  const botPhone = process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  // wa.me link with pre-filled text containing merchant slug
-  const text = encodeURIComponent(`MERCHANT:${merchantSlug}`);
+export async function generateWhatsAppDeepLink(merchantSlug: string, merchantName?: string): Promise<string> {
+  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  let name = merchantName;
+  if (!name) {
+    const tenant = await prisma.tenant.findUnique({ where: { slug: merchantSlug }, select: { name: true } });
+    name = tenant?.name || merchantSlug;
+  }
+  // Friendly user-facing message with the slug tag at the end for bot parsing
+  const text = encodeURIComponent(`Hola, quiero registrar mi factura en ${name}. [MERCHANT:${merchantSlug}]`);
   return `https://wa.me/${botPhone}?text=${text}`;
 }
 
@@ -50,7 +56,7 @@ export async function generateMerchantQR(tenantId: string): Promise<{
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   if (!tenant) throw new Error('Tenant not found');
 
-  const deepLink = generateWhatsAppDeepLink(tenant.slug);
+  const deepLink = await generateWhatsAppDeepLink(tenant.slug, tenant.name);
   const qrBuffer = await generateQRImage(deepLink);
 
   // Upload to Cloudinary if configured
@@ -85,8 +91,8 @@ export async function generateBranchQR(branchId: string): Promise<{
   if (!branch) throw new Error('Branch not found');
 
   // Branch QR includes both tenant slug and branch ID
-  const botPhone = process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  const text = encodeURIComponent(`MERCHANT:${branch.tenant.slug}:BRANCH:${branch.id}`);
+  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  const text = encodeURIComponent(`Hola, quiero registrar mi factura en ${branch.tenant.name} - ${branch.name}. [MERCHANT:${branch.tenant.slug}:BRANCH:${branch.id}]`);
   const deepLink = `https://wa.me/${botPhone}?text=${text}`;
 
   const qrBuffer = await generateQRImage(deepLink);

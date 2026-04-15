@@ -35,6 +35,7 @@ export async function initiateRedemption(params: {
   message: string;
   token?: string;
   tokenId?: string;
+  shortCode?: string;
   expiresAt?: string;
   amount?: string;
   cashAmount?: string;
@@ -150,6 +151,19 @@ export async function initiateRedemption(params: {
   const signature = createHmac('sha256', hmacSecret).update(payloadString).digest('hex');
   const token = Buffer.from(JSON.stringify({ payload, signature })).toString('base64');
 
+  // Generate a unique 6-digit short code for manual entry by cashier.
+  // Retry up to 5 times if we hit a collision with an active code in the same tenant.
+  let shortCode = '';
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const candidate = String(Math.floor(100000 + Math.random() * 900000));
+    const collision = await prisma.redemptionToken.findFirst({
+      where: { tenantId, shortCode: candidate, status: 'pending', expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    if (!collision) { shortCode = candidate; break; }
+  }
+  if (!shortCode) shortCode = String(Math.floor(100000 + Math.random() * 900000));
+
   // Store in redemption_tokens table
   await prisma.redemptionToken.create({
     data: {
@@ -162,6 +176,7 @@ export async function initiateRedemption(params: {
       assetTypeId,
       status: 'pending',
       tokenSignature: signature,
+      shortCode,
       expiresAt,
       ledgerPendingEntryId: ledgerResult.debit.id,
     },
@@ -181,6 +196,7 @@ export async function initiateRedemption(params: {
       : 'Redemption QR generated.',
     token,
     tokenId,
+    shortCode,
     expiresAt: expiresAt.toISOString(),
     amount: pointsAmount,
     cashAmount: isHybrid ? cashPortion.toString() : undefined,
@@ -206,23 +222,52 @@ export async function processRedemption(params: {
   const hmacSecret = process.env.HMAC_SECRET;
   if (!hmacSecret) throw new Error('HMAC_SECRET not configured');
 
-  // 1. Decode token
-  let decoded: { payload: RedemptionTokenPayload; signature: string };
-  try {
-    decoded = JSON.parse(Buffer.from(params.token, 'base64').toString('utf-8'));
-  } catch {
-    return { success: false, message: 'Invalid QR code.' };
-  }
+  const tokenStr = params.token?.trim() || '';
 
-  const { payload, signature } = decoded;
+  // If input is a 6-digit short code, look up the token directly from the DB.
+  // The DB lookup itself is the authenticity check — the code only exists if we
+  // created it during initiateRedemption. No signature verification needed.
+  let payload: RedemptionTokenPayload;
+  if (/^\d{6}$/.test(tokenStr)) {
+    const record = await prisma.redemptionToken.findFirst({
+      where: {
+        tenantId: params.cashierTenantId,
+        shortCode: tokenStr,
+        status: 'pending',
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!record) {
+      return { success: false, message: 'Codigo de 6 digitos no valido o expirado.' };
+    }
+    payload = {
+      tokenId: record.id,
+      consumerAccountId: record.consumerAccountId,
+      productId: record.productId,
+      amount: record.amount.toString(),
+      tenantId: record.tenantId,
+      assetTypeId: record.assetTypeId,
+      createdAt: record.createdAt.toISOString(),
+      expiresAt: record.expiresAt.toISOString(),
+    };
+  } else {
+    // 1. Decode token (base64 JSON)
+    let decoded: { payload: RedemptionTokenPayload; signature: string };
+    try {
+      decoded = JSON.parse(Buffer.from(tokenStr, 'base64').toString('utf-8'));
+    } catch {
+      return { success: false, message: 'Codigo QR invalido.' };
+    }
 
-  // 2. Verify HMAC signature
-  const expectedSig = createHmac('sha256', hmacSecret)
-    .update(JSON.stringify(payload))
-    .digest('hex');
+    // 2. Verify HMAC signature
+    const expectedSig = createHmac('sha256', hmacSecret)
+      .update(JSON.stringify(decoded.payload))
+      .digest('hex');
 
-  if (signature !== expectedSig) {
-    return { success: false, message: 'Invalid QR — signature verification failed.' };
+    if (decoded.signature !== expectedSig) {
+      return { success: false, message: 'Invalid QR — signature verification failed.' };
+    }
+    payload = decoded.payload;
   }
 
   // 3. Check TTL (from token payload)

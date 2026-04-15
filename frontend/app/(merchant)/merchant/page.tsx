@@ -195,20 +195,29 @@ export default function MerchantDashboard() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Mobile-only header */}
-      <div className="lg:hidden bg-emerald-700 text-white px-4 py-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold">Dashboard</h1>
-          <p className="text-emerald-200 text-sm">{staffName} (owner)</p>
-        </div>
-        <button onClick={logout} className="text-sm text-emerald-200 hover:text-white">Salir</button>
-      </div>
+      {(() => {
+        const branchLabel = selectedBranch
+          ? (branches.find(b => b.id === selectedBranch)?.name || 'Sucursal')
+          : (branches.length > 0 ? 'Todas las sucursales' : 'Dashboard')
+        return (
+          <>
+            {/* Mobile-only header */}
+            <div className="lg:hidden bg-emerald-700 text-white px-4 py-4 flex items-center justify-between">
+              <div>
+                <h1 className="text-lg font-bold">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
+                <p className="text-emerald-200 text-xs mt-0.5">{branchLabel}</p>
+              </div>
+              <button onClick={logout} className="text-sm text-emerald-200 hover:text-white">Salir</button>
+            </div>
 
-      {/* Page title (desktop only) */}
-      <div className="hidden lg:block px-8 pt-8 pb-4">
-        <h1 className="text-3xl font-bold text-slate-800">Dashboard</h1>
-        <p className="text-slate-500 text-sm mt-1">Bienvenido {staffName}</p>
-      </div>
+            {/* Page title (desktop only) */}
+            <div className="hidden lg:block px-8 pt-8 pb-4">
+              <h1 className="text-3xl font-bold text-slate-800">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
+              <p className="text-slate-500 text-sm mt-1">{branchLabel}</p>
+            </div>
+          </>
+        )
+      })()}
 
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
@@ -235,7 +244,7 @@ export default function MerchantDashboard() {
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
                   <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Multiplicador de puntos</p>
-                  <p className="text-4xl font-bold text-emerald-700 mt-1">{parseFloat(multiplier.currentRate)}x</p>
+                  <p className="text-4xl font-bold text-emerald-700 mt-1">{parseFloat(parseFloat(multiplier.currentRate).toFixed(2))}x</p>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
                   {['1', '1.5', '2', '3'].map(m => (
@@ -266,19 +275,19 @@ export default function MerchantDashboard() {
             <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Emitido</p>
               <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
-                {parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0').toLocaleString()}
+                {Math.round(parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0')).toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjeado</p>
               <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
-                {parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0').toLocaleString()}
+                {Math.round(parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0')).toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Circulacion</p>
               <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate">
-                {parseFloat(metrics?.netCirculation || analytics?.netBalance || '0').toLocaleString()}
+                {Math.round(parseFloat(metrics?.netCirculation || analytics?.netBalance || '0')).toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
@@ -391,7 +400,7 @@ export default function MerchantDashboard() {
                     </div>
                     <div>
                       <p className="text-xs text-slate-500">Valor canjeado</p>
-                      <p className="font-bold text-indigo-600">{parseFloat(p.totalValueRedeemed).toLocaleString()}</p>
+                      <p className="font-bold text-indigo-600">{Math.round(parseFloat(p.totalValueRedeemed)).toLocaleString()}</p>
                     </div>
                   </div>
                 </div>
@@ -474,7 +483,7 @@ export default function MerchantDashboard() {
                       </div>
                       <div className="text-right">
                         <p className={`font-bold text-sm ${tx.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
-                          {tx.entryType === 'CREDIT' ? '+' : '-'}{parseFloat(tx.amount).toLocaleString()}
+                          {tx.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(tx.amount)).toLocaleString()}
                         </p>
                         <span className={`text-xs px-1.5 py-0.5 rounded ${
                           tx.status === 'confirmed' ? 'bg-green-100 text-green-700' :

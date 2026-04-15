@@ -39,7 +39,7 @@ async function test() {
   // 1. Deep link generation
   // ──────────────────────────────────
   console.log('1. WhatsApp deep link generation');
-  const deepLink = generateWhatsAppDeepLink('qr-shop');
+  const deepLink = await generateWhatsAppDeepLink('qr-shop');
   assert(deepLink.startsWith('https://wa.me/'), `Starts with wa.me (got: ${deepLink.slice(0, 30)}...)`);
   assert(deepLink.includes('MERCHANT'), 'Contains MERCHANT identifier');
   assert(deepLink.includes('qr-shop'), 'Contains merchant slug');
@@ -83,7 +83,7 @@ async function test() {
   // 4. QR is static — regenerating gives same deep link
   // ──────────────────────────────────
   console.log('\n4. QR is static — same deep link every time');
-  const deepLink2 = generateWhatsAppDeepLink('qr-shop');
+  const deepLink2 = await generateWhatsAppDeepLink('qr-shop');
   assert(deepLink2 === deepLink, 'Same slug → same deep link (static, never changes)');
 
   // ──────────────────────────────────

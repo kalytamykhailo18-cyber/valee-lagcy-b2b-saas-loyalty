@@ -37,6 +37,8 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [role, setRole] = useState<string | null>(null)
   const [staffName, setStaffName] = useState<string>('')
+  const [tenantName, setTenantName] = useState<string>('')
+  const [tenantLogoUrl, setTenantLogoUrl] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
@@ -50,8 +52,31 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     setRole(localStorage.getItem('staffRole'))
     setStaffName(localStorage.getItem('staffName') || '')
+    setTenantName(localStorage.getItem('tenantName') || '')
+    setTenantLogoUrl(localStorage.getItem('tenantLogoUrl') || null)
     setDrawerOpen(false)
   }, [pathname])
+
+  // Fetch tenant info if not in localStorage (first visit after login)
+  useEffect(() => {
+    if (!mounted || !role) return
+    if (tenantName && tenantLogoUrl !== null) return // already loaded or explicitly null
+    ;(async () => {
+      try {
+        const { api } = await import('@/lib/api')
+        const s = await api.getMerchantSettings()
+        if (s?.name) {
+          setTenantName(s.name)
+          localStorage.setItem('tenantName', s.name)
+        }
+        if (s?.logoUrl !== undefined) {
+          setTenantLogoUrl(s.logoUrl)
+          if (s.logoUrl) localStorage.setItem('tenantLogoUrl', s.logoUrl)
+          else localStorage.removeItem('tenantLogoUrl')
+        }
+      } catch {}
+    })()
+  }, [mounted, role, tenantName, tenantLogoUrl])
 
   const bareRoutes = ['/merchant/login', '/merchant/scanner']
   if (bareRoutes.includes(pathname)) {
@@ -63,6 +88,8 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     localStorage.removeItem('refreshToken')
     localStorage.removeItem('staffRole')
     localStorage.removeItem('staffName')
+    localStorage.removeItem('tenantName')
+    localStorage.removeItem('tenantLogoUrl')
     router.push('/merchant/login')
   }
 
@@ -73,16 +100,22 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
 
   const sidebarContent = (
     <>
-      <div className="h-16 flex items-center px-6 border-b border-slate-200 flex-shrink-0">
-        <Link
-          href="/merchant"
-          className="text-2xl font-extrabold tracking-tight text-emerald-700 hover:text-emerald-800 transition-colors"
-        >
-          Valee
+      <div className="h-16 flex items-center gap-3 px-4 border-b border-slate-200 flex-shrink-0">
+        <Link href="/merchant" className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-80 transition">
+          {tenantLogoUrl ? (
+            <img src={tenantLogoUrl} alt={tenantName || 'Logo'} className="w-10 h-10 rounded-lg object-cover border border-slate-200 flex-shrink-0" />
+          ) : (
+            <div className="w-10 h-10 rounded-lg bg-emerald-600 text-white flex items-center justify-center font-extrabold text-lg flex-shrink-0">
+              {(tenantName || 'V').charAt(0).toUpperCase()}
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-base font-extrabold tracking-tight text-emerald-700 truncate">{tenantName || 'Valee'}</p>
+            {role && (
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{role}</p>
+            )}
+          </div>
         </Link>
-        {role && (
-          <span className="ml-3 text-[10px] font-semibold text-slate-400 uppercase tracking-widest">{role}</span>
-        )}
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">

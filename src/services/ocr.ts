@@ -240,7 +240,7 @@ Return ONLY a JSON object with these exact fields:
 - total_amount: final total in document's currency (number or null)
 - transaction_date: date in ISO format YYYY-MM-DD (string or null)
 - transaction_time: time if visible, e.g. "14:30" (string or null)
-- customer_phone: ONLY the customer/buyer phone if explicitly labeled as such. NOT merchant phones or 0800 numbers. (string or null)
+- customer_phone: the customer/buyer phone number. On Venezuelan receipts, look for "Tlf:" or "Tel:" that appears in the CUSTOMER section (near "RIF/CI:", "RAZON SOCIAL:", "Nombre:", "Cliente:"). This is the customer's phone, not the store's. Do NOT return the store's 0800 number or the phone in the merchant header. Return in format 04XX-XXXXXXX if visible. (string or null)
 - customer_cedula: customer's Venezuelan ID (cedula). Look for "RIF/C.I.:", "CI:", "Cedula:" labels. Starts with V or E + digits. NOT the merchant's RIF (J-). (string or null)
 - customer_name: customer name if labeled ("RAZON SOCIAL:", "Cliente:", "Nombre:"). (string or null)
 - merchant_name: business name (string or null)
@@ -252,10 +252,17 @@ Return ONLY a JSON object with these exact fields:
 - confidence_score: 0.0 to 1.0 (number)`;
 
 const EXTRACTION_PROMPT = `You are extracting data from a Latin American sales document image.
+The image may be rotated, upside down, or at an angle — read the text in whatever orientation it appears.
 The document may be one of three types:
 - "fiscal_invoice": a traditional sales receipt (FACTURA DE VENTA, with invoice number, items, RIF, etc.)
 - "mobile_payment": a screenshot of a mobile bank payment confirmation (Pago Movil, transferencia bancaria)
 - "voucher": a small printed voucher with just the amount and date
+
+IMPORTANT VISUAL RULES:
+- The merchant RIF is in the HEADER of the receipt near "SENIAT" and the merchant name. It starts with J- followed by 8-9 digits. Do NOT confuse it with other RIFs on the receipt.
+- The invoice number appears AFTER "FACTURA:" label, near "FECHA:" and "HORA:". It is NOT the barcode number at the bottom. It is NOT the "Ticket:" or "ID de orden:" number.
+- Barcodes at the bottom of receipts are NOT invoice numbers. They are long strings of digits/letters often near "MH", "ZZP", "Z1F", or printed as actual barcode graphics.
+- Numbers on item lines (followed by product descriptions) are product SKUs/barcodes, NOT the invoice number.
 
 ${EXTRACTION_RULES}
 

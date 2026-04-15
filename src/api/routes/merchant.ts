@@ -441,6 +441,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       account: {
         id: account.id,
         phoneNumber: account.phoneNumber,
+        displayName: account.displayName,
         accountType: account.accountType,
         cedula: account.cedula,
         level: account.level,
@@ -520,6 +521,70 @@ export default async function merchantRoutes(app: FastifyInstance) {
     `;
 
     return { success: true, account: { id: upgraded.id, accountType: upgraded.accountType, cedula: upgraded.cedula } };
+  });
+
+  // ---- UPDATE CUSTOMER DATA (displayName, cedula) ----
+  app.patch('/api/merchant/customers/:id', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { displayName, cedula } = request.body as { displayName?: string | null; cedula?: string | null };
+
+    const account = await prisma.account.findFirst({
+      where: { id, tenantId, accountType: { in: ['shadow', 'verified'] } },
+    });
+    if (!account) return reply.status(404).send({ error: 'Cliente no encontrado' });
+
+    const updates: { displayName?: string | null; cedula?: string | null } = {};
+
+    if (displayName !== undefined) {
+      const trimmed = displayName ? displayName.trim() : null;
+      updates.displayName = trimmed || null;
+    }
+
+    if (cedula !== undefined) {
+      const normalized = cedula ? cedula.replace(/[\s\-]/g, '').toUpperCase() : null;
+      if (normalized) {
+        // Check cedula isn't already linked to a different account in this tenant
+        const conflict = await prisma.account.findFirst({
+          where: { tenantId, cedula: normalized, NOT: { id } },
+          select: { id: true, phoneNumber: true },
+        });
+        if (conflict) {
+          return reply.status(409).send({
+            error: 'Esta cedula ya esta vinculada a otro cliente',
+            existingPhone: conflict.phoneNumber,
+          });
+        }
+      }
+      updates.cedula = normalized;
+    }
+
+    const updated = await prisma.account.update({
+      where: { id },
+      data: updates,
+    });
+
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, consumer_account_id, outcome, metadata, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff',
+          ${request.staff!.role}::"AuditActorRole", 'CUSTOMER_LOOKUP', ${id}::uuid, 'success',
+          ${JSON.stringify({ action: 'customer_edit', updates })}::jsonb, now())
+      `;
+    } catch (err) {
+      console.error('[Audit] customer edit log failed:', err);
+    }
+
+    return {
+      success: true,
+      account: {
+        id: updated.id,
+        phoneNumber: updated.phoneNumber,
+        displayName: updated.displayName,
+        cedula: updated.cedula,
+        accountType: updated.accountType,
+      },
+    };
   });
 
   // ---- STAFF MANAGEMENT (Owner only) ----
@@ -616,6 +681,13 @@ export default async function merchantRoutes(app: FastifyInstance) {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
       rif: tenant?.rif || null,
       name: tenant?.name || '',
+      logoUrl: tenant?.logoUrl || null,
+      address: tenant?.address || null,
+      contactPhone: tenant?.contactPhone || null,
+      contactEmail: tenant?.contactEmail || null,
+      website: tenant?.website || null,
+      description: tenant?.description || null,
+      instagramHandle: tenant?.instagramHandle || null,
       preferredExchangeSource: tenant?.preferredExchangeSource || null,
       referenceCurrency: tenant?.referenceCurrency || 'usd',
       trustLevel: tenant?.trustLevel || 'level_2_standard',
@@ -627,12 +699,23 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
   app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel } = request.body as {
+    const {
+      welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
+      name, address, contactPhone, contactEmail, website, description, instagramHandle,
+    } = request.body as {
       welcomeBonusAmount?: number;
       rif?: string;
       preferredExchangeSource?: string | null;
       referenceCurrency?: string;
       trustLevel?: string;
+      logoUrl?: string | null;
+      name?: string;
+      address?: string | null;
+      contactPhone?: string | null;
+      contactEmail?: string | null;
+      website?: string | null;
+      description?: string | null;
+      instagramHandle?: string | null;
     };
 
     const validSources = ['bcv', 'binance_p2p', 'bybit_p2p', 'promedio', 'euro_bcv'];
@@ -647,7 +730,19 @@ export default async function merchantRoutes(app: FastifyInstance) {
       data.welcomeBonusAmount = welcomeBonusAmount;
     }
     if (rif !== undefined) {
-      data.rif = rif || null;
+      if (!rif || (typeof rif === 'string' && !rif.trim())) {
+        data.rif = null;
+      } else {
+        // Normalize and validate: [JVEGP]-XXXXXXXX-X (7-9 digits body + 1 check digit)
+        const normalized = String(rif).trim().toUpperCase().replace(/\s+/g, '');
+        const match = normalized.match(/^([JVEGP])-?(\d{7,9})-?(\d)$/);
+        if (!match) {
+          return reply.status(400).send({
+            error: 'RIF invalido. Formato: J-XXXXXXXX-X (prefijo J, V, E, G o P; 7-9 digitos; 1 digito verificador)',
+          });
+        }
+        data.rif = `${match[1]}-${match[2]}-${match[3]}`;
+      }
     }
     if (preferredExchangeSource !== undefined) {
       if (preferredExchangeSource !== null && !validSources.includes(preferredExchangeSource)) {
@@ -667,12 +762,60 @@ export default async function merchantRoutes(app: FastifyInstance) {
       }
       data.trustLevel = trustLevel;
     }
+    if (logoUrl !== undefined) {
+      data.logoUrl = logoUrl || null;
+    }
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (trimmed.length < 2 || trimmed.length > 255) {
+        return reply.status(400).send({ error: 'Nombre debe tener entre 2 y 255 caracteres' });
+      }
+      data.name = trimmed;
+    }
+    if (address !== undefined) {
+      const v = address ? String(address).trim() : null;
+      if (v && v.length > 500) return reply.status(400).send({ error: 'Direccion no puede exceder 500 caracteres' });
+      data.address = v || null;
+    }
+    if (contactPhone !== undefined) {
+      const v = contactPhone ? String(contactPhone).trim() : null;
+      if (v && v.length > 30) return reply.status(400).send({ error: 'Telefono no puede exceder 30 caracteres' });
+      data.contactPhone = v || null;
+    }
+    if (contactEmail !== undefined) {
+      const v = contactEmail ? String(contactEmail).trim() : null;
+      if (v && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) {
+        return reply.status(400).send({ error: 'Email invalido' });
+      }
+      data.contactEmail = v || null;
+    }
+    if (website !== undefined) {
+      const v = website ? String(website).trim() : null;
+      data.website = v || null;
+    }
+    if (description !== undefined) {
+      const v = description ? String(description).trim() : null;
+      if (v && v.length > 1000) return reply.status(400).send({ error: 'Descripcion no puede exceder 1000 caracteres' });
+      data.description = v || null;
+    }
+    if (instagramHandle !== undefined) {
+      const v = instagramHandle ? String(instagramHandle).trim().replace(/^@/, '') : null;
+      if (v && v.length > 100) return reply.status(400).send({ error: 'Instagram no puede exceder 100 caracteres' });
+      data.instagramHandle = v || null;
+    }
 
     const updated = await prisma.tenant.update({ where: { id: tenantId }, data });
     return {
       welcomeBonusAmount: updated.welcomeBonusAmount,
       rif: updated.rif,
       name: updated.name,
+      logoUrl: updated.logoUrl,
+      address: updated.address,
+      contactPhone: updated.contactPhone,
+      contactEmail: updated.contactEmail,
+      website: updated.website,
+      description: updated.description,
+      instagramHandle: updated.instagramHandle,
       preferredExchangeSource: updated.preferredExchangeSource,
       referenceCurrency: updated.referenceCurrency,
       trustLevel: updated.trustLevel,
@@ -781,6 +924,150 @@ export default async function merchantRoutes(app: FastifyInstance) {
     return { rule: updated };
   });
 
+  app.patch('/api/merchant/recurrence-rules/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { name, intervalDays, graceDays, messageTemplate, bonusAmount } = request.body as any;
+
+    const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
+    if (!rule) return reply.status(404).send({ error: 'Rule not found' });
+
+    const updates: any = {};
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (trimmed.length < 4 || trimmed.length > 80) {
+        return reply.status(400).send({ error: 'Nombre debe tener entre 4 y 80 caracteres' });
+      }
+      updates.name = trimmed;
+    }
+    if (intervalDays !== undefined) {
+      const n = parseInt(intervalDays);
+      if (isNaN(n) || n < 1 || n > 365) {
+        return reply.status(400).send({ error: 'Intervalo debe estar entre 1 y 365 dias' });
+      }
+      updates.intervalDays = n;
+    }
+    if (graceDays !== undefined) {
+      const n = parseInt(graceDays);
+      if (isNaN(n) || n < 0 || n > 90) {
+        return reply.status(400).send({ error: 'Gracia debe estar entre 0 y 90 dias' });
+      }
+      updates.graceDays = n;
+    }
+    if (messageTemplate !== undefined) {
+      const trimmed = String(messageTemplate).trim();
+      if (trimmed.length < 20 || trimmed.length > 500) {
+        return reply.status(400).send({ error: 'Mensaje debe tener entre 20 y 500 caracteres' });
+      }
+      updates.messageTemplate = trimmed;
+    }
+    if (bonusAmount !== undefined) {
+      if (bonusAmount === null || bonusAmount === '') {
+        updates.bonusAmount = null;
+      } else {
+        const n = parseInt(bonusAmount);
+        if (isNaN(n) || n < 1) {
+          return reply.status(400).send({ error: 'Bono debe ser un numero positivo' });
+        }
+        updates.bonusAmount = n;
+      }
+    }
+
+    const updated = await prisma.recurrenceRule.update({ where: { id }, data: updates });
+    return { rule: updated };
+  });
+
+  app.delete('/api/merchant/recurrence-rules/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
+    if (!rule) return reply.status(404).send({ error: 'Rule not found' });
+
+    // Soft delete: mark as inactive and prefix the name with [DELETED] timestamp
+    await prisma.recurrenceRule.update({
+      where: { id },
+      data: { active: false, name: `[Eliminada ${new Date().toISOString().slice(0, 10)}] ${rule.name}`.slice(0, 255) },
+    });
+    return { success: true };
+  });
+
+  // Preview: list the consumers who would receive a message from this rule right now
+  app.get('/api/merchant/recurrence-rules/:id/eligible', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
+    if (!rule) return reply.status(404).send({ error: 'Rule not found' });
+
+    const thresholdDays = rule.intervalDays + rule.graceDays;
+    const cutoffDate = new Date(Date.now() - thresholdDays * 24 * 60 * 60 * 1000);
+
+    // Find consumers whose last INVOICE_CLAIMED was before the cutoff
+    const lapsed = await prisma.$queryRaw<Array<{
+      account_id: string;
+      phone_number: string;
+      display_name: string | null;
+      cedula: string | null;
+      last_visit: Date;
+    }>>`
+      SELECT a.id AS account_id, a.phone_number, a.display_name, a.cedula, sub.last_visit
+      FROM accounts a
+      INNER JOIN (
+        SELECT account_id, MAX(created_at) AS last_visit
+        FROM ledger_entries
+        WHERE tenant_id = ${tenantId}::uuid
+          AND event_type = 'INVOICE_CLAIMED'
+          AND entry_type = 'CREDIT'
+          AND status != 'reversed'
+        GROUP BY account_id
+        HAVING MAX(created_at) < ${cutoffDate}
+      ) sub ON sub.account_id = a.id
+      WHERE a.tenant_id = ${tenantId}::uuid
+        AND a.account_type IN ('shadow', 'verified')
+        AND a.phone_number IS NOT NULL
+      ORDER BY sub.last_visit ASC
+    `;
+
+    // Check which ones have already been notified for their current absence event
+    const consumers = await Promise.all(lapsed.map(async c => {
+      const notified = await prisma.recurrenceNotification.findUnique({
+        where: {
+          tenantId_ruleId_consumerAccountId_lastVisitAt: {
+            tenantId,
+            ruleId: rule.id,
+            consumerAccountId: c.account_id,
+            lastVisitAt: c.last_visit,
+          },
+        },
+        select: { id: true, sentAt: true },
+      });
+      const daysSince = Math.floor(
+        (Date.now() - new Date(c.last_visit).getTime()) / (24 * 60 * 60 * 1000)
+      );
+      return {
+        accountId: c.account_id,
+        phoneNumber: c.phone_number,
+        displayName: c.display_name,
+        cedula: c.cedula,
+        lastVisit: c.last_visit.toISOString(),
+        daysSince,
+        alreadyNotified: !!notified,
+        notifiedAt: notified?.sentAt.toISOString() || null,
+      };
+    }));
+
+    return {
+      ruleId: rule.id,
+      ruleName: rule.name,
+      thresholdDays,
+      total: consumers.length,
+      pending: consumers.filter(c => !c.alreadyNotified).length,
+      alreadyNotified: consumers.filter(c => c.alreadyNotified).length,
+      consumers,
+    };
+  });
+
   app.get('/api/merchant/recurrence-notifications', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
     const { limit = '50', offset = '0' } = request.query as any;
@@ -885,11 +1172,16 @@ export default async function merchantRoutes(app: FastifyInstance) {
       longitude: longitude != null ? longitude : undefined,
     });
 
-    await prisma.$executeRaw`
-      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
-      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_CREATED', 'success',
-        ${JSON.stringify({ branchId: branch.id, name })}::jsonb, now())
-    `;
+    // Audit log — wrap in try/catch so a logging error never breaks the response
+    try {
+      await prisma.$executeRaw`
+        INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_CREATED', 'success',
+          ${JSON.stringify({ branchId: branch.id, name })}::jsonb, now())
+      `;
+    } catch (err) {
+      console.error('[Audit] BRANCH_CREATED log failed:', err);
+    }
 
     return { branch };
   });

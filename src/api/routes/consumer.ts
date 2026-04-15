@@ -328,11 +328,23 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     // Use last-10-digit matching so legacy accounts stored in any phone format
     // (with/without +, with/without leading 0, with separators) still resolve.
-    const accounts = await prisma.account.findMany({
+    const allAccounts = await prisma.account.findMany({
       where: tail.length === 10
         ? { phoneNumber: { endsWith: tail }, accountType: { in: ['shadow', 'verified'] } }
         : { phoneNumber, accountType: { in: ['shadow', 'verified'] } },
       include: { tenant: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // Deduplicate: if the same user has multiple account records for the same
+    // tenant (from phone-format variations), keep only the most recent.
+    // Also filter out inactive tenants.
+    const seenTenants = new Set<string>();
+    const accounts = allAccounts.filter(acc => {
+      if (acc.tenant.status !== 'active') return false;
+      if (seenTenants.has(acc.tenantId)) return false;
+      seenTenants.add(acc.tenantId);
+      return true;
     });
 
     const merchants = await Promise.all(accounts.map(async (acc) => {
@@ -565,6 +577,54 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
 
     return result;
+  });
+
+  // ---- ACTIVE REDEMPTION CODES ----
+  // Returns pending redemption tokens that haven't expired yet, so the consumer
+  // can re-open the QR if they navigated away.
+  app.get('/api/consumer/active-redemptions', { preHandler: [requireConsumerAuth] }, async (request) => {
+    const { accountId, tenantId } = request.consumer!;
+    const now = new Date();
+
+    const tokens = await prisma.redemptionToken.findMany({
+      where: {
+        tenantId,
+        consumerAccountId: accountId,
+        status: 'pending',
+        expiresAt: { gt: now },
+      },
+      include: { product: { select: { id: true, name: true, photoUrl: true, redemptionCost: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return {
+      redemptions: tokens.map(t => {
+        // Reconstruct the full signed token (base64 JSON of { payload, signature })
+        const payload = {
+          tokenId: t.id,
+          consumerAccountId: t.consumerAccountId,
+          productId: t.productId,
+          amount: t.amount.toString(),
+          tenantId: t.tenantId,
+          assetTypeId: t.assetTypeId,
+          createdAt: t.createdAt.toISOString(),
+          expiresAt: t.expiresAt.toISOString(),
+        };
+        const token = Buffer.from(JSON.stringify({ payload, signature: t.tokenSignature })).toString('base64');
+        return {
+          id: t.id,
+          token,
+          shortCode: t.shortCode,
+          productName: t.product.name,
+          productPhoto: t.product.photoUrl,
+          amount: t.amount.toString(),
+          cashAmount: t.cashAmount?.toString() || null,
+          expiresAt: t.expiresAt.toISOString(),
+          secondsRemaining: Math.max(0, Math.floor((t.expiresAt.getTime() - now.getTime()) / 1000)),
+          createdAt: t.createdAt.toISOString(),
+        };
+      }),
+    };
   });
 
   // ---- UPLOAD IMAGE (for dispute screenshots) ----

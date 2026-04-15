@@ -32,16 +32,39 @@ async function tryRefreshToken(): Promise<boolean> {
   }
 }
 
+function redirectToLogin() {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem('accessToken');
+  localStorage.removeItem('refreshToken');
+  const path = window.location.pathname;
+  if (path.startsWith('/merchant')) {
+    localStorage.removeItem('staffRole');
+    localStorage.removeItem('staffName');
+    localStorage.removeItem('tenantName');
+    localStorage.removeItem('tenantLogoUrl');
+    if (path !== '/merchant/login') window.location.href = '/merchant/login';
+  } else if (path.startsWith('/admin')) {
+    if (path !== '/admin/login') window.location.href = '/admin/login';
+  } else {
+    // Consumer routes — main page has its own login screen
+    if (path.startsWith('/consumer') || path.startsWith('/catalog') || path.startsWith('/scan') || path.startsWith('/my-codes')) {
+      window.location.href = '/consumer';
+    }
+  }
+}
+
 async function request(path: string, options: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
 
+  // Only set Content-Type if there's a body. Fastify rejects requests with
+  // Content-Type: application/json but empty body.
+  const baseHeaders: Record<string, string> = {};
+  if (options.body) baseHeaders['Content-Type'] = 'application/json';
+  if (token) baseHeaders['Authorization'] = `Bearer ${token}`;
+
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
+    headers: { ...baseHeaders, ...options.headers },
   });
 
   // Auto-refresh on 401: try refreshing the token and retry ONCE
@@ -49,17 +72,23 @@ async function request(path: string, options: RequestInit = {}) {
     const refreshed = await tryRefreshToken();
     if (refreshed) {
       const newToken = localStorage.getItem('accessToken');
+      const retryHeaders: Record<string, string> = {};
+      if (options.body) retryHeaders['Content-Type'] = 'application/json';
+      if (newToken) retryHeaders['Authorization'] = `Bearer ${newToken}`;
       const retryRes = await fetch(`${API_BASE}${path}`, {
         ...options,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
-          ...options.headers,
-        },
+        headers: { ...retryHeaders, ...options.headers },
       });
       const retryData = await retryRes.json();
-      if (!retryRes.ok) throw { status: retryRes.status, ...retryData };
+      if (!retryRes.ok) {
+        // If retry also fails with 401, refresh token is also invalid — kick to login
+        if (retryRes.status === 401) redirectToLogin();
+        throw { status: retryRes.status, ...retryData };
+      }
       return retryData;
+    } else {
+      // Refresh failed — session truly expired, kick to login
+      redirectToLogin();
     }
   }
 
@@ -112,6 +141,7 @@ export const api = {
   },
   redeemProduct: (productId: string, assetTypeId: string) =>
     request('/api/consumer/redeem', { method: 'POST', body: JSON.stringify({ productId, assetTypeId }) }),
+  getActiveRedemptions: () => request('/api/consumer/active-redemptions'),
 
   // Consumer image upload (for dispute screenshots)
   uploadConsumerImage: async (file: File): Promise<{ success: boolean; url: string }> => {
@@ -172,6 +202,8 @@ export const api = {
     request(`/api/merchant/customer-lookup/${encodeURIComponent(phoneNumber)}`),
   upgradeIdentity: (phoneNumber: string, cedula: string, force?: boolean) =>
     request('/api/merchant/identity-upgrade', { method: 'POST', body: JSON.stringify({ phoneNumber, cedula, force }) }),
+  updateCustomer: (id: string, data: { displayName?: string | null; cedula?: string | null }) =>
+    request(`/api/merchant/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getAllAccounts: () => request('/api/consumer/all-accounts'),
   getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
   initiateDualScan: (amount: string, branchId?: string) =>
@@ -180,7 +212,20 @@ export const api = {
     request('/api/consumer/dual-scan/confirm', { method: 'POST', body: JSON.stringify({ token }) }),
   getPlanUsage: () => request('/api/merchant/plan-usage'),
   getMerchantSettings: () => request('/api/merchant/settings'),
-  updateMerchantSettings: (data: { welcomeBonusAmount?: number; rif?: string; preferredExchangeSource?: string | null; referenceCurrency?: string }) =>
+  updateMerchantSettings: (data: {
+    welcomeBonusAmount?: number;
+    rif?: string;
+    preferredExchangeSource?: string | null;
+    referenceCurrency?: string;
+    logoUrl?: string | null;
+    name?: string;
+    address?: string | null;
+    contactPhone?: string | null;
+    contactEmail?: string | null;
+    website?: string | null;
+    description?: string | null;
+    instagramHandle?: string | null;
+  }) =>
     request('/api/merchant/settings', { method: 'PUT', body: JSON.stringify(data) }),
   getExchangeRates: () => request('/api/merchant/exchange-rates'),
   getAnalytics: () => request('/api/merchant/analytics'),
@@ -198,6 +243,12 @@ export const api = {
     request('/api/merchant/recurrence-rules', { method: 'POST', body: JSON.stringify(data) }),
   toggleRecurrenceRule: (id: string) =>
     request(`/api/merchant/recurrence-rules/${id}/toggle`, { method: 'PATCH' }),
+  updateRecurrenceRule: (id: string, data: any) =>
+    request(`/api/merchant/recurrence-rules/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteRecurrenceRule: (id: string) =>
+    request(`/api/merchant/recurrence-rules/${id}`, { method: 'DELETE' }),
+  getRecurrenceEligible: (id: string) =>
+    request(`/api/merchant/recurrence-rules/${id}/eligible`),
   getRecurrenceNotifications: (limit = 50, offset = 0) =>
     request(`/api/merchant/recurrence-notifications?limit=${limit}&offset=${offset}`),
   getMultiplier: () => request('/api/merchant/multiplier'),

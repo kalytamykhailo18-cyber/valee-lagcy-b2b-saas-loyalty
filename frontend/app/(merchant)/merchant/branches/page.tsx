@@ -1,8 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import { MdStorefront } from 'react-icons/md'
 import { api } from '@/lib/api'
+
+const LocationPicker = dynamic(() => import('@/components/LocationPicker'), { ssr: false })
 
 interface Branch {
   id: string
@@ -33,10 +36,33 @@ export default function BranchesPage() {
     } catch {} finally { setLoading(false) }
   }
 
+  const [errors, setErrors] = useState<{ name?: string; address?: string; latitude?: string; longitude?: string }>({})
+
+  function validateForm(): boolean {
+    const errs: { name?: string; address?: string; latitude?: string; longitude?: string } = {}
+    if (!form.name.trim()) errs.name = 'El nombre es obligatorio'
+    else if (form.name.trim().length < 2) errs.name = 'Minimo 2 caracteres'
+    if (!form.address.trim()) errs.address = 'La direccion es obligatoria'
+    if (form.latitude) {
+      const lat = parseFloat(form.latitude)
+      if (isNaN(lat) || lat < -90 || lat > 90) errs.latitude = 'Latitud invalida (-90 a 90)'
+    }
+    if (form.longitude) {
+      const lng = parseFloat(form.longitude)
+      if (isNaN(lng) || lng < -180 || lng > 180) errs.longitude = 'Longitud invalida (-180 a 180)'
+    }
+    if ((form.latitude && !form.longitude) || (!form.latitude && form.longitude)) {
+      if (!form.latitude) errs.latitude = 'Latitud requerida si hay longitud'
+      if (!form.longitude) errs.longitude = 'Longitud requerida si hay latitud'
+    }
+    setErrors(errs)
+    return Object.keys(errs).length === 0
+  }
+
   async function handleCreate() {
-    if (!form.name.trim()) return
-    setCreating(true)
     setMessage('')
+    if (!validateForm()) return
+    setCreating(true)
     try {
       await api.createBranch({
         name: form.name.trim(),
@@ -45,11 +71,12 @@ export default function BranchesPage() {
         longitude: form.longitude ? parseFloat(form.longitude) : undefined,
       })
       setForm({ name: '', address: '', latitude: '', longitude: '' })
+      setErrors({})
       setShowForm(false)
       setMessage('Sucursal creada exitosamente')
       loadBranches()
-    } catch {
-      setMessage('Error al crear sucursal')
+    } catch (e: any) {
+      setMessage(e?.error || e?.message || 'Error al crear sucursal')
     }
     setCreating(false)
   }
@@ -63,12 +90,17 @@ export default function BranchesPage() {
 
   async function handleGenerateQR(id: string) {
     setGeneratingQR(id)
+    setMessage('')
     try {
-      await api.generateBranchQR(id)
-      setMessage('Codigo QR generado exitosamente')
-      loadBranches()
-    } catch {
-      setMessage('Error al generar codigo QR')
+      const result = await api.generateBranchQR(id)
+      if (result?.qrCodeUrl) {
+        setMessage('Codigo QR generado exitosamente')
+      } else {
+        setMessage('Error: el servidor no devolvio el QR')
+      }
+      await loadBranches()
+    } catch (e: any) {
+      setMessage(`Error al generar QR: ${e?.error || e?.message || 'desconocido'}`)
     }
     setGeneratingQR(null)
   }
@@ -94,7 +126,11 @@ export default function BranchesPage() {
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         {message && (
-          <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">
+          <div className={`mb-4 rounded-xl p-3 text-sm border ${
+            message.toLowerCase().includes('error') || message.toLowerCase().includes('invalid')
+              ? 'bg-red-50 border-red-200 text-red-700'
+              : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+          }`}>
             {message}
           </div>
         )}
@@ -104,52 +140,46 @@ export default function BranchesPage() {
           <div className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100 mb-6 space-y-4 max-w-2xl">
             <h2 className="text-lg font-semibold text-slate-800">Nueva sucursal</h2>
             <div>
-              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 placeholder="Ej: Sucursal Centro"
                 value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                onChange={e => { setForm({ ...form, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: undefined }) }}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.name ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
               />
+              {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
             </div>
             <div>
-              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion</label>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion <span className="text-red-500">*</span></label>
               <input
                 type="text"
                 placeholder="Av. Principal, Valencia"
                 value={form.address}
-                onChange={e => setForm({ ...form, address: e.target.value })}
-                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                onChange={e => { setForm({ ...form, address: e.target.value }); if (errors.address) setErrors({ ...errors, address: undefined }) }}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.address ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
               />
+              {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address}</p>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Latitud</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="10.4806"
-                  value={form.latitude}
-                  onChange={e => setForm({ ...form, latitude: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Longitud</label>
-                <input
-                  type="number"
-                  step="any"
-                  placeholder="-66.9036"
-                  value={form.longitude}
-                  onChange={e => setForm({ ...form, longitude: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Ubicacion en el mapa</label>
+              <p className="text-xs text-slate-400 mb-2">Busca la direccion, haz click en el mapa o usa tu ubicacion actual</p>
+              <LocationPicker
+                latitude={form.latitude ? parseFloat(form.latitude) : null}
+                longitude={form.longitude ? parseFloat(form.longitude) : null}
+                onChange={(lat, lng) => {
+                  setForm({ ...form, latitude: lat != null ? String(lat) : '', longitude: lng != null ? String(lng) : '' })
+                  if (errors.latitude || errors.longitude) setErrors({ ...errors, latitude: undefined, longitude: undefined })
+                }}
+                address={form.address}
+              />
+              {(errors.latitude || errors.longitude) && (
+                <p className="text-red-500 text-xs mt-1">{errors.latitude || errors.longitude}</p>
+              )}
             </div>
             <button
               onClick={handleCreate}
-              disabled={creating || !form.name.trim()}
+              disabled={creating}
               className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
             >
               {creating ? 'Creando...' : 'Crear sucursal'}

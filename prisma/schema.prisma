@@ -121,6 +121,9 @@ enum AuditActionType {
   DISPUTE_ESCALATED
   TENANT_CREATED
   TENANT_DEACTIVATED
+  BRANCH_CREATED
+  BRANCH_TOGGLED
+  BRANCH_QR_GENERATED
 }
 
 enum AuditOutcome {
@@ -177,6 +180,13 @@ model Tenant {
   status     TenantStatus @default(active)
   ownerEmail       String       @map("owner_email") @db.VarChar(255)
   qrCodeUrl        String?      @map("qr_code_url")
+  logoUrl          String?      @map("logo_url")
+  address          String?      @db.VarChar(500)
+  contactPhone     String?      @map("contact_phone") @db.VarChar(30)
+  contactEmail     String?      @map("contact_email") @db.VarChar(255)
+  website          String?      @db.VarChar(500)
+  description      String?      @db.VarChar(1000)
+  instagramHandle  String?      @map("instagram_handle") @db.VarChar(100)
   welcomeBonusAmount Int        @default(50) @map("welcome_bonus_amount")
   rif              String?      @db.VarChar(50)
   preferredExchangeSource ExchangeSource? @map("preferred_exchange_source")
@@ -436,6 +446,7 @@ model RedemptionToken {
   assetTypeId          String                @map("asset_type_id") @db.Uuid
   status               RedemptionTokenStatus @default(pending)
   tokenSignature       String                @map("token_signature") @db.VarChar(64)
+  shortCode            String?               @map("short_code") @db.VarChar(6)
   expiresAt            DateTime              @map("expires_at") @db.Timestamptz
   usedAt               DateTime?             @map("used_at") @db.Timestamptz
   usedByStaffId        String?               @map("used_by_staff_id") @db.Uuid
@@ -454,6 +465,7 @@ model RedemptionToken {
   @@index([tenantId, status])
   @@index([consumerAccountId])
   @@index([tokenSignature])
+  @@index([tenantId, shortCode])
   @@map("redemption_tokens")
 }
 

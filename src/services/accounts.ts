@@ -19,17 +19,31 @@ export function normalizeVenezuelanPhone(input: string): string {
   if (!input) return input;
   const digits = input.replace(/\D/g, '');
 
-  // Already 12 digits with country code 58 → canonical
+  // If input explicitly starts with + and a country code, trust it
+  const trimmed = input.trim();
+  if (trimmed.startsWith('+') && digits.length >= 10) {
+    return '+' + digits;
+  }
+
+  // Already 12 digits with country code 58 → canonical VE
   if (digits.length === 12 && digits.startsWith('58')) {
+    return '+' + digits;
+  }
+  // 11 digits starting with 1 → US/Canada number
+  if (digits.length === 11 && digits.startsWith('1')) {
     return '+' + digits;
   }
   // 11 digits with leading 0 (Venezuelan local format) → strip 0, prepend 58
   if (digits.length === 11 && digits.startsWith('0')) {
     return '+58' + digits.slice(1);
   }
-  // 10 digits without country code → assume VE, prepend 58
-  if (digits.length === 10) {
+  // 10 digits starting with 4 → Venezuelan mobile (04XX), prepend 58
+  if (digits.length === 10 && digits.startsWith('4')) {
     return '+58' + digits;
+  }
+  // 10 digits not starting with 4 → could be US without country code, prepend 1
+  if (digits.length === 10 && !digits.startsWith('4')) {
+    return '+1' + digits;
   }
   // Unknown format → return with + if it has at least 10 digits, else as-is
   if (digits.length >= 10) return '+' + digits;

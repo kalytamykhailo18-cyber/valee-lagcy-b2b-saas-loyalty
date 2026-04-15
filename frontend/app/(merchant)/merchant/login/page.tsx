@@ -22,6 +22,13 @@ export default function MerchantLogin() {
       localStorage.setItem('refreshToken', data.refreshToken)
       localStorage.setItem('staffRole', data.staff.role)
       localStorage.setItem('staffName', data.staff.name)
+      // Pre-fetch tenant branding so header shows logo/name immediately
+      try {
+        const s = await api.getMerchantSettings()
+        if (s?.name) localStorage.setItem('tenantName', s.name)
+        if (s?.logoUrl) localStorage.setItem('tenantLogoUrl', s.logoUrl)
+        else localStorage.removeItem('tenantLogoUrl')
+      } catch {}
       router.push(data.staff.role === 'cashier' ? '/merchant/scanner' : '/merchant')
     } catch (e: any) {
       setError(e.error || 'Credenciales invalidas')

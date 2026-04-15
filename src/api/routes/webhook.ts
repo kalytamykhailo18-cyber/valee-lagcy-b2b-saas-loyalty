@@ -152,6 +152,12 @@ export default async function webhookRoutes(app: FastifyInstance) {
 
     // Route to the message handler
     const messageType = hasImage ? 'image' : 'text';
+
+    // Send immediate "processing" message for images (multimodal takes a few seconds)
+    if (messageType === 'image') {
+      await sendWhatsAppMessage(formattedPhone, 'Analizando tu factura... Tu proxima comida gratis te esta esperando');
+    }
+
     const responses = await handleIncomingMessage({
       phoneNumber: formattedPhone,
       tenantId,

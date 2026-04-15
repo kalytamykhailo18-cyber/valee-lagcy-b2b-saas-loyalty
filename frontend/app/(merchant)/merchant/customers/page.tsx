@@ -31,6 +31,13 @@ export default function CustomersPage() {
   const [upgradeMsg, setUpgradeMsg] = useState('')
   const [conflictPhone, setConflictPhone] = useState<string | null>(null)
 
+  // Edit mode
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState<{ displayName: string; cedula: string }>({ displayName: '', cedula: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editMsg, setEditMsg] = useState('')
+  const [editConflict, setEditConflict] = useState<string | null>(null)
+
   useEffect(() => { loadCustomers() }, [offset, search])
 
   async function loadCustomers() {
@@ -50,11 +57,42 @@ export default function CustomersPage() {
     setUpgradeMsg('')
     setConflictPhone(null)
     setCedula('')
+    setEditing(false)
+    setEditMsg('')
+    setEditConflict(null)
     try {
       const data = await api.lookupCustomer(phone)
       setSelected(data)
+      setEditForm({ displayName: data.account.displayName || '', cedula: data.account.cedula || '' })
     } catch {}
     setSelectedLoading(false)
+  }
+
+  async function handleSaveEdit(force = false) {
+    if (!selected) return
+    setEditSaving(true)
+    setEditMsg('')
+    try {
+      const payload: { displayName?: string | null; cedula?: string | null } = {}
+      const name = editForm.displayName.trim()
+      const ced = editForm.cedula.trim()
+      payload.displayName = name || null
+      payload.cedula = ced || null
+      const res = await api.updateCustomer(selected.account.id, payload)
+      setSelected({ ...selected, account: { ...selected.account, ...res.account } })
+      setEditMsg('Cambios guardados')
+      setEditConflict(null)
+      setEditing(false)
+      loadCustomers()
+    } catch (e: any) {
+      if (e.existingPhone) {
+        setEditConflict(e.existingPhone)
+        setEditMsg('')
+      } else {
+        setEditMsg(e.error || e.message || 'Error al guardar')
+      }
+    }
+    setEditSaving(false)
   }
 
   async function handleUpgrade(force = false) {
@@ -178,22 +216,72 @@ export default function CustomersPage() {
                 {/* Account Card */}
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
                   <div className="flex items-start justify-between mb-3">
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cliente</p>
-                      <p className="text-lg font-bold text-slate-800 mt-1">{selected.account.phoneNumber}</p>
+                      <p className="text-lg font-bold text-slate-800 mt-1 truncate">{selected.account.phoneNumber}</p>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold flex-shrink-0 ml-2 ${
                       selected.account.accountType === 'verified' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
                     }`}>
                       {selected.account.accountType === 'verified' ? 'Verificada' : 'Shadow'}
                     </span>
                   </div>
-                  {selected.account.cedula && (
-                    <p className="text-sm text-slate-600">Cedula: {selected.account.cedula}</p>
+
+                  {editing ? (
+                    <div className="space-y-3">
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+                        <input
+                          type="text"
+                          placeholder="Nombre del cliente"
+                          value={editForm.displayName}
+                          onChange={e => { setEditForm({ ...editForm, displayName: e.target.value }); setEditConflict(null) }}
+                          className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cedula</label>
+                        <input
+                          type="text"
+                          placeholder="V-12345678"
+                          value={editForm.cedula}
+                          onChange={e => { setEditForm({ ...editForm, cedula: e.target.value }); setEditConflict(null) }}
+                          className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        />
+                      </div>
+                      {editConflict && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
+                          Esta cedula ya esta vinculada a {editConflict}. Cambia la cedula o desvinculala desde el otro cliente primero.
+                        </div>
+                      )}
+                      {editMsg && <p className={`text-sm ${editMsg.includes('guardados') ? 'text-green-600' : 'text-red-500'}`}>{editMsg}</p>}
+                      <div className="flex gap-2">
+                        <button onClick={() => { setEditing(false); setEditMsg(''); setEditConflict(null); setEditForm({ displayName: selected.account.displayName || '', cedula: selected.account.cedula || '' }) }} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm">Cancelar</button>
+                        <button onClick={() => handleSaveEdit()} disabled={editSaving} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
+                          {editSaving ? 'Guardando...' : 'Guardar'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      {selected.account.displayName && (
+                        <p className="text-sm text-slate-600">Nombre: {selected.account.displayName}</p>
+                      )}
+                      {selected.account.cedula && (
+                        <p className="text-sm text-slate-600">Cedula: {selected.account.cedula}</p>
+                      )}
+                      <button
+                        onClick={() => setEditing(true)}
+                        className="mt-3 text-xs text-emerald-600 hover:text-emerald-800 font-semibold"
+                      >
+                        Editar datos
+                      </button>
+                    </>
                   )}
+
                   <div className="mt-4 pt-4 border-t border-slate-100">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Saldo</p>
-                    <p className="text-3xl font-bold text-emerald-700 mt-1">{parseFloat(selected.balance).toLocaleString()}</p>
+                    <p className="text-3xl font-bold text-emerald-700 mt-1">{Math.round(parseFloat(selected.balance)).toLocaleString()}</p>
                   </div>
 
                   {/* Identity upgrade */}

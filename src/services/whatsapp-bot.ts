@@ -154,12 +154,18 @@ export async function handleSupportIntent(
 ): Promise<string[]> {
   switch (intent) {
     case 'balance_query': {
-      if (!accountId) return ['Aún no tienes una cuenta. Escanea el QR del comercio para comenzar.'];
-      const assetType = await prisma.assetType.findFirst();
+      if (!accountId) return ['Aun no tienes una cuenta. Escanea el QR del comercio para comenzar.'];
+      const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
+      const assetType = assetConfig
+        ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
+        : await prisma.assetType.findFirst();
       const balance = assetType
         ? await getAccountBalance(accountId, assetType.id, tenantId)
         : '0';
-      return [`Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString()} puntos. 💰`];
+      const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
+      const merchantName = tenant?.name || 'el comercio';
+      const unitLabel = assetType?.unitLabel || 'puntos';
+      return [`Tu saldo en ${merchantName} es de ${Math.round(parseFloat(balance)).toLocaleString()} ${unitLabel}.`];
     }
 
     case 'receipt_status': {
@@ -192,21 +198,28 @@ export async function handleSupportIntent(
         if (ext.merchant_rif) lines.push(`RIF: ${ext.merchant_rif}`);
         if (ext.transaction_date) lines.push(`Fecha: ${ext.transaction_date}`);
         if (ext.order_items && ext.order_items.length > 0) {
-          lines.push(`Items: ${ext.order_items.length} producto${ext.order_items.length > 1 ? 's' : ''}`);
+          lines.push(`Items (${ext.order_items.length}):`);
+          for (const item of ext.order_items) {
+            const qty = item.quantity || 1;
+            const price = item.unit_price != null ? ` Bs ${item.unit_price}` : '';
+            lines.push(`- ${qty}x ${item.name}${price}`);
+          }
         }
       }
       return lines;
     }
 
-    case 'how_to_redeem':
+    case 'how_to_redeem': {
+      const appUrl = process.env.CONSUMER_APP_URL || 'https://valee.app';
       return [
         `Para canjear tus puntos:`,
-        `1️⃣ Abre la app (PWA) en tu navegador.`,
-        `2️⃣ Ve al catálogo de productos.`,
-        `3️⃣ Elige el producto que deseas.`,
-        `4️⃣ Genera un QR de canje.`,
-        `5️⃣ Muestra el QR al cajero y listo. ¡Disfruta tu premio! 🎉`,
+        `1. Abre la app ${appUrl} en tu navegador.`,
+        `2. Ve al catalogo de productos.`,
+        `3. Elige el producto que deseas.`,
+        `4. Genera un QR de canje.`,
+        `5. Muestra el QR al cajero y listo.`,
       ];
+    }
 
     case 'report_problem':
       return [
@@ -264,7 +277,8 @@ export function resetOcrRetry(tenantId: string, phoneNumber: string): void {
 
 /**
  * Parse the pre-filled message from the merchant QR code.
- * Format: "MERCHANT:{slug}" or "MERCHANT:{slug}:BRANCH:{branchId}"
+ * Accepts either the raw "MERCHANT:{slug}" tag or the friendly format with
+ * the tag in brackets at the end: "Hola, quiero registrar... [MERCHANT:{slug}]".
  * Returns { tenantId, branchId } or null if not a QR message.
  */
 export async function parseMerchantIdentifier(messageText: string): Promise<{
@@ -272,7 +286,8 @@ export async function parseMerchantIdentifier(messageText: string): Promise<{
   branchId: string | null;
   tenantName: string;
 } | null> {
-  const match = messageText.match(/^MERCHANT:([a-z0-9\-]+)(?::BRANCH:([a-f0-9\-]+))?$/i);
+  // Match MERCHANT:slug (optionally inside square brackets, anywhere in the text)
+  const match = messageText.match(/MERCHANT:([a-z0-9\-]+)(?::BRANCH:([a-f0-9\-]+))?/i);
   if (!match) return null;
 
   const slug = match[1];
@@ -327,7 +342,7 @@ export async function handleIncomingMessage(params: {
     const lower = messageText.toLowerCase().trim();
 
     // Check if it's a merchant QR message (already handled by webhook for tenant routing)
-    if (/^merchant:/i.test(lower)) {
+    if (/merchant:[a-z0-9\-]+/i.test(lower)) {
       return getStateGreeting(state, merchantName, balance, phoneNumber);
     }
 

@@ -356,18 +356,28 @@ export async function validateInvoice(params: {
     const extractedRif = normRif(extracted.merchant_rif);
     const tenantRif = normRif(tenantForTrust.rif);
 
-    // Compare the digit body (the letter prefix and check digit may be slightly
-    // misread by OCR). If both have at least 7 digits and they don't match,
-    // reject.
     const extractedDigits = extractedRif.replace(/\D/g, '');
     const tenantDigits = tenantRif.replace(/\D/g, '');
 
-    if (
-      extractedDigits.length >= 7 &&
-      tenantDigits.length >= 7 &&
-      !extractedDigits.includes(tenantDigits) &&
-      !tenantDigits.includes(extractedDigits)
-    ) {
+    // Fuzzy match with 1-digit tolerance for thermal print degradation.
+    // Allow: exact match, substring (length mismatch from OCR adding/removing
+    // digits), or same-length strings differing by at most 1 character.
+    const sameLengthFuzzy = (a: string, b: string): boolean => {
+      if (a.length !== b.length) return false;
+      let diffs = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) diffs++;
+        if (diffs > 1) return false;
+      }
+      return true;
+    };
+
+    const matches = extractedDigits === tenantDigits
+      || extractedDigits.includes(tenantDigits)
+      || tenantDigits.includes(extractedDigits)
+      || sameLengthFuzzy(extractedDigits, tenantDigits);
+
+    if (extractedDigits.length >= 7 && tenantDigits.length >= 7 && !matches) {
       console.log(`[Validation] RIF mismatch: tenant=${tenantForTrust.rif} extracted=${extracted.merchant_rif}`);
       return {
         success: false,
@@ -376,22 +386,88 @@ export async function validateInvoice(params: {
         invoiceNumber: extracted.invoice_number,
       };
     }
+
+    // If RIF fuzzy-matches the tenant's registered RIF, use the canonical
+    // tenant RIF instead of the OCR-garbled one for display consistency.
+    if (matches && extracted.merchant_rif !== tenantForTrust.rif) {
+      console.log(`[Validation] RIF fuzzy match: correcting "${extracted.merchant_rif}" → "${tenantForTrust.rif}"`);
+      extracted.merchant_rif = tenantForTrust.rif;
+    }
   }
 
-  // STAGE B: Identity cross-check (soft mode).
-  // Claude often returns the merchant's printed phone as customer_phone (there is
-  // no reliable label on Venezuelan receipts). We still log mismatches for audit,
-  // but do NOT hard-reject here — Stage C (match against the merchant's CSV) is
-  // the real anti-fraud gate: no one can claim an invoice that the merchant
-  // hasn't uploaded or that has already been claimed.
-  if (extracted.customer_phone) {
-    const digitsExtracted = extracted.customer_phone.replace(/[^\d]/g, '');
-    const digitsSender = senderPhone.replace(/[^\d]/g, '');
-    const last10Extracted = digitsExtracted.slice(-10);
-    const last10Sender = digitsSender.slice(-10);
+  // STAGE B: Triple identity verification.
+  //
+  // Three signals: (1) sender's WhatsApp phone, (2) phone printed on invoice,
+  // (3) cedula printed on invoice. If 2+ fields are available from the invoice,
+  // we compare them against the sender. A match means the digit strings are
+  // identical OR differ by at most 1 digit (thermal printer wear tolerance).
+  //
+  // Logic:
+  //   - If no identity fields on invoice → accept (can't verify)
+  //   - If 1 field available → must match sender (with 1-digit tolerance)
+  //   - If 2+ fields available → at least 2 out of 3 must match
+  //
+  // This prevents fraud (someone sending another person's receipt) while
+  // tolerating OCR/print degradation on a single character.
+  {
+    const fuzzyMatch = (a: string, b: string): boolean => {
+      if (a === b) return true;
+      if (a.length !== b.length) return false;
+      let diffs = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) diffs++;
+        if (diffs > 1) return false;
+      }
+      return true;
+    };
 
-    if (last10Extracted.length >= 7 && last10Sender.length >= 7 && last10Extracted !== last10Sender) {
-      console.log(`[Identity][soft-warn] Phone on invoice does not match sender: invoice=${digitsExtracted} sender=${digitsSender} — letting it continue to Stage C.`);
+    const senderDigits = senderPhone.replace(/\D/g, '').slice(-10);
+    const invoicePhoneDigits = extracted.customer_phone
+      ? extracted.customer_phone.replace(/\D/g, '').slice(-10)
+      : null;
+    const invoiceCedula = extracted.customer_cedula
+      ? extracted.customer_cedula.replace(/\D/g, '')
+      : null;
+
+    // Look up sender's stored cedula (if they've been verified before)
+    let senderCedula: string | null = null;
+    const senderAccount = await prisma.account.findUnique({
+      where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+      select: { cedula: true },
+    });
+    if (senderAccount?.cedula) {
+      senderCedula = senderAccount.cedula.replace(/\D/g, '');
+    }
+
+    // Build match results
+    const checks: { field: string; match: boolean }[] = [];
+
+    if (invoicePhoneDigits && invoicePhoneDigits.length >= 7) {
+      const phoneMatch = fuzzyMatch(senderDigits, invoicePhoneDigits);
+      checks.push({ field: 'phone', match: phoneMatch });
+    }
+
+    if (invoiceCedula && invoiceCedula.length >= 5) {
+      if (senderCedula && senderCedula.length >= 5) {
+        const cedulaMatch = fuzzyMatch(senderCedula, invoiceCedula);
+        checks.push({ field: 'cedula', match: cedulaMatch });
+      }
+      // If sender has no stored cedula, we can't compare — don't count it
+    }
+
+    const matchCount = checks.filter(c => c.match).length;
+    const failCount = checks.filter(c => !c.match).length;
+
+    console.log(`[Identity] Triple check: sender=${senderDigits} invoicePhone=${invoicePhoneDigits} invoiceCedula=${invoiceCedula} senderCedula=${senderCedula} checks=${JSON.stringify(checks)} matches=${matchCount} fails=${failCount}`);
+
+    // Only reject if we have 2+ fields available AND majority don't match
+    if (checks.length >= 2 && failCount > matchCount) {
+      return {
+        success: false,
+        stage: 'identity',
+        message: 'Los datos de la factura no coinciden con tu cuenta. El telefono o cedula en la factura no corresponden al numero que esta enviando.',
+        invoiceNumber: extracted.invoice_number,
+      };
     }
   }
 

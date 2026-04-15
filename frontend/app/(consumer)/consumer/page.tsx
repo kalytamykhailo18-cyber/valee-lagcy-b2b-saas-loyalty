@@ -71,6 +71,7 @@ function ConsumerApp() {
   const [showWelcome, setShowWelcome] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [activeCodesCount, setActiveCodesCount] = useState(0)
 
   const handleSync = useCallback(async () => {
     const count = getPendingCount()
@@ -110,9 +111,17 @@ function ConsumerApp() {
             loadData()
           } catch (e: any) {
             logEvent('selectMerchant_fail', e?.message || e?.error || 'unknown')
-            localStorage.removeItem('accessToken')
-            localStorage.removeItem('refreshToken')
-            setScreen('login')
+            // Only clear session on auth failures (401/403). Otherwise keep the
+            // user logged in and show main with whatever token they had — don't
+            // kick them to login over a transient error.
+            if (e?.status === 401 || e?.status === 403) {
+              localStorage.removeItem('accessToken')
+              localStorage.removeItem('refreshToken')
+              setScreen('login')
+            } else {
+              setScreen('main')
+              loadData()
+            }
           }
         })()
       } else {
@@ -129,11 +138,12 @@ function ConsumerApp() {
 
   async function loadData() {
     try {
-      const [balData, histData, accData, catData] = await Promise.all([
+      const [balData, histData, accData, catData, activeCodes] = await Promise.all([
         api.getBalance(),
         api.getHistory(),
         api.getAccount(),
         api.getCatalog(50, 0),
+        api.getActiveRedemptions().catch(() => ({ redemptions: [] })),
       ])
       setBalance(balData.balance)
       setConfirmedBalance(balData.confirmed || balData.balance)
@@ -144,21 +154,32 @@ function ConsumerApp() {
       setHistory(histData.entries)
       setAccount(accData)
       setProducts(catData.products || [])
+      setActiveCodesCount(activeCodes.redemptions?.length || 0)
 
       if (!localStorage.getItem('welcomeDismissed') && histData.entries.length === 0) {
         setShowWelcome(true)
       }
     } catch (err: any) {
       logEvent('loadData_fail', `err=${err?.message || err?.error || 'unknown'}`)
-      // Token is invalid or expired and refresh failed — clear and show login
-      localStorage.removeItem('accessToken')
-      localStorage.removeItem('refreshToken')
-      setScreen('login')
+      // Only logout on true auth failures (401/403). Network errors or 500s
+      // should keep the user on the main screen so they can retry.
+      if (err?.status === 401 || err?.status === 403) {
+        localStorage.removeItem('accessToken')
+        localStorage.removeItem('refreshToken')
+        setScreen('login')
+      }
+      // otherwise stay on main — user sees stale data but can retry
     }
   }
 
   async function handleRequestOTP() {
     setError('')
+    // Validate Venezuelan phone format: +58 + 10 digits
+    const digits = phoneNumber.replace(/\D/g, '')
+    if (!digits.startsWith('58') || digits.length !== 12) {
+      setError('Ingresa un numero venezolano valido (10 digitos)')
+      return
+    }
     setLoading(true)
     try {
       await api.requestOTP(phoneNumber)
@@ -233,23 +254,64 @@ function ConsumerApp() {
             <h1 className="text-3xl font-extrabold tracking-tight text-indigo-700">Valee</h1>
             <p className="text-slate-500 mt-2">Ingresa tu numero para comenzar</p>
           </div>
-          <div className="space-y-4">
-            <input
-              type="tel" placeholder="+58 412 1234567"
-              value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && phoneNumber && handleRequestOTP()}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
-            {error && <p className="text-red-500 text-sm">{error}</p>}
-            <button
-              onClick={handleRequestOTP} disabled={loading || !phoneNumber}
-              className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 transition"
-            >
-              {loading ? 'Enviando...' : 'Enviar codigo OTP'}
-            </button>
-            <p className="text-xs text-slate-400 text-center pt-2">
-              Recibiras un codigo por WhatsApp para verificar tu numero.
-            </p>
+          <div className="space-y-2">
+            {(() => {
+              // Accept either "0414..." (11 digits) or "414..." (10 digits)
+              // Strip leading zero if present for normalization
+              const raw = phoneNumber.startsWith('+58') ? phoneNumber.slice(3) : phoneNumber.replace(/\D/g, '')
+              const normalized = raw.startsWith('0') ? raw.slice(1) : raw
+              const prefix = normalized.slice(0, 3)
+              const validPrefix = ['412', '414', '416', '424', '426'].includes(prefix)
+              const validLength = normalized.length === 10
+              const isValid = validPrefix && validLength
+              const showValidation = normalized.length > 0
+
+              // Display value: user can see what they typed (with or without leading 0)
+              const displayValue = raw
+
+              return (
+                <>
+                  <div className={`rounded-xl border overflow-hidden ${
+                    showValidation && !isValid
+                      ? 'border-red-300 focus-within:ring-2 focus-within:ring-red-400'
+                      : 'border-slate-200 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500'
+                  }`}>
+                    <input
+                      type="tel"
+                      inputMode="numeric"
+                      placeholder="0414 1234567"
+                      value={displayValue}
+                      onChange={e => {
+                        const digits = e.target.value.replace(/\D/g, '').slice(0, 11)
+                        // Normalize to 10-digit body for storage (strip optional leading 0)
+                        const body = digits.startsWith('0') ? digits.slice(1) : digits
+                        setPhoneNumber(body ? `+58${body.slice(0, 10)}` : '')
+                        if (error) setError('')
+                      }}
+                      onKeyDown={e => e.key === 'Enter' && isValid && handleRequestOTP()}
+                      className="w-full px-4 py-3 focus:outline-none"
+                    />
+                  </div>
+                  {showValidation && normalized.length >= 3 && !validPrefix && (
+                    <p className="text-amber-600 text-xs">El numero debe empezar con 0414, 0424, 0412, 0416 o 0426</p>
+                  )}
+                  {showValidation && validPrefix && !validLength && (
+                    <p className="text-slate-500 text-xs">Faltan {10 - normalized.length} digitos</p>
+                  )}
+                  {error && <p className="text-red-500 text-sm">{error}</p>}
+                  <button
+                    onClick={handleRequestOTP}
+                    disabled={loading || !isValid}
+                    className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 transition mt-3"
+                  >
+                    {loading ? 'Enviando...' : 'Enviar codigo OTP'}
+                  </button>
+                  <p className="text-xs text-slate-400 text-center pt-2">
+                    Recibiras un codigo por WhatsApp para verificar tu numero.
+                  </p>
+                </>
+              )
+            })()}
           </div>
         </div>
       </div>
@@ -267,8 +329,14 @@ function ConsumerApp() {
           </div>
           <div className="space-y-4">
             <input
-              type="text" placeholder="000000" maxLength={6}
-              value={otp} onChange={e => setOtp(e.target.value)}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="000000"
+              maxLength={6}
+              value={otp}
+              onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={e => e.key === 'Enter' && otp.length === 6 && handleVerifyOTP()}
               className="w-full px-4 py-3 rounded-xl border border-slate-200 text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
             {error && <p className="text-red-500 text-sm">{error}</p>}
@@ -479,6 +547,22 @@ function ConsumerApp() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* Active codes banner — shows if user has pending QR codes */}
+      {activeCodesCount > 0 && (
+        <Link
+          href="/my-codes"
+          className="block mx-4 mb-24 bg-amber-50 border border-amber-300 rounded-xl p-4 hover:bg-amber-100 transition"
+        >
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-amber-900 font-bold text-sm">Tienes {activeCodesCount} codigo{activeCodesCount > 1 ? 's' : ''} activo{activeCodesCount > 1 ? 's' : ''}</p>
+              <p className="text-amber-700 text-xs mt-0.5">Toca para ver tus QR de canje</p>
+            </div>
+            <MdChevronRight className="w-6 h-6 text-amber-700" />
+          </div>
+        </Link>
       )}
 
       {/* Bottom Fixed Actions */}

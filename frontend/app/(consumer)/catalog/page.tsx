@@ -181,6 +181,13 @@ export default function Catalog() {
           <div className="bg-slate-100 rounded-2xl p-8 inline-block">
             <QRDisplay value={redeemResult.token} />
           </div>
+          {redeemResult.shortCode && (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4">
+              <p className="text-xs text-indigo-600 uppercase tracking-wider font-semibold">Codigo manual</p>
+              <p className="text-3xl font-bold text-indigo-700 tracking-widest font-mono mt-1">{redeemResult.shortCode}</p>
+              <p className="text-xs text-indigo-500 mt-1">Dile este codigo al cajero si no puede escanear</p>
+            </div>
+          )}
           {redeemResult.cashAmount && parseFloat(redeemResult.cashAmount) > 0 ? (
             <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mt-4 text-left space-y-2">
               <p className="text-amber-900 font-bold text-center mb-3">Canje hibrido</p>

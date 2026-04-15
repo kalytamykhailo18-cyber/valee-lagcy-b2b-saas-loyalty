@@ -43,7 +43,7 @@ async function test() {
   // 1. QR contains merchant slug as WhatsApp pre-filled message
   // ──────────────────────────────────
   console.log('1. QR deep link contains merchant identifier');
-  const deepLink = generateWhatsAppDeepLink('panaderia-luna');
+  const deepLink = await generateWhatsAppDeepLink('panaderia-luna');
   // The pre-filled message text is: MERCHANT:panaderia-luna
   const preFilledText = decodeURIComponent(deepLink.split('text=')[1]);
   assert(preFilledText === 'MERCHANT:panaderia-luna', `Pre-filled text: "${preFilledText}"`);

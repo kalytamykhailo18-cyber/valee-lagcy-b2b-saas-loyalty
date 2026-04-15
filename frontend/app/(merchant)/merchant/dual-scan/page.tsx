@@ -3,6 +3,29 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 
+function QRImage({ value }: { value: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    import('qrcode').then(QRCode => {
+      QRCode.toDataURL(value, { width: 320, margin: 2, errorCorrectionLevel: 'M' })
+        .then(url => { if (!cancelled) setDataUrl(url) })
+        .catch(() => { if (!cancelled) setDataUrl(null) })
+    })
+    return () => { cancelled = true }
+  }, [value])
+
+  if (!dataUrl) {
+    return (
+      <div className="w-64 h-64 lg:w-80 lg:h-80 flex items-center justify-center bg-slate-100 rounded-lg">
+        <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+  return <img src={dataUrl} alt="QR" className="w-64 h-64 lg:w-80 lg:h-80" />
+}
+
 export default function DualScanPage() {
   const [amount, setAmount] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -108,11 +131,7 @@ export default function DualScanPage() {
               <p className="text-sm text-slate-500">Muestra este codigo al cliente</p>
 
               <div className="inline-block bg-white border-4 border-emerald-200 rounded-2xl p-4">
-                <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(token)}`}
-                  alt="QR"
-                  className="w-64 h-64 lg:w-80 lg:h-80"
-                />
+                <QRImage value={token} />
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4">

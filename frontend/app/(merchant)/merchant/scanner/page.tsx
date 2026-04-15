@@ -79,9 +79,8 @@ export default function CashierScanner() {
     try {
       const apiPromise = api.scanRedemption(token)
         .catch((e: any) => {
-          // Check if it's a network error
-          const isNetworkError = !e.status || e.status === 0 || e.message === 'Failed to fetch'
-            || (typeof e === 'object' && !('error' in e) && !('message' in e))
+          // Check if it's a network error (no status means no response reached us)
+          const isNetworkError = !e?.status && (e?.message === 'Failed to fetch' || e?.name === 'TypeError')
 
           if (isNetworkError) {
             // Queue for later
@@ -89,7 +88,7 @@ export default function CashierScanner() {
             setPendingCount(getPendingCount())
             return { success: false, queued: true, message: 'Sin conexion. El canje se procesara cuando vuelvas a estar en linea.' }
           }
-          return { success: false, message: e.error || 'Error scanning QR' }
+          return { success: false, message: e?.error || e?.message || 'Error al procesar el canje' }
         })
 
       const animPromise = new Promise(resolve => setTimeout(resolve, 1500))
@@ -318,15 +317,22 @@ export default function CashierScanner() {
           </>
         ) : (
           <>
-            <p className="text-sm text-slate-500 mb-2">Ingresa el token manualmente:</p>
-            <textarea
-              value={tokenInput} onChange={e => setTokenInput(e.target.value)}
-              placeholder="Pega el token QR aqui..."
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm h-24 resize-none"
+            <p className="text-sm text-slate-600 font-medium mb-1">Codigo de canje</p>
+            <p className="text-xs text-slate-400 mb-3">Ingresa el codigo de 6 digitos que te diga el cliente</p>
+            <input
+              type="text"
+              inputMode="numeric"
+              maxLength={6}
+              value={tokenInput}
+              onChange={e => setTokenInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              onKeyDown={e => e.key === 'Enter' && tokenInput.length === 6 && handleManualScan()}
+              placeholder="000000"
+              className="w-full px-4 py-4 rounded-xl border-2 border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-center text-3xl tracking-widest font-mono"
+              autoFocus
             />
-            <button onClick={handleManualScan} disabled={!tokenInput.trim()}
+            <button onClick={handleManualScan} disabled={tokenInput.length !== 6}
               className="w-full mt-4 bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700 disabled:opacity-50 transition">
-              Procesar canje
+              {tokenInput.length === 6 ? 'Procesar canje' : `Ingresa ${6 - tokenInput.length} digito${6 - tokenInput.length === 1 ? '' : 's'} mas`}
             </button>
           </>
         )}

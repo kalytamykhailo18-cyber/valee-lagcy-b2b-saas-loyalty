@@ -7,6 +7,13 @@ interface Settings {
   welcomeBonusAmount: number
   rif: string | null
   name: string
+  logoUrl: string | null
+  address: string | null
+  contactPhone: string | null
+  contactEmail: string | null
+  website: string | null
+  description: string | null
+  instagramHandle: string | null
   preferredExchangeSource: string | null
   referenceCurrency: string
 }
@@ -48,8 +55,21 @@ export default function SettingsPage() {
   const [message, setMessage] = useState('')
   const [welcomeBonus, setWelcomeBonus] = useState('')
   const [rif, setRif] = useState('')
+  const [rifPrefix, setRifPrefix] = useState<'J' | 'V' | 'E' | 'G' | 'P'>('J')
+  const [rifBody, setRifBody] = useState('')
+  const [rifCheck, setRifCheck] = useState('')
+  const [rifError, setRifError] = useState('')
   const [exchangeSource, setExchangeSource] = useState('')
   const [refCurrency, setRefCurrency] = useState('usd')
+  const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [name, setName] = useState('')
+  const [address, setAddress] = useState('')
+  const [contactPhone, setContactPhone] = useState('')
+  const [contactEmail, setContactEmail] = useState('')
+  const [website, setWebsite] = useState('')
+  const [description, setDescription] = useState('')
+  const [instagramHandle, setInstagramHandle] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -65,8 +85,29 @@ export default function SettingsPage() {
       setPlanUsage(pu)
       setWelcomeBonus(String(s.welcomeBonusAmount))
       setRif(s.rif || '')
+      // Parse "J-12345678-9" into prefix/body/check
+      if (s.rif) {
+        const m = String(s.rif).toUpperCase().replace(/\s+/g, '').match(/^([JVEGP])-?(\d{7,9})-?(\d)$/)
+        if (m) {
+          setRifPrefix(m[1] as any)
+          setRifBody(m[2])
+          setRifCheck(m[3])
+        }
+      } else {
+        setRifPrefix('J')
+        setRifBody('')
+        setRifCheck('')
+      }
       setExchangeSource(s.preferredExchangeSource || '')
       setRefCurrency(s.referenceCurrency || 'usd')
+      setLogoUrl(s.logoUrl || null)
+      setName(s.name || '')
+      setAddress(s.address || '')
+      setContactPhone(s.contactPhone || '')
+      setContactEmail(s.contactEmail || '')
+      setWebsite(s.website || '')
+      setDescription(s.description || '')
+      setInstagramHandle(s.instagramHandle || '')
     } catch (e: any) {
       setMessage('Error: ' + (e.error || 'no se pudo cargar'))
     } finally {
@@ -75,23 +116,79 @@ export default function SettingsPage() {
   }
 
   async function save() {
-    setSaving(true)
     setMessage('')
+    setRifError('')
+    // Validate RIF if any part is filled
+    const anyRifPart = rifBody.trim() || rifCheck.trim()
+    let builtRif = ''
+    if (anyRifPart) {
+      if (!rifBody || rifBody.length < 7 || rifBody.length > 9) {
+        setRifError('El cuerpo del RIF debe tener entre 7 y 9 digitos')
+        return
+      }
+      if (!rifCheck || rifCheck.length !== 1) {
+        setRifError('El digito verificador es obligatorio (1 digito)')
+        return
+      }
+      if (!/^\d+$/.test(rifBody) || !/^\d$/.test(rifCheck)) {
+        setRifError('El RIF solo puede contener numeros')
+        return
+      }
+      builtRif = `${rifPrefix}-${rifBody}-${rifCheck}`
+    }
+    setSaving(true)
     try {
       const updated = await api.updateMerchantSettings({
         welcomeBonusAmount: Number(welcomeBonus),
-        rif: rif.trim(),
+        rif: builtRif,
         preferredExchangeSource: exchangeSource || null,
         referenceCurrency: refCurrency,
+        logoUrl: logoUrl,
+        name: name.trim(),
+        address: address.trim() || null,
+        contactPhone: contactPhone.trim() || null,
+        contactEmail: contactEmail.trim() || null,
+        website: website.trim() || null,
+        description: description.trim() || null,
+        instagramHandle: instagramHandle.trim().replace(/^@/, '') || null,
       })
       setSettings(updated)
       setMessage('Guardado')
+      // Update localStorage so other pages (dashboard header) pick up the logo
+      if (updated.logoUrl) localStorage.setItem('tenantLogoUrl', updated.logoUrl)
+      else localStorage.removeItem('tenantLogoUrl')
+      if (updated.name) localStorage.setItem('tenantName', updated.name)
       setTimeout(() => setMessage(''), 2500)
     } catch (e: any) {
       setMessage('Error: ' + (e.error || 'no se pudo guardar'))
     } finally {
       setSaving(false)
     }
+  }
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setMessage('Error: el logo debe ser menor a 2MB')
+      return
+    }
+    setUploadingLogo(true)
+    setMessage('')
+    try {
+      const result = await api.uploadProductImage(file)
+      setLogoUrl(result.url)
+      setMessage('Logo subido. Pulsa Guardar para confirmar.')
+    } catch (err: any) {
+      setMessage('Error al subir logo: ' + (err?.error || err?.message || 'desconocido'))
+    }
+    setUploadingLogo(false)
+    e.target.value = ''
+  }
+
+  function removeLogo() {
+    setLogoUrl(null)
+    setMessage('Logo removido. Pulsa Guardar para confirmar.')
   }
 
   const currentRate = rates.find(r => r.source === exchangeSource && r.currency === refCurrency)
@@ -117,10 +214,92 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Left column */}
           <div className="space-y-6">
+            {/* Merchant info */}
+            <section className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100">
+              <h2 className="font-semibold text-slate-800 text-lg mb-1">Informacion del comercio</h2>
+              <p className="text-xs text-slate-500 mb-4">Estos datos se muestran a los clientes en la PWA y reciben en las notificaciones.</p>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre del comercio <span className="text-red-500">*</span></label>
+                  <input type="text" value={name} onChange={e => setName(e.target.value)} maxLength={255}
+                    placeholder="Ej: Farmacia Central"
+                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion</label>
+                  <input type="text" value={address} onChange={e => setAddress(e.target.value)} maxLength={500}
+                    placeholder="Av. Principal, Valencia, Carabobo"
+                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Telefono de contacto</label>
+                    <input type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} maxLength={30}
+                      placeholder="0414-1234567"
+                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Email de contacto</label>
+                    <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} maxLength={255}
+                      placeholder="info@comercio.com"
+                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sitio web</label>
+                    <input type="text" value={website} onChange={e => setWebsite(e.target.value)} maxLength={500}
+                      placeholder="www.micomercio.com"
+                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Instagram</label>
+                    <div className="relative mt-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">@</span>
+                      <input type="text" value={instagramHandle} onChange={e => setInstagramHandle(e.target.value.replace(/^@/, ''))} maxLength={100}
+                        placeholder="micomercio"
+                        className="w-full pl-7 pr-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Descripcion</label>
+                  <textarea value={description} onChange={e => setDescription(e.target.value)} maxLength={1000}
+                    placeholder="Breve descripcion del comercio y los servicios que ofrece."
+                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <p className="text-xs text-slate-400 mt-1">{description.length}/1000</p>
+                </div>
+              </div>
+            </section>
+
             {/* General */}
             <section className="bg-white rounded-2xl p-5 lg:p-6 shadow-sm border border-slate-100">
               <h2 className="font-semibold text-slate-800 text-lg mb-4">General</h2>
               <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Logo del comercio</label>
+                  <div className="mt-2 flex items-center gap-4">
+                    {logoUrl ? (
+                      <img src={logoUrl} alt="Logo" className="w-20 h-20 rounded-xl object-cover border border-slate-200" />
+                    ) : (
+                      <div className="w-20 h-20 rounded-xl bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs text-center px-2">
+                        Sin logo
+                      </div>
+                    )}
+                    <div className="flex-1 space-y-2">
+                      <label className="inline-block cursor-pointer bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-700 transition">
+                        {uploadingLogo ? 'Subiendo...' : logoUrl ? 'Cambiar logo' : 'Subir logo'}
+                        <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={uploadingLogo} className="hidden" />
+                      </label>
+                      {logoUrl && (
+                        <button onClick={removeLogo} className="block text-xs text-red-600 hover:text-red-800 font-medium">
+                          Quitar logo
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">Formato recomendado: cuadrado, 400x400px, maximo 2MB. Se mostrara en el menu del dashboard.</p>
+                </div>
                 <div>
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos de bienvenida</label>
                   <input type="number" value={welcomeBonus} onChange={e => setWelcomeBonus(e.target.value)}
@@ -129,8 +308,43 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio</label>
-                  <input type="text" value={rif} onChange={e => setRif(e.target.value)} placeholder="J-12345678-9"
-                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <div className={`mt-1 flex items-stretch gap-2 ${rifError ? '' : ''}`}>
+                    <select
+                      value={rifPrefix}
+                      onChange={e => { setRifPrefix(e.target.value as any); if (rifError) setRifError('') }}
+                      className={`px-3 py-2.5 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 font-semibold ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                    >
+                      <option value="J">J</option>
+                      <option value="V">V</option>
+                      <option value="E">E</option>
+                      <option value="G">G</option>
+                      <option value="P">P</option>
+                    </select>
+                    <span className="self-center text-slate-400">-</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={rifBody}
+                      onChange={e => { setRifBody(e.target.value.replace(/\D/g, '').slice(0, 9)); if (rifError) setRifError('') }}
+                      placeholder="12345678"
+                      maxLength={9}
+                      className={`flex-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 font-mono ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                    />
+                    <span className="self-center text-slate-400">-</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={rifCheck}
+                      onChange={e => { setRifCheck(e.target.value.replace(/\D/g, '').slice(0, 1)); if (rifError) setRifError('') }}
+                      placeholder="0"
+                      maxLength={1}
+                      className={`w-12 px-2 py-2.5 rounded-lg border text-sm text-center focus:outline-none focus:ring-2 font-mono ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Prefijo: J (juridico), V (venezolano), E (extranjero), G (gobierno), P (pasaporte). 7-9 digitos + verificador.
+                  </p>
+                  {rifError && <p className="text-xs text-red-500 mt-1">{rifError}</p>}
                 </div>
               </div>
             </section>
