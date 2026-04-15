@@ -18,6 +18,15 @@ type ScanState = 'scanning' | 'processing' | 'success' | 'failure' | 'queued'
 type InputMode = 'camera' | 'manual'
 
 export default function CashierScanner() {
+  // Auth guard — redirect to login if no session
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const token = localStorage.getItem('accessToken')
+    const role = localStorage.getItem('staffRole')
+    if (!token || !role) {
+      window.location.replace('/merchant/login')
+    }
+  }, [])
   const [state, setState] = useState<ScanState>('scanning')
   const [inputMode, setInputMode] = useState<InputMode>('camera')
   const [tokenInput, setTokenInput] = useState('')

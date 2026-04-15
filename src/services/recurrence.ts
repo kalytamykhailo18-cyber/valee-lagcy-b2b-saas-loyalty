@@ -39,7 +39,7 @@ export async function runRecurrenceEngine(): Promise<RecurrenceResult> {
     const cutoffDate = new Date(Date.now() - thresholdDays * 24 * 60 * 60 * 1000);
 
     // Find consumers whose last INVOICE_CLAIMED was before the cutoff
-    const lapsedConsumers = await prisma.$queryRaw<Array<{
+    let lapsedConsumers = await prisma.$queryRaw<Array<{
       account_id: string;
       phone_number: string;
       last_visit: Date;
@@ -60,6 +60,14 @@ export async function runRecurrenceEngine(): Promise<RecurrenceResult> {
         AND a.account_type IN ('shadow', 'verified')
         AND a.phone_number IS NOT NULL
     `;
+
+    // If the rule has a targetPhones list (group), restrict to those numbers only
+    if (rule.targetPhones && rule.targetPhones.length > 0) {
+      const targetTails = new Set(rule.targetPhones.map(p => p.replace(/\D/g, '').slice(-10)));
+      lapsedConsumers = lapsedConsumers.filter(c =>
+        targetTails.has(c.phone_number.replace(/\D/g, '').slice(-10))
+      );
+    }
 
     for (const consumer of lapsedConsumers) {
       const daysSince = Math.floor(

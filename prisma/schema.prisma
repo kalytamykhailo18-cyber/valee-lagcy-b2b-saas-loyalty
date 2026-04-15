@@ -639,6 +639,9 @@ model RecurrenceRule {
   messageTemplate String    @map("message_template")
   bonusAmount     Decimal?  @map("bonus_amount") @db.Decimal(18, 8)
   active          Boolean   @default(true)
+  // If non-empty, only customers whose phone is in this list receive the message.
+  // Empty/null means all lapsed customers (default behavior).
+  targetPhones    String[]  @default([]) @map("target_phones")
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt       DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

@@ -248,38 +248,56 @@ export default function ProductManagement() {
               <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-emerald-200 transition">
                 {editingId === p.id ? (
                   <div className="p-4 space-y-3">
-                    <input
-                      type="text"
-                      value={editForm.name}
-                      onChange={e => setEditForm({ ...editForm, name: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Descripcion"
-                      value={editForm.description}
-                      onChange={e => setEditForm({ ...editForm, description: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    />
-                    <div className="flex items-center gap-2">
-                      <label className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer ${editUploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
-                        {editUploading ? '...' : 'Cambiar foto'}
-                        <input
-                          type="file"
-                          accept="image/jpeg,image/png,image/webp,image/gif"
-                          className="hidden"
-                          disabled={editUploading}
-                          onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'edit'); e.target.value = '' }}
-                        />
-                      </label>
-                      {editForm.photoUrl && (
-                        <img src={editForm.photoUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
-                      )}
+                    <div>
+                      <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+                      <input
+                        type="text"
+                        value={editForm.name}
+                        onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Descripcion</label>
+                      <input
+                        type="text"
+                        placeholder="Detalle del producto"
+                        value={editForm.description}
+                        onChange={e => setEditForm({ ...editForm, description: e.target.value })}
+                        className="w-full mt-1 px-3 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide block mb-1">Foto</label>
+                      <div className="flex items-center gap-2">
+                        <label className={`inline-flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer ${editUploading ? 'bg-slate-100 text-slate-400' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                          {editUploading ? 'Subiendo...' : 'Cambiar foto'}
+                          <input
+                            type="file"
+                            accept="image/jpeg,image/png,image/webp,image/gif"
+                            className="hidden"
+                            disabled={editUploading}
+                            onChange={e => { const f = e.target.files?.[0]; if (f) handleImageUpload(f, 'edit'); e.target.value = '' }}
+                          />
+                        </label>
+                        {editForm.photoUrl && (
+                          <img src={editForm.photoUrl} alt="" className="w-10 h-10 rounded-lg object-cover border border-slate-200" />
+                        )}
+                      </div>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
-                      <input type="number" placeholder="Costo" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
-                      <input type="number" placeholder="Stock" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
-                      <input type="number" placeholder="Nivel" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="px-2 py-2 rounded-lg border text-sm" />
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
+                        <input type="number" placeholder="0" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
+                        <input type="number" placeholder="0" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min</label>
+                        <input type="number" placeholder="1" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                      </div>
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200 transition">Cancelar</button>

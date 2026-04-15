@@ -34,19 +34,25 @@ export default function DualScanPage() {
   const [secondsLeft, setSecondsLeft] = useState(0)
   const [error, setError] = useState('')
 
-  // Countdown
+  // Countdown — compute initial value synchronously so user never sees 0 on mount
   useEffect(() => {
-    if (!expiresAt) return
-    const tick = () => {
-      const left = Math.max(0, Math.round((expiresAt - Date.now()) / 1000))
+    if (!expiresAt) {
+      setSecondsLeft(0)
+      return
+    }
+    // Set immediately on this render cycle
+    const initial = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
+    setSecondsLeft(initial)
+
+    const interval = setInterval(() => {
+      const left = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000))
       setSecondsLeft(left)
       if (left <= 0) {
+        clearInterval(interval)
         setToken(null)
         setExpiresAt(null)
       }
-    }
-    tick()
-    const interval = setInterval(tick, 500)
+    }, 1000)
     return () => clearInterval(interval)
   }, [expiresAt])
 
@@ -59,8 +65,13 @@ export default function DualScanPage() {
     setGenerating(true)
     try {
       const res = await api.initiateDualScan(amount)
+      const exp = Number(res.expiresAt)
+      // Sanity check: server-supplied expiresAt must be in the future. If client
+      // clock is wildly off, treat the value as "now + 60s" so the timer at
+      // least shows something meaningful instead of vanishing instantly.
+      const safeExpiresAt = exp > Date.now() ? exp : Date.now() + 60_000
       setToken(res.token)
-      setExpiresAt(res.expiresAt)
+      setExpiresAt(safeExpiresAt)
     } catch (e: any) {
       setError(e.error || 'Error al generar QR')
     } finally {

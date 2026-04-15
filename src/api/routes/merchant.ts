@@ -5,17 +5,139 @@ import { authenticateStaff, issueStaffTokens, verifyStaffToken } from '../../ser
 import { processCSV } from '../../services/csv-upload.js';
 import { enqueueCsvJob } from '../../services/workers.js';
 import { processRedemption } from '../../services/redemption.js';
-import { upgradeToVerified } from '../../services/accounts.js';
+import { upgradeToVerified, normalizeVenezuelanPhone } from '../../services/accounts.js';
 import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
 import { requireStaffAuth, requireOwnerRole } from '../middleware/auth.js';
 import { verifyAndResolveLedgerEntry } from '../../services/qr-token.js';
 import { uploadImage } from '../../services/cloudinary.js';
 import { checkIdempotencyKey, storeIdempotencyKey } from '../../services/idempotency.js';
 import { createBranch, listBranches, toggleBranch } from '../../services/branches.js';
-import { generateBranchQR } from '../../services/merchant-qr.js';
+import { generateBranchQR, generateMerchantQR } from '../../services/merchant-qr.js';
 import { listDisputes, resolveDispute } from '../../services/disputes.js';
+import { createSystemAccounts } from '../../services/accounts.js';
 
 export default async function merchantRoutes(app: FastifyInstance) {
+
+  // ---- PUBLIC SIGNUP (no auth required) ----
+  app.post('/api/merchant/signup', async (request, reply) => {
+    const {
+      businessName, slug, ownerName, ownerEmail, password,
+      address, contactPhone, rif, description,
+    } = request.body as {
+      businessName?: string;
+      slug?: string;
+      ownerName?: string;
+      ownerEmail?: string;
+      password?: string;
+      address?: string;
+      contactPhone?: string;
+      rif?: string;
+      description?: string;
+    };
+
+    // Validation
+    if (!businessName || businessName.trim().length < 2) {
+      return reply.status(400).send({ error: 'El nombre del comercio es obligatorio (minimo 2 caracteres)' });
+    }
+    if (!slug || !/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$/.test(slug)) {
+      return reply.status(400).send({ error: 'El slug debe tener 2-50 caracteres, solo minusculas, numeros y guiones' });
+    }
+    if (!ownerName || ownerName.trim().length < 2) {
+      return reply.status(400).send({ error: 'Nombre del propietario obligatorio' });
+    }
+    if (!ownerEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
+      return reply.status(400).send({ error: 'Email invalido' });
+    }
+    if (!password || password.length < 8) {
+      return reply.status(400).send({ error: 'La contrasena debe tener al menos 8 caracteres' });
+    }
+
+    // Normalize and validate optional RIF
+    let normalizedRif: string | null = null;
+    if (rif && rif.trim()) {
+      const m = rif.trim().toUpperCase().replace(/\s+/g, '').match(/^([JVEGP])-?(\d{7,9})-?(\d)$/);
+      if (!m) return reply.status(400).send({ error: 'RIF invalido. Formato: J-XXXXXXXX-X' });
+      normalizedRif = `${m[1]}-${m[2]}-${m[3]}`;
+    }
+
+    // Validate optional contact phone (10-15 digits)
+    if (contactPhone && contactPhone.trim()) {
+      const digits = contactPhone.replace(/\D/g, '');
+      if (digits.length < 10 || digits.length > 15) {
+        return reply.status(400).send({ error: 'Telefono invalido. Debe tener entre 10 y 15 digitos.' });
+      }
+    }
+
+    // Check slug not taken
+    const existingSlug = await prisma.tenant.findUnique({ where: { slug } });
+    if (existingSlug) {
+      return reply.status(409).send({ error: 'Ese slug ya esta en uso. Elige otro.' });
+    }
+
+    // Check RIF not already registered
+    if (normalizedRif) {
+      const existingRif = await prisma.tenant.findFirst({ where: { rif: normalizedRif } });
+      if (existingRif) {
+        return reply.status(409).send({ error: 'Ese RIF ya esta registrado en la plataforma.' });
+      }
+    }
+
+    // Check email not used by another staff
+    const existingStaff = await prisma.staff.findFirst({ where: { email: ownerEmail } });
+    if (existingStaff) {
+      return reply.status(409).send({ error: 'Ese email ya tiene una cuenta. Inicia sesion en lugar de registrarte.' });
+    }
+
+    // Create tenant
+    const tenant = await prisma.tenant.create({
+      data: {
+        name: businessName.trim(),
+        slug,
+        ownerEmail,
+        rif: normalizedRif,
+        address: address?.trim() || null,
+        contactPhone: contactPhone?.trim() || null,
+        contactEmail: ownerEmail,
+        description: description?.trim() || null,
+      },
+    });
+
+    // System accounts (issued_value_pool, redemption_holding)
+    await createSystemAccounts(tenant.id);
+
+    // Default asset config (use first asset type, conversion 1:1)
+    const defaultAsset = await prisma.assetType.findFirst();
+    if (defaultAsset) {
+      await prisma.tenantAssetConfig.create({
+        data: { tenantId: tenant.id, assetTypeId: defaultAsset.id, conversionRate: 1 },
+      });
+    }
+
+    // Owner staff account
+    const passwordHash = await bcrypt.hash(password, 10);
+    await prisma.staff.create({
+      data: { tenantId: tenant.id, name: ownerName.trim(), email: ownerEmail, passwordHash, role: 'owner' },
+    });
+
+    // Generate merchant QR (best effort, don't fail signup if Cloudinary down)
+    try {
+      await generateMerchantQR(tenant.id);
+    } catch (err) {
+      console.error('[Signup] QR generation failed (non-fatal):', err);
+    }
+
+    // Auto-login: issue staff tokens so the new owner lands authenticated
+    const newStaff = await prisma.staff.findFirst({ where: { tenantId: tenant.id, role: 'owner' } });
+    if (!newStaff) return reply.status(500).send({ error: 'Error inesperado tras crear cuenta' });
+    const tokens = issueStaffTokens({ staffId: newStaff.id, tenantId: tenant.id, role: 'owner', type: 'staff' });
+
+    return {
+      success: true,
+      ...tokens,
+      staff: { id: newStaff.id, name: newStaff.name, role: newStaff.role },
+      tenant: { id: tenant.id, name: tenant.name, slug: tenant.slug },
+    };
+  });
 
   // ---- IMAGE UPLOAD (Owner only) ----
   app.post('/api/merchant/upload-image', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
@@ -901,14 +1023,22 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
   app.post('/api/merchant/recurrence-rules', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, intervalDays, graceDays, messageTemplate, bonusAmount } = request.body as any;
+    const { name, intervalDays, graceDays, messageTemplate, bonusAmount, targetPhones } = request.body as any;
 
     if (!name || !intervalDays || !messageTemplate) {
       return reply.status(400).send({ error: 'name, intervalDays, and messageTemplate are required' });
     }
 
+    const normalizedPhones = Array.isArray(targetPhones)
+      ? targetPhones.map((p: string) => normalizeVenezuelanPhone(String(p))).filter((p: string) => p && p.length >= 10)
+      : [];
+
     const rule = await prisma.recurrenceRule.create({
-      data: { tenantId, name, intervalDays: parseInt(intervalDays), graceDays: parseInt(graceDays || '1'), messageTemplate, bonusAmount: bonusAmount || null },
+      data: {
+        tenantId, name, intervalDays: parseInt(intervalDays), graceDays: parseInt(graceDays || '1'),
+        messageTemplate, bonusAmount: bonusAmount || null,
+        targetPhones: normalizedPhones,
+      },
     });
     return { rule };
   });
@@ -927,7 +1057,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
   app.patch('/api/merchant/recurrence-rules/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
     const { id } = request.params as { id: string };
-    const { name, intervalDays, graceDays, messageTemplate, bonusAmount } = request.body as any;
+    const { name, intervalDays, graceDays, messageTemplate, bonusAmount, targetPhones } = request.body as any;
 
     const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
     if (!rule) return reply.status(404).send({ error: 'Rule not found' });
@@ -972,6 +1102,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
         updates.bonusAmount = n;
       }
     }
+    if (targetPhones !== undefined) {
+      if (!Array.isArray(targetPhones)) {
+        return reply.status(400).send({ error: 'targetPhones debe ser un array' });
+      }
+      updates.targetPhones = targetPhones
+        .map((p: string) => normalizeVenezuelanPhone(String(p)))
+        .filter((p: string) => p && p.length >= 10);
+    }
 
     const updated = await prisma.recurrenceRule.update({ where: { id }, data: updates });
     return { rule: updated };
@@ -984,11 +1122,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
     if (!rule) return reply.status(404).send({ error: 'Rule not found' });
 
-    // Soft delete: mark as inactive and prefix the name with [DELETED] timestamp
-    await prisma.recurrenceRule.update({
-      where: { id },
-      data: { active: false, name: `[Eliminada ${new Date().toISOString().slice(0, 10)}] ${rule.name}`.slice(0, 255) },
-    });
+    // Hard delete: remove dependent notifications first, then the rule.
+    // Notifications are historical records — losing them is acceptable for a
+    // user-initiated delete (they're not financial). The audit_log row for
+    // CUSTOMER_LOOKUP/etc. lives separately and is preserved.
+    await prisma.recurrenceNotification.deleteMany({ where: { ruleId: id } });
+    await prisma.recurrenceRule.delete({ where: { id } });
     return { success: true };
   });
 
@@ -1004,7 +1143,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const cutoffDate = new Date(Date.now() - thresholdDays * 24 * 60 * 60 * 1000);
 
     // Find consumers whose last INVOICE_CLAIMED was before the cutoff
-    const lapsed = await prisma.$queryRaw<Array<{
+    let lapsed = await prisma.$queryRaw<Array<{
       account_id: string;
       phone_number: string;
       display_name: string | null;
@@ -1028,6 +1167,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
         AND a.phone_number IS NOT NULL
       ORDER BY sub.last_visit ASC
     `;
+
+    // If the rule has a targetPhones list, restrict to those (compare last 10 digits)
+    if (rule.targetPhones && rule.targetPhones.length > 0) {
+      const targetTails = new Set(rule.targetPhones.map(p => p.replace(/\D/g, '').slice(-10)));
+      lapsed = lapsed.filter(c => targetTails.has(c.phone_number.replace(/\D/g, '').slice(-10)));
+    }
 
     // Check which ones have already been notified for their current absence event
     const consumers = await Promise.all(lapsed.map(async c => {
@@ -1203,6 +1348,67 @@ export default async function merchantRoutes(app: FastifyInstance) {
     } catch (e: any) {
       return reply.status(404).send({ error: e.message || 'Branch not found' });
     }
+  });
+
+  app.patch('/api/merchant/branches/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { name, address, latitude, longitude } = request.body as {
+      name?: string; address?: string | null; latitude?: number | null; longitude?: number | null;
+    };
+
+    const branch = await prisma.branch.findFirst({ where: { id, tenantId } });
+    if (!branch) return reply.status(404).send({ error: 'Sucursal no encontrada' });
+
+    const updates: any = {};
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (trimmed.length < 1) return reply.status(400).send({ error: 'El nombre no puede estar vacio' });
+      if (trimmed.length > 255) return reply.status(400).send({ error: 'Nombre maximo 255 caracteres' });
+      updates.name = trimmed;
+    }
+    if (address !== undefined) updates.address = address ? String(address).trim() : null;
+    if (latitude !== undefined) {
+      if (latitude !== null && (typeof latitude !== 'number' || latitude < -90 || latitude > 90)) {
+        return reply.status(400).send({ error: 'Latitud invalida (-90 a 90)' });
+      }
+      updates.latitude = latitude;
+    }
+    if (longitude !== undefined) {
+      if (longitude !== null && (typeof longitude !== 'number' || longitude < -180 || longitude > 180)) {
+        return reply.status(400).send({ error: 'Longitud invalida (-180 a 180)' });
+      }
+      updates.longitude = longitude;
+    }
+
+    const updated = await prisma.branch.update({ where: { id }, data: updates });
+    return { branch: updated };
+  });
+
+  app.delete('/api/merchant/branches/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const branch = await prisma.branch.findFirst({ where: { id, tenantId } });
+    if (!branch) return reply.status(404).send({ error: 'Sucursal no encontrada' });
+
+    // Block delete if branch has any ledger entries (preserves financial history)
+    const entryCount = await prisma.ledgerEntry.count({ where: { branchId: id } });
+    if (entryCount > 0) {
+      return reply.status(409).send({
+        error: `No se puede eliminar: la sucursal tiene ${entryCount} transacciones registradas. Desactivala en su lugar.`,
+      });
+    }
+    // Block delete if cashiers are assigned
+    const staffCount = await prisma.staff.count({ where: { branchId: id } });
+    if (staffCount > 0) {
+      return reply.status(409).send({
+        error: `No se puede eliminar: ${staffCount} cajero(s) asignado(s). Reasignalos primero.`,
+      });
+    }
+
+    await prisma.branch.delete({ where: { id } });
+    return { success: true };
   });
 
   app.post('/api/merchant/branches/:id/generate-qr', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {

@@ -200,6 +200,12 @@ export default function Home() {
             Acceso comercio
           </Link>
           <Link
+            href="/merchant/signup"
+            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+          >
+            Registra tu comercio
+          </Link>
+          <Link
             href="/privacy"
             className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
           >
@@ -338,6 +344,18 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Merchant signup CTA */}
+          <div className="mt-8 bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center">
+            <p className="text-sm font-semibold text-emerald-800">Tienes un comercio?</p>
+            <p className="text-xs text-emerald-700 mt-1 mb-3">Registra tu negocio en Valee gratis y empieza a fidelizar clientes.</p>
+            <Link
+              href="/merchant/signup"
+              className="inline-block bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 transition"
+            >
+              Registra tu comercio
+            </Link>
+          </div>
+
           {/* Footer links */}
           <footer className="mt-10 pt-6 border-t border-slate-200 text-center text-sm font-medium text-slate-500 space-x-6">
             <Link
@@ -345,6 +363,12 @@ export default function Home() {
               className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
             >
               Acceso comercio
+            </Link>
+            <Link
+              href="/merchant/signup"
+              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+            >
+              Registrar comercio
             </Link>
             <Link
               href="/admin/login"

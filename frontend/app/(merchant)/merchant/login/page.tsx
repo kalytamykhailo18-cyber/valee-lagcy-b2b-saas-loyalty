@@ -95,6 +95,9 @@ export default function MerchantLogin() {
             >
               {loading ? 'Ingresando...' : 'Ingresar'}
             </button>
+            <p className="text-center text-sm text-slate-500 pt-2">
+              No tienes cuenta? <Link href="/merchant/signup" className="text-emerald-600 hover:text-emerald-800 font-semibold">Registra tu comercio</Link>
+            </p>
           </div>
         </div>
       </main>

@@ -113,8 +113,13 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- GLOBAL LEDGER AUDIT ----
-  app.get('/api/admin/ledger', { preHandler: [requireAdminAuth] }, async (request) => {
+  app.get('/api/admin/ledger', { preHandler: [requireAdminAuth] }, async (request, reply) => {
     const { tenantId, eventType, status, dateFrom, dateTo, limit = '50', offset = '0' } = request.query as any;
+
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (tenantId && !UUID_RE.test(String(tenantId))) {
+      return reply.status(400).send({ error: 'tenantId debe ser un UUID valido' });
+    }
 
     const where: any = {};
     if (tenantId) where.tenantId = tenantId;

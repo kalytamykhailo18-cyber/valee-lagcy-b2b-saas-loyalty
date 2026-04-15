@@ -9,8 +9,12 @@ export default function LedgerAudit() {
   const [filters, setFilters] = useState({ tenantId: '', eventType: '', limit: '50', offset: '0' })
   const [hashResult, setHashResult] = useState<any>(null)
   const [verifying, setVerifying] = useState(false)
+  const [tenants, setTenants] = useState<any[]>([])
 
-  useEffect(() => { loadLedger() }, [])
+  useEffect(() => {
+    loadLedger()
+    api.getTenants().then(d => setTenants(d.tenants || [])).catch(() => {})
+  }, [])
 
   async function loadLedger() {
     try {
@@ -49,13 +53,16 @@ export default function LedgerAudit() {
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 mb-6">
           <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-4">Filtros</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-            <input
-              type="text"
-              placeholder="Tenant ID"
+            <select
               value={filters.tenantId}
               onChange={e => setFilters({ ...filters, tenantId: e.target.value })}
-              className="px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            />
+              className="px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">Todos los comercios</option>
+              {tenants.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
             <select
               value={filters.eventType}
               onChange={e => setFilters({ ...filters, eventType: e.target.value })}

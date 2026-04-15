@@ -8,7 +8,7 @@ export default function RecurrencePage() {
   const [notifications, setNotifications] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '' })
+  const [form, setForm] = useState({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '', targetPhones: '' as string })
   const [loading, setLoading] = useState(false)
   const [expandedRule, setExpandedRule] = useState<string | null>(null)
   const [eligibleByRule, setEligibleByRule] = useState<Record<string, any>>({})
@@ -86,12 +86,17 @@ export default function RecurrencePage() {
     }
     setLoading(true)
     try {
+      const targetPhonesArr = form.targetPhones
+        .split(/[\n,;]+/)
+        .map(s => s.trim())
+        .filter(Boolean)
       const payload = {
         name: form.name.trim(),
         intervalDays: form.intervalDays,
         graceDays: form.graceDays,
         messageTemplate: form.messageTemplate.trim(),
         bonusAmount: form.bonusAmount || undefined,
+        targetPhones: targetPhonesArr,
       }
       if (editingId) {
         await api.updateRecurrenceRule(editingId, payload)
@@ -102,7 +107,7 @@ export default function RecurrencePage() {
       }
       setShowForm(false)
       setEditingId(null)
-      setForm({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '' })
+      setForm({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '', targetPhones: '' })
       setErrors({})
       loadData()
     } catch (e: any) {
@@ -119,6 +124,7 @@ export default function RecurrencePage() {
       graceDays: String(rule.graceDays),
       messageTemplate: rule.messageTemplate || '',
       bonusAmount: rule.bonusAmount ? String(rule.bonusAmount) : '',
+      targetPhones: Array.isArray(rule.targetPhones) ? rule.targetPhones.join('\n') : '',
     })
     setErrors({})
     setCreateMsg('')
@@ -130,7 +136,7 @@ export default function RecurrencePage() {
   function cancelEdit() {
     setEditingId(null)
     setShowForm(false)
-    setForm({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '' })
+    setForm({ name: '', intervalDays: '14', graceDays: '1', messageTemplate: '', bonusAmount: '', targetPhones: '' })
     setErrors({})
     setCreateMsg('')
   }
@@ -249,6 +255,24 @@ export default function RecurrencePage() {
               />
               {errors.bonusAmount && <p className="text-red-500 text-xs mt-1">{errors.bonusAmount}</p>}
             </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Grupo de telefonos (opcional)</label>
+              <textarea
+                value={form.targetPhones}
+                onChange={e => setForm({ ...form, targetPhones: e.target.value })}
+                placeholder="Deja vacio para enviar a TODOS los clientes inactivos.&#10;O ingresa numeros (uno por linea o separados por coma):&#10;0414 1234567&#10;04241234567"
+                className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm h-28 resize-none font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <p className="text-xs text-slate-400 mt-1">
+                Si dejas vacio el mensaje se envia a TODOS los clientes que no han visitado en el periodo. Si agregas numeros, solo a esos.
+              </p>
+              {form.targetPhones.trim() && (
+                <p className="text-xs text-emerald-600 mt-1 font-semibold">
+                  Grupo: {form.targetPhones.split(/[\n,;]+/).map(s => s.trim()).filter(Boolean).length} numero(s)
+                </p>
+              )}
+            </div>
+
             {createMsg && (
               <p className={`text-sm ${createMsg.toLowerCase().includes('error') ? 'text-red-500' : 'text-emerald-600'}`}>{createMsg}</p>
             )}
@@ -299,6 +323,11 @@ export default function RecurrencePage() {
                       <div className="text-xs text-slate-500 space-y-1">
                         <p>Cada {r.intervalDays} dias + {r.graceDays} de gracia</p>
                         <p>Bono: {r.bonusAmount ? `${Number(r.bonusAmount)} pts` : 'Sin bono'}</p>
+                        <p>
+                          Grupo: {Array.isArray(r.targetPhones) && r.targetPhones.length > 0
+                            ? `${r.targetPhones.length} numero(s) especifico(s)`
+                            : 'Todos los clientes inactivos'}
+                        </p>
                       </div>
                       <p className="text-xs text-slate-400 mt-3 bg-slate-50 p-2 rounded line-clamp-3">
                         {r.messageTemplate}

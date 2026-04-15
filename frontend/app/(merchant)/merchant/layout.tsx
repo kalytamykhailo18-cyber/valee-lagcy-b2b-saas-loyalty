@@ -50,12 +50,21 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   // does NOT remount when going from /merchant/login → /merchant, so a single
   // mount-time read would miss the role/name written by the login page.
   useEffect(() => {
-    setRole(localStorage.getItem('staffRole'))
+    const storedRole = localStorage.getItem('staffRole')
+    const storedToken = localStorage.getItem('accessToken')
+    setRole(storedRole)
     setStaffName(localStorage.getItem('staffName') || '')
     setTenantName(localStorage.getItem('tenantName') || '')
     setTenantLogoUrl(localStorage.getItem('tenantLogoUrl') || null)
     setDrawerOpen(false)
-  }, [pathname])
+
+    // Auth guard: if visiting a protected merchant route without a session,
+    // redirect to login. Public routes (login/signup/scanner) are handled below.
+    const publicRoutes = ['/merchant/login', '/merchant/signup', '/merchant/scanner']
+    if (!publicRoutes.includes(pathname) && (!storedToken || !storedRole)) {
+      router.replace('/merchant/login')
+    }
+  }, [pathname, router])
 
   // Fetch tenant info if not in localStorage (first visit after login)
   useEffect(() => {
@@ -78,7 +87,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     })()
   }, [mounted, role, tenantName, tenantLogoUrl])
 
-  const bareRoutes = ['/merchant/login', '/merchant/scanner']
+  const bareRoutes = ['/merchant/login', '/merchant/signup', '/merchant/scanner']
   if (bareRoutes.includes(pathname)) {
     return <>{children}</>
   }

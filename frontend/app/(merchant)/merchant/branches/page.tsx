@@ -26,8 +26,66 @@ export default function BranchesPage() {
   const [creating, setCreating] = useState(false)
   const [generatingQR, setGeneratingQR] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', address: '', latitude: '', longitude: '' })
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
   useEffect(() => { loadBranches() }, [])
+
+  function startEdit(b: Branch) {
+    setEditingId(b.id)
+    setEditForm({
+      name: b.name,
+      address: b.address || '',
+      latitude: b.latitude != null ? String(b.latitude) : '',
+      longitude: b.longitude != null ? String(b.longitude) : '',
+    })
+    setMessage('')
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setEditForm({ name: '', address: '', latitude: '', longitude: '' })
+  }
+
+  async function saveEdit() {
+    if (!editingId) return
+    const trimmed = editForm.name.trim()
+    if (!trimmed) {
+      setMessage('Error: el nombre no puede estar vacio')
+      return
+    }
+    setSavingEdit(true)
+    try {
+      await api.updateBranch(editingId, {
+        name: editForm.name.trim(),
+        address: editForm.address.trim() || null,
+        latitude: editForm.latitude ? parseFloat(editForm.latitude) : null,
+        longitude: editForm.longitude ? parseFloat(editForm.longitude) : null,
+      })
+      setMessage('Sucursal actualizada')
+      setEditingId(null)
+      loadBranches()
+    } catch (e: any) {
+      setMessage(`Error: ${e?.error || e?.message || 'no se pudo actualizar'}`)
+    }
+    setSavingEdit(false)
+  }
+
+  async function deleteBranch(b: Branch) {
+    if (!confirm(`Eliminar la sucursal "${b.name}"? Esta accion es permanente.`)) return
+    setDeletingId(b.id)
+    setMessage('')
+    try {
+      await api.deleteBranch(b.id)
+      setMessage('Sucursal eliminada')
+      loadBranches()
+    } catch (e: any) {
+      setMessage(`Error: ${e?.error || e?.message || 'no se pudo eliminar'}`)
+    }
+    setDeletingId(null)
+  }
 
   async function loadBranches() {
     try {
@@ -221,6 +279,12 @@ export default function BranchesPage() {
                       <span className={`absolute top-0.5 left-0.5 w-6 h-6 bg-white rounded-full shadow transition-transform ${b.active ? 'translate-x-5' : 'translate-x-0'}`} />
                     </button>
                   </div>
+                  <div className="flex gap-3 mt-3">
+                    <button onClick={() => startEdit(b)} className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">Editar</button>
+                    <button onClick={() => deleteBranch(b)} disabled={deletingId === b.id} className="text-xs text-red-600 hover:text-red-800 font-semibold disabled:opacity-50">
+                      {deletingId === b.id ? 'Eliminando...' : 'Eliminar'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* QR section */}
@@ -258,6 +322,63 @@ export default function BranchesPage() {
           </div>
         )}
       </div>
+
+      {/* Edit Modal */}
+      {editingId && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto"
+          onClick={cancelEdit}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8 max-h-[calc(100vh-4rem)] overflow-y-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-lg font-bold text-slate-800">Editar sucursal</h2>
+              <button onClick={cancelEdit} className="text-slate-400 hover:text-slate-600 text-2xl leading-none" aria-label="Cerrar">&times;</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre</label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion</label>
+                <input
+                  type="text"
+                  value={editForm.address}
+                  onChange={e => setEditForm({ ...editForm, address: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Ubicacion en el mapa</label>
+                <div className="mt-2">
+                  <LocationPicker
+                    latitude={editForm.latitude ? parseFloat(editForm.latitude) : null}
+                    longitude={editForm.longitude ? parseFloat(editForm.longitude) : null}
+                    onChange={(lat, lng) => setEditForm({ ...editForm, latitude: lat != null ? String(lat) : '', longitude: lng != null ? String(lng) : '' })}
+                    address={editForm.address}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex gap-3">
+              <button onClick={cancelEdit} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-200 transition">
+                Cancelar
+              </button>
+              <button onClick={saveEdit} disabled={savingEdit} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition">
+                {savingEdit ? 'Guardando...' : 'Guardar cambios'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

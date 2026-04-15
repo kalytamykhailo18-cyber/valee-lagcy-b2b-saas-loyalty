@@ -191,6 +191,18 @@ export const api = {
     request(`/api/merchant/products/${id}/toggle`, { method: 'PATCH' }),
   scanRedemption: (token: string) =>
     request('/api/merchant/scan-redemption', { method: 'POST', body: JSON.stringify({ token }) }),
+  merchantSignup: (data: {
+    businessName: string;
+    slug: string;
+    ownerName: string;
+    ownerEmail: string;
+    password: string;
+    rif?: string;
+    contactPhone?: string;
+    address?: string;
+    description?: string;
+  }) =>
+    request('/api/merchant/signup', { method: 'POST', body: JSON.stringify(data) }),
   getCustomers: (params?: { limit?: number; offset?: number; search?: string }) => {
     const qs = new URLSearchParams();
     if (params?.limit) qs.set('limit', String(params.limit));
@@ -263,6 +275,10 @@ export const api = {
     request('/api/merchant/branches', { method: 'POST', body: JSON.stringify(data) }),
   toggleBranch: (id: string) =>
     request(`/api/merchant/branches/${id}/toggle`, { method: 'PATCH' }),
+  updateBranch: (id: string, data: { name?: string; address?: string | null; latitude?: number | null; longitude?: number | null }) =>
+    request(`/api/merchant/branches/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteBranch: (id: string) =>
+    request(`/api/merchant/branches/${id}`, { method: 'DELETE' }),
   generateBranchQR: (id: string) =>
     request(`/api/merchant/branches/${id}/generate-qr`, { method: 'POST' }),
 

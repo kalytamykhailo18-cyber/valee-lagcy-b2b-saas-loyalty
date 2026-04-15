@@ -196,9 +196,10 @@ export default function MerchantDashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
       {(() => {
+        const activeBranches = branches.filter(b => b.active)
         const branchLabel = selectedBranch
           ? (branches.find(b => b.id === selectedBranch)?.name || 'Sucursal')
-          : (branches.length > 0 ? 'Todas las sucursales' : 'Dashboard')
+          : (activeBranches.length >= 2 ? 'Todas las sucursales' : (activeBranches[0]?.name || 'Dashboard'))
         return (
           <>
             {/* Mobile-only header */}
