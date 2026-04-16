@@ -144,10 +144,23 @@ export default function CashierScanner() {
         { facingMode: 'environment' },
         {
           fps: 10,
-          qrbox: { width: 250, height: 250 },
+          qrbox: { width: 260, height: 260 },
           aspectRatio: 1,
           disableFlip: false,
-        },
+          // Continuous autofocus + higher target resolution so the camera
+          // actually catches small QR codes printed on receipts. Without this
+          // many phones lock focus once and never re-focus, so the cashier
+          // sees a blurry preview that never decodes.
+          videoConstraints: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            advanced: [
+              { focusMode: 'continuous' },
+              { focusDistance: { min: 0, ideal: 0.2, max: 1 } },
+            ],
+          },
+        } as any,
         (decodedText: string) => {
           if (!isProcessingRef.current && decodedText.trim()) {
             processToken(decodedText.trim())
@@ -155,6 +168,15 @@ export default function CashierScanner() {
         },
         () => {}
       )
+      // Belt-and-suspenders: force continuous autofocus via the raw track API
+      // for browsers that ignore advanced constraints in getUserMedia.
+      try {
+        const videoEl = document.querySelector<HTMLVideoElement>(`#${scannerContainerId} video`)
+        const track = (videoEl?.srcObject as MediaStream | null)?.getVideoTracks?.()[0]
+        if (track && 'applyConstraints' in track) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] }).catch(() => {})
+        }
+      } catch {}
     } catch (err: any) {
       console.error('Camera start error:', err)
       const msg = typeof err === 'string' ? err : err?.message || 'No se pudo acceder a la camara'
@@ -191,7 +213,7 @@ export default function CashierScanner() {
           <span className="text-8xl">*</span>
           <h1 className="text-3xl font-bold mt-6">CANJE EXITOSO</h1>
           {result?.productName && <p className="text-xl mt-2">{result.productName}</p>}
-          {result?.amount && <p className="text-2xl font-bold mt-2">{parseFloat(result.amount).toLocaleString()} pts</p>}
+          {result?.amount && <p className="text-2xl font-bold mt-2">{Math.round(parseFloat(result.amount)).toLocaleString()} pts</p>}
           {isHybrid && (
             <div className="bg-yellow-400 text-yellow-900 rounded-xl p-4 mt-4 mx-4">
               <p className="text-sm font-bold uppercase">Oferta hibrida</p>
@@ -254,19 +276,19 @@ export default function CashierScanner() {
   // SCANNING screen
   return (
     <div className="min-h-screen bg-emerald-50 p-4">
-      <div className="flex items-center gap-3 mb-6">
-        <Link href="/merchant" className="text-emerald-700 text-2xl">&larr;</Link>
-        <h1 className="text-xl font-bold text-emerald-800">Escaner de canjes</h1>
+      <div className="flex items-center gap-3 mb-6 aa-rise-sm">
+        <Link href="/merchant" className="text-emerald-700 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <h1 className="text-xl font-bold text-emerald-800 tracking-tight">Escaner de canjes</h1>
       </div>
 
       {/* Offline / Sync indicators */}
       {!isOnline && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
+        <div className="aa-pop bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
           Sin conexion. Los canjes se guardaran localmente.
         </div>
       )}
       {pendingCount > 0 && (
-        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4 flex items-center justify-between">
+        <div className="aa-pop bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4 flex items-center justify-between">
           <span className="text-sm text-indigo-800">
             {syncing ? 'Sincronizando...' : `${pendingCount} canje(s) pendiente(s)`}
           </span>
@@ -302,7 +324,7 @@ export default function CashierScanner() {
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm">
+      <div className="bg-white rounded-2xl p-6 shadow-sm aa-rise" style={{ animationDelay: '120ms' }}>
         {inputMode === 'camera' ? (
           <>
             {cameraError ? (
@@ -336,12 +358,12 @@ export default function CashierScanner() {
               onChange={e => setTokenInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={e => e.key === 'Enter' && tokenInput.length === 6 && handleManualScan()}
               placeholder="000000"
-              className="w-full px-4 py-4 rounded-xl border-2 border-slate-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-center text-3xl tracking-widest font-mono"
+              className="aa-field aa-field-emerald w-full px-4 py-4 rounded-xl border-2 border-slate-200 focus:border-emerald-500 text-center text-3xl tracking-widest font-mono"
               autoFocus
             />
             <button onClick={handleManualScan} disabled={tokenInput.length !== 6}
-              className="w-full mt-4 bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700 disabled:opacity-50 transition">
-              {tokenInput.length === 6 ? 'Procesar canje' : `Ingresa ${6 - tokenInput.length} digito${6 - tokenInput.length === 1 ? '' : 's'} mas`}
+              className="aa-btn aa-btn-emerald w-full mt-4 bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700 disabled:opacity-50">
+              <span className="relative z-10">{tokenInput.length === 6 ? 'Procesar canje' : `Ingresa ${6 - tokenInput.length} digito${6 - tokenInput.length === 1 ? '' : 's'} mas`}</span>
             </button>
           </>
         )}

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { MdLocalOffer } from 'react-icons/md'
 import { api } from '@/lib/api'
+import { ImageLightbox } from '@/components/ImageLightbox'
 
 interface Product {
   id: string
@@ -40,6 +41,7 @@ export default function HybridDealsPage() {
     minLevel: '',
   })
   const [loading, setLoading] = useState(false)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
   const [assetTypeId, setAssetTypeId] = useState('')
@@ -134,20 +136,21 @@ export default function HybridDealsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <ImageLightbox src={lightboxSrc} alt="Producto" onClose={() => setLightboxSrc(null)} />
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Promociones hibridas</h1>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Promociones hibridas</h1>
             <p className="text-sm text-slate-500 mt-1">
               Ofertas combinadas de efectivo + puntos. El cliente paga una parte en efectivo y el resto con sus puntos.
             </p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
           >
-            {showForm ? 'Cancelar' : '+ Nueva promocion'}
+            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nueva promocion'}</span>
           </button>
         </div>
       </div>
@@ -177,7 +180,7 @@ export default function HybridDealsPage() {
                   placeholder="Ej: Pizza familiar 2x1"
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
@@ -187,7 +190,7 @@ export default function HybridDealsPage() {
                   placeholder="Detalle de la oferta"
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
@@ -235,7 +238,7 @@ export default function HybridDealsPage() {
                   placeholder="800"
                   value={form.redemptionCost}
                   onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
                 <p className="text-xs text-slate-400 mt-1">Lo que descuenta del saldo del cliente</p>
               </div>
@@ -248,7 +251,7 @@ export default function HybridDealsPage() {
                   type="number"
                   value={form.stock}
                   onChange={e => setForm({ ...form, stock: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
@@ -257,7 +260,7 @@ export default function HybridDealsPage() {
                   type="number"
                   value={form.minLevel}
                   onChange={e => setForm({ ...form, minLevel: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
@@ -265,9 +268,9 @@ export default function HybridDealsPage() {
             <button
               onClick={handleCreate}
               disabled={loading || !form.name || !form.cashPrice || !form.redemptionCost}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
+              className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center"
             >
-              {loading ? 'Creando...' : 'Crear promocion'}
+              {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Creando...' : 'Crear promocion'}</span>
             </button>
           </div>
         )}
@@ -281,8 +284,8 @@ export default function HybridDealsPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {hybridDeals.map(p => (
-              <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-emerald-200 transition">
+            {hybridDeals.map((p, i) => (
+              <div key={p.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
                 {editingId === p.id ? (
                   <div className="p-4 space-y-3">
                     <div>
@@ -344,7 +347,7 @@ export default function HybridDealsPage() {
                     </div>
                     <div className="flex gap-2">
                       <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200 transition">Cancelar</button>
-                      <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700 transition">
+                      <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700">
                         {loading ? '...' : 'Guardar'}
                       </button>
                     </div>
@@ -354,7 +357,14 @@ export default function HybridDealsPage() {
                     {/* Photo */}
                     <div className="relative bg-gradient-to-br from-amber-50 to-emerald-50 aspect-square flex items-center justify-center">
                       {p.photoUrl ? (
-                        <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setLightboxSrc(p.photoUrl)}
+                          className="w-full h-full cursor-zoom-in"
+                          aria-label={`Ver foto de ${p.name}`}
+                        >
+                          <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover hover:opacity-95 transition" />
+                        </button>
                       ) : (
                         <MdLocalOffer className="w-16 h-16 text-amber-400" />
                       )}
@@ -387,7 +397,7 @@ export default function HybridDealsPage() {
                           <span className="text-slate-400 text-xs px-1">+</span>
                           <div className="text-center flex-1">
                             <p className="text-xs text-slate-500">Puntos</p>
-                            <p className="text-base font-bold text-emerald-700">{parseFloat(p.redemptionCost).toLocaleString()}</p>
+                            <p className="text-base font-bold text-emerald-700">{Math.round(parseFloat(p.redemptionCost)).toLocaleString()}</p>
                           </div>
                         </div>
                       </div>

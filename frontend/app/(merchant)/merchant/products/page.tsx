@@ -3,11 +3,13 @@
 import { useState, useEffect } from 'react'
 import { MdCardGiftcard } from 'react-icons/md'
 import { api } from '@/lib/api'
+import { ImageLightbox } from '@/components/ImageLightbox'
 
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1' })
   const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '' })
   const [loading, setLoading] = useState(false)
@@ -110,18 +112,19 @@ export default function ProductManagement() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <ImageLightbox src={lightboxSrc} alt="Producto" onClose={() => setLightboxSrc(null)} />
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Catalogo de productos</h1>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Catalogo de productos</h1>
             <p className="text-sm text-slate-500 mt-1">Crea y gestiona los productos que tus clientes pueden canjear</p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
           >
-            {showForm ? 'Cancelar' : '+ Nuevo producto'}
+            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nuevo producto'}</span>
           </button>
         </div>
       </div>
@@ -141,7 +144,7 @@ export default function ProductManagement() {
                   placeholder="Ej: Cafe gratis"
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
@@ -151,7 +154,7 @@ export default function ProductManagement() {
                   placeholder="Breve descripcion"
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
@@ -192,7 +195,7 @@ export default function ProductManagement() {
                   type="number"
                   value={form.redemptionCost}
                   onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
@@ -212,7 +215,7 @@ export default function ProductManagement() {
                   type="number"
                   value={form.stock}
                   onChange={e => setForm({ ...form, stock: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
@@ -221,7 +224,7 @@ export default function ProductManagement() {
                   type="number"
                   value={form.minLevel}
                   onChange={e => setForm({ ...form, minLevel: e.target.value })}
-                  className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
@@ -238,14 +241,14 @@ export default function ProductManagement() {
 
         {/* Product grid */}
         {products.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-100 aa-rise">
             <p className="text-slate-400">No hay productos creados todavia</p>
             <p className="text-sm text-slate-400 mt-1">Toca el boton Nuevo producto para empezar</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {products.map(p => (
-              <div key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md hover:border-emerald-200 transition">
+            {products.map((p, i) => (
+              <div key={p.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
                 {editingId === p.id ? (
                   <div className="p-4 space-y-3">
                     <div>
@@ -300,9 +303,9 @@ export default function ProductManagement() {
                       </div>
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200 transition">Cancelar</button>
-                      <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700 transition">
-                        {loading ? '...' : 'Guardar'}
+                      <button onClick={() => setEditingId(null)} className="aa-btn flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200"><span className="relative z-10">Cancelar</span></button>
+                      <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center">
+                        {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? '...' : 'Guardar'}</span>
                       </button>
                     </div>
                   </div>
@@ -311,7 +314,14 @@ export default function ProductManagement() {
                     {/* Product photo area */}
                     <div className="relative bg-slate-100 aspect-square flex items-center justify-center">
                       {p.photoUrl ? (
-                        <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setLightboxSrc(p.photoUrl)}
+                          className="w-full h-full cursor-zoom-in"
+                          aria-label={`Ver foto de ${p.name}`}
+                        >
+                          <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover hover:opacity-95 transition" />
+                        </button>
                       ) : (
                         <MdCardGiftcard className="w-12 h-12 text-slate-400" />
                       )}
@@ -332,7 +342,7 @@ export default function ProductManagement() {
                       <div className="flex items-center justify-between mt-3">
                         <div>
                           <p className="text-lg font-bold text-emerald-700">
-                            {parseFloat(p.redemptionCost).toLocaleString()} <span className="text-xs font-medium text-slate-500">pts</span>
+                            {Math.round(parseFloat(p.redemptionCost)).toLocaleString()} <span className="text-xs font-medium text-slate-500">pts</span>
                           </p>
                           {p.cashPrice && Number(p.cashPrice) > 0 && (
                             <p className="text-sm font-bold text-amber-600">+ ${Number(p.cashPrice).toLocaleString()}</p>
@@ -353,9 +363,9 @@ export default function ProductManagement() {
                       )}
                       <button
                         onClick={() => startEdit(p)}
-                        className="w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition"
+                        className="aa-btn w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium"
                       >
-                        Editar
+                        <span className="relative z-10">Editar</span>
                       </button>
                     </div>
                   </>

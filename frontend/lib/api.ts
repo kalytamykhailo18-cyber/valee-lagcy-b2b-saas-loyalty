@@ -161,8 +161,8 @@ export const api = {
   },
 
   // Merchant Auth
-  merchantLogin: (email: string, password: string, tenantSlug: string) =>
-    request('/api/merchant/auth/login', { method: 'POST', body: JSON.stringify({ email, password, tenantSlug }) }),
+  merchantLogin: (email: string, password: string, tenantSlug?: string) =>
+    request('/api/merchant/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...(tenantSlug ? { tenantSlug } : {}) }) }),
 
   // Merchant Data
   uploadProductImage: async (file: File): Promise<{ success: boolean; url: string }> => {
@@ -182,6 +182,15 @@ export const api = {
   },
   uploadCSV: (csvContent: string) =>
     request('/api/merchant/csv-upload', { method: 'POST', body: JSON.stringify({ csvContent }) }),
+  getInvoices: (params: { status?: string; batchId?: string; search?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.status) qs.set('status', params.status)
+    if (params.batchId) qs.set('batchId', params.batchId)
+    if (params.search) qs.set('search', params.search)
+    if (params.limit != null) qs.set('limit', String(params.limit))
+    if (params.offset != null) qs.set('offset', String(params.offset))
+    return request(`/api/merchant/invoices${qs.toString() ? `?${qs}` : ''}`)
+  },
   getProducts: () => request('/api/merchant/products'),
   createProduct: (data: any) =>
     request('/api/merchant/products', { method: 'POST', body: JSON.stringify(data) }),
@@ -193,7 +202,7 @@ export const api = {
     request('/api/merchant/scan-redemption', { method: 'POST', body: JSON.stringify({ token }) }),
   merchantSignup: (data: {
     businessName: string;
-    slug: string;
+    slug?: string;
     ownerName: string;
     ownerEmail: string;
     password: string;
@@ -279,8 +288,11 @@ export const api = {
     request(`/api/merchant/branches/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteBranch: (id: string) =>
     request(`/api/merchant/branches/${id}`, { method: 'DELETE' }),
-  generateBranchQR: (id: string) =>
-    request(`/api/merchant/branches/${id}/generate-qr`, { method: 'POST' }),
+  generateBranchQR: (id: string, reason?: string) =>
+    request(`/api/merchant/branches/${id}/generate-qr`, {
+      method: 'POST',
+      ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+    }),
 
   // Disputes (merchant)
   getDisputes: (status?: string) =>

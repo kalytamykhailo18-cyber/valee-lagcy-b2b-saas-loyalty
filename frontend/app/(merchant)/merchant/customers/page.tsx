@@ -116,14 +116,14 @@ export default function CustomersPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Clientes</h1>
-        <p className="text-sm text-slate-500 mt-1">{total} clientes registrados</p>
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Clientes</h1>
+        <p className="text-sm text-slate-500 mt-1"><span key={total} className="aa-count inline-block tabular-nums">{total}</span> clientes registrados</p>
       </div>
 
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         {/* Search */}
-        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-6 max-w-xl">
+        <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 mb-6 max-w-xl aa-rise" style={{ animationDelay: '80ms' }}>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <MdSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -132,7 +132,7 @@ export default function CustomersPage() {
                 placeholder="Buscar por telefono o cedula..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); setOffset(0) }}
-                className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="aa-field aa-field-emerald w-full pl-10 pr-4 py-2.5 rounded-lg border border-slate-200 text-sm"
               />
             </div>
           </div>
@@ -142,23 +142,35 @@ export default function CustomersPage() {
           {/* Customer List */}
           <div className="lg:col-span-2">
             {loading ? (
-              <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
-                <p className="text-slate-400">Cargando...</p>
+              <div className="space-y-2">
+                {[0,1,2,3,4].map(i => (
+                  <div key={i} className="bg-white rounded-xl p-4 border border-slate-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="aa-skel w-10 h-10 rounded-full" />
+                      <div className="space-y-2 flex-1">
+                        <div className="aa-skel h-3 w-1/3" />
+                        <div className="aa-skel h-2 w-1/4" />
+                      </div>
+                    </div>
+                    <div className="aa-skel h-5 w-16" />
+                  </div>
+                ))}
               </div>
             ) : customers.length === 0 ? (
-              <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
+              <div className="bg-white rounded-2xl p-8 text-center border border-slate-100 aa-rise">
                 <MdPeople className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-slate-400">{search ? 'Sin resultados para esta busqueda' : 'Aun no hay clientes registrados'}</p>
               </div>
             ) : (
               <div className="space-y-2">
-                {customers.map(c => (
+                {customers.map((c, i) => (
                   <button
                     key={c.id}
                     onClick={() => selectCustomer(c.phoneNumber)}
-                    className={`w-full text-left bg-white rounded-xl p-4 shadow-sm border transition hover:shadow-md hover:border-emerald-200 ${
+                    className={`aa-card aa-row-in w-full text-left bg-white rounded-xl p-4 shadow-sm border ${
                       selected?.account?.id === c.id ? 'border-emerald-400 ring-1 ring-emerald-400' : 'border-slate-100'
                     }`}
+                    style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -176,7 +188,7 @@ export default function CustomersPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-emerald-700 text-sm">{parseFloat(c.balance).toLocaleString()}</p>
+                        <p className="font-bold text-emerald-700 text-sm">{Math.round(parseFloat(c.balance)).toLocaleString()}</p>
                         <p className="text-[10px] text-slate-400">{unitLabel}</p>
                       </div>
                     </div>
@@ -212,7 +224,7 @@ export default function CustomersPage() {
             )}
 
             {selected && !selectedLoading && (
-              <div className="space-y-4 sticky top-4">
+              <div key={selected.account.id} className="space-y-4 sticky top-4 aa-rise">
                 {/* Account Card */}
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
                   <div className="flex items-start justify-between mb-3">
@@ -236,7 +248,7 @@ export default function CustomersPage() {
                           placeholder="Nombre del cliente"
                           value={editForm.displayName}
                           onChange={e => { setEditForm({ ...editForm, displayName: e.target.value }); setEditConflict(null) }}
-                          className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="aa-field aa-field-emerald w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm"
                         />
                       </div>
                       <div>
@@ -246,7 +258,7 @@ export default function CustomersPage() {
                           placeholder="V-12345678"
                           value={editForm.cedula}
                           onChange={e => { setEditForm({ ...editForm, cedula: e.target.value }); setEditConflict(null) }}
-                          className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                          className="aa-field aa-field-emerald w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm"
                         />
                       </div>
                       {editConflict && (
@@ -257,8 +269,8 @@ export default function CustomersPage() {
                       {editMsg && <p className={`text-sm ${editMsg.includes('guardados') ? 'text-green-600' : 'text-red-500'}`}>{editMsg}</p>}
                       <div className="flex gap-2">
                         <button onClick={() => { setEditing(false); setEditMsg(''); setEditConflict(null); setEditForm({ displayName: selected.account.displayName || '', cedula: selected.account.cedula || '' }) }} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm">Cancelar</button>
-                        <button onClick={() => handleSaveEdit()} disabled={editSaving} className="flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
-                          {editSaving ? 'Guardando...' : 'Guardar'}
+                        <button onClick={() => handleSaveEdit()} disabled={editSaving} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center">
+                          {editSaving && <span className="aa-spinner" />}<span className="relative z-10">{editSaving ? 'Guardando...' : 'Guardar'}</span>
                         </button>
                       </div>
                     </div>
@@ -292,7 +304,7 @@ export default function CustomersPage() {
                         placeholder="Cedula (V-12345678)"
                         value={cedula}
                         onChange={e => { setCedula(e.target.value); setConflictPhone(null) }}
-                        className="w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        className="aa-field w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                       />
                       {conflictPhone ? (
                         <div className="space-y-2">
@@ -308,8 +320,8 @@ export default function CustomersPage() {
                         <button
                           onClick={() => handleUpgrade(false)}
                           disabled={!cedula}
-                          className="w-full bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
-                        >Verificar identidad</button>
+                          className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-2.5 rounded-lg text-sm font-semibold disabled:opacity-50"
+                        ><span className="relative z-10">Verificar identidad</span></button>
                       )}
                       {upgradeMsg && <p className={`text-sm ${upgradeMsg.includes('exitosamente') ? 'text-green-600' : 'text-amber-600'}`}>{upgradeMsg}</p>}
                     </div>
@@ -347,7 +359,7 @@ export default function CustomersPage() {
                         <div key={e.id} className="flex justify-between items-center py-1.5 border-b border-slate-50 last:border-0">
                           <span className="text-xs text-slate-600 truncate mr-2">{e.eventType}</span>
                           <span className={`text-sm font-semibold ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
-                            {e.entryType === 'CREDIT' ? '+' : '-'}{parseFloat(e.amount).toLocaleString()}
+                            {e.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(e.amount)).toLocaleString()}
                           </span>
                         </div>
                       ))}

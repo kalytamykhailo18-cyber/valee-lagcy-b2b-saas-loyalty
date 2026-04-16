@@ -8,7 +8,10 @@ import Link from 'next/link'
 export default function MerchantLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  // Slug is only requested as a fallback when the email is shared across
+  // multiple tenants. 99% of users never see this field.
   const [tenantSlug, setTenantSlug] = useState('')
+  const [tenantOptions, setTenantOptions] = useState<{ slug: string; name: string }[] | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
@@ -17,7 +20,7 @@ export default function MerchantLogin() {
     setError('')
     setLoading(true)
     try {
-      const data = await api.merchantLogin(email, password, tenantSlug)
+      const data = await api.merchantLogin(email, password, tenantSlug || undefined)
       localStorage.setItem('accessToken', data.accessToken)
       localStorage.setItem('refreshToken', data.refreshToken)
       localStorage.setItem('staffRole', data.staff.role)
@@ -31,7 +34,12 @@ export default function MerchantLogin() {
       } catch {}
       router.push(data.staff.role === 'cashier' ? '/merchant/scanner' : '/merchant')
     } catch (e: any) {
-      setError(e.error || 'Credenciales invalidas')
+      if (e?.requiresTenantSlug && Array.isArray(e.tenantOptions)) {
+        setTenantOptions(e.tenantOptions)
+        setError('Este email esta vinculado a varios comercios. Elige uno.')
+      } else {
+        setError(e.error || 'Credenciales invalidas')
+      }
     } finally {
       setLoading(false)
     }
@@ -39,7 +47,7 @@ export default function MerchantLogin() {
 
   return (
     <div className="min-h-screen flex flex-col bg-emerald-50">
-      <header className="py-6 text-center">
+      <header className="py-6 text-center aa-rise-sm">
         <Link
           href="/"
           className="inline-block text-3xl font-extrabold tracking-tight text-emerald-700 hover:text-emerald-800 transition-colors"
@@ -50,29 +58,20 @@ export default function MerchantLogin() {
 
       <main className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-sm space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-slate-800">Panel del comercio</h1>
+          <div className="text-center aa-rise" style={{ animationDelay: '80ms' }}>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Panel del comercio</h1>
             <p className="text-slate-500 mt-1 text-sm">Inicia sesion con tu cuenta de comercio</p>
           </div>
-          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4">
-            <div>
-              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Codigo del comercio</label>
-              <input
-                type="text"
-                value={tenantSlug}
-                onChange={e => setTenantSlug(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                className="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              />
-            </div>
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4 aa-rise" style={{ animationDelay: '160ms' }}>
             <div>
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Email</label>
               <input
                 type="email"
                 value={email}
-                onChange={e => setEmail(e.target.value)}
+                onChange={e => { setEmail(e.target.value); setTenantOptions(null); setTenantSlug('') }}
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                className="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                autoComplete="email"
+                className="aa-field aa-field-emerald w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm"
               />
             </div>
             <div>
@@ -82,18 +81,38 @@ export default function MerchantLogin() {
                 value={password}
                 onChange={e => setPassword(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleLogin()}
-                className="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                autoComplete="current-password"
+                className="aa-field aa-field-emerald w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm"
               />
             </div>
+
+            {/* Only shows up if the API replies that this email belongs to
+                multiple tenants — the dueño normal nunca lo ve. */}
+            {tenantOptions && tenantOptions.length > 0 && (
+              <div className="aa-pop">
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Elige tu comercio</label>
+                <select
+                  value={tenantSlug}
+                  onChange={e => setTenantSlug(e.target.value)}
+                  className="aa-field aa-field-emerald w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm bg-white"
+                >
+                  <option value="">Selecciona...</option>
+                  {tenantOptions.map(t => (
+                    <option key={t.slug} value={t.slug}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>
+              <div className="aa-pop bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>
             )}
             <button
               onClick={handleLogin}
-              disabled={loading || !email || !password || !tenantSlug}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 transition"
+              disabled={loading || !email || !password || (!!tenantOptions && !tenantSlug)}
+              className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold text-sm hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center"
             >
-              {loading ? 'Ingresando...' : 'Ingresar'}
+              {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Ingresando...' : 'Ingresar'}</span>
             </button>
             <p className="text-center text-sm text-slate-500 pt-2">
               No tienes cuenta? <Link href="/merchant/signup" className="text-emerald-600 hover:text-emerald-800 font-semibold">Registra tu comercio</Link>

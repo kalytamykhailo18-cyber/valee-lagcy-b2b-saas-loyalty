@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react'
 import dynamic from 'next/dynamic'
-import { MdStorefront } from 'react-icons/md'
+import { MdStorefront, MdDownload, MdZoomIn } from 'react-icons/md'
 import { api } from '@/lib/api'
+import { ImageLightbox } from '@/components/ImageLightbox'
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), { ssr: false })
 
@@ -26,6 +27,10 @@ export default function BranchesPage() {
   const [creating, setCreating] = useState(false)
   const [generatingQR, setGeneratingQR] = useState<string | null>(null)
   const [message, setMessage] = useState('')
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
+  const [regenReason, setRegenReason] = useState('')
+  const [regenBranchId, setRegenBranchId] = useState<string | null>(null)
+  const [downloadToast, setDownloadToast] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ name: '', address: '', latitude: '', longitude: '' })
   const [savingEdit, setSavingEdit] = useState(false)
@@ -146,11 +151,11 @@ export default function BranchesPage() {
     } catch {}
   }
 
-  async function handleGenerateQR(id: string) {
+  async function handleGenerateQR(id: string, reason?: string) {
     setGeneratingQR(id)
     setMessage('')
     try {
-      const result = await api.generateBranchQR(id)
+      const result = await api.generateBranchQR(id, reason)
       if (result?.qrCodeUrl) {
         setMessage('Codigo QR generado exitosamente')
       } else {
@@ -165,18 +170,64 @@ export default function BranchesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <ImageLightbox
+        src={lightboxSrc}
+        alt="Codigo QR"
+        downloadName={`qr-sucursal.png`}
+        onClose={() => setLightboxSrc(null)}
+        onDownload={() => { setDownloadToast(true); setTimeout(() => setDownloadToast(false), 3000) }}
+      />
+
+      {/* Regenerate QR confirmation modal */}
+      {regenBranchId && (
+        <div className="aa-backdrop fixed inset-0 z-[90] bg-slate-900/60 flex items-center justify-center p-4" onClick={() => setRegenBranchId(null)}>
+          <div className="aa-modal bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-slate-800">Regenerar QR de sucursal</h3>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
+              El QR anterior quedara inutilizado. Si ya esta impreso en material fisico, tendras que reemplazarlo.
+            </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Razon del cambio <span className="text-red-500">*</span></label>
+              <textarea
+                value={regenReason}
+                onChange={e => setRegenReason(e.target.value)}
+                placeholder="Ej: El QR anterior fue vandalizado, cambio de ubicacion..."
+                className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm h-20 resize-none"
+              />
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setRegenBranchId(null)} className="aa-btn flex-1 bg-slate-100 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-200">
+                <span className="relative z-10">Cancelar</span>
+              </button>
+              <button
+                onClick={async () => {
+                  if (!regenReason.trim()) return
+                  const bid = regenBranchId
+                  setRegenBranchId(null)
+                  await handleGenerateQR(bid, regenReason.trim())
+                }}
+                disabled={regenReason.trim().length < 3}
+                className="aa-btn aa-btn-danger flex-1 bg-red-600 text-white py-2.5 rounded-xl text-sm font-semibold hover:bg-red-700 disabled:opacity-50"
+              >
+                <span className="relative z-10">Regenerar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Sucursales</h1>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Sucursales</h1>
             <p className="text-sm text-slate-500 mt-1">Gestiona las ubicaciones fisicas de tu comercio y sus codigos QR</p>
           </div>
           <button
             onClick={() => setShowForm(!showForm)}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
           >
-            {showForm ? 'Cancelar' : '+ Nueva sucursal'}
+            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nueva sucursal'}</span>
           </button>
         </div>
       </div>
@@ -204,7 +255,7 @@ export default function BranchesPage() {
                 placeholder="Ej: Sucursal Centro"
                 value={form.name}
                 onChange={e => { setForm({ ...form, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: undefined }) }}
-                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.name ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.name ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
             </div>
@@ -215,7 +266,7 @@ export default function BranchesPage() {
                 placeholder="Av. Principal, Valencia"
                 value={form.address}
                 onChange={e => { setForm({ ...form, address: e.target.value }); if (errors.address) setErrors({ ...errors, address: undefined }) }}
-                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.address ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.address ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               {errors.address && <p className="text-red-500 text-xs mt-1">{errors.address}</p>}
             </div>
@@ -238,9 +289,9 @@ export default function BranchesPage() {
             <button
               onClick={handleCreate}
               disabled={creating}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
+              className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center"
             >
-              {creating ? 'Creando...' : 'Crear sucursal'}
+              {creating && <span className="aa-spinner" />}<span className="relative z-10">{creating ? 'Creando...' : 'Crear sucursal'}</span>
             </button>
           </div>
         )}
@@ -256,8 +307,8 @@ export default function BranchesPage() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {branches.map(b => (
-              <div key={b.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition overflow-hidden">
+            {branches.map((b, i) => (
+              <div key={b.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
                 <div className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
@@ -290,20 +341,52 @@ export default function BranchesPage() {
                 {/* QR section */}
                 <div className="px-5 pb-5 pt-3 border-t border-slate-100">
                   {b.qrCodeUrl ? (
-                    <div className="flex items-center gap-3">
-                      <img
-                        src={b.qrCodeUrl}
-                        alt={`QR ${b.name}`}
-                        className="w-20 h-20 rounded-lg border border-slate-200 flex-shrink-0"
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-slate-500 mb-1">Codigo QR activo</p>
+                    <div className="flex items-start gap-3">
+                      <button
+                        onClick={() => setLightboxSrc(b.qrCodeUrl)}
+                        className="group relative cursor-zoom-in flex-shrink-0"
+                        aria-label="Ver QR en grande"
+                      >
+                        <img
+                          src={b.qrCodeUrl}
+                          alt={`QR ${b.name}`}
+                          className="w-20 h-20 rounded-lg border border-slate-200 group-hover:opacity-90 group-hover:scale-[1.03] transition"
+                        />
+                        <span className="absolute inset-0 rounded-lg bg-black/0 group-hover:bg-black/20 flex items-center justify-center opacity-0 group-hover:opacity-100 transition">
+                          <MdZoomIn className="w-5 h-5 text-white" />
+                        </span>
+                      </button>
+                      <div className="flex-1 min-w-0 space-y-1.5">
+                        <p className="text-xs text-slate-500">Codigo QR activo</p>
                         <button
-                          onClick={() => handleGenerateQR(b.id)}
-                          disabled={generatingQR === b.id}
-                          className="text-xs text-emerald-600 hover:text-emerald-800 font-medium"
+                          onClick={async (e) => {
+                            e.preventDefault()
+                            try {
+                              const url = b.qrCodeUrl!.includes('res.cloudinary.com')
+                                ? b.qrCodeUrl!.replace('/upload/', '/upload/fl_attachment/')
+                                : b.qrCodeUrl!
+                              const res = await fetch(url)
+                              const blob = await res.blob()
+                              const a = document.createElement('a')
+                              a.href = URL.createObjectURL(blob)
+                              a.download = `qr-${b.name.replace(/\s+/g, '-').toLowerCase()}.png`
+                              document.body.appendChild(a)
+                              a.click()
+                              document.body.removeChild(a)
+                              URL.revokeObjectURL(a.href)
+                            } catch {}
+                            setDownloadToast(true)
+                            setTimeout(() => setDownloadToast(false), 3000)
+                          }}
+                          className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 font-medium"
                         >
-                          {generatingQR === b.id ? 'Regenerando...' : 'Regenerar QR'}
+                          <MdDownload className="w-4 h-4" /> Descargar
+                        </button>
+                        <button
+                          onClick={() => { setRegenBranchId(b.id); setRegenReason('') }}
+                          className="block text-xs text-slate-400 hover:text-red-600 font-medium"
+                        >
+                          Regenerar QR
                         </button>
                       </div>
                     </div>
@@ -311,9 +394,9 @@ export default function BranchesPage() {
                     <button
                       onClick={() => handleGenerateQR(b.id)}
                       disabled={generatingQR === b.id}
-                      className="w-full bg-emerald-50 text-emerald-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-100 disabled:opacity-50 transition"
+                      className="aa-btn aa-btn-emerald w-full bg-emerald-50 text-emerald-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-100 disabled:opacity-50"
                     >
-                      {generatingQR === b.id ? 'Generando...' : 'Generar codigo QR'}
+                      <span className="relative z-10">{generatingQR === b.id ? 'Generando...' : 'Generar codigo QR'}</span>
                     </button>
                   )}
                 </div>
@@ -323,14 +406,21 @@ export default function BranchesPage() {
         )}
       </div>
 
+      {/* Download toast */}
+      {downloadToast && (
+        <div className="aa-pop fixed bottom-6 left-1/2 -translate-x-1/2 z-[80] bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2">
+          Descarga de QR exitosa. Revisa tus archivos.
+        </div>
+      )}
+
       {/* Edit Modal */}
       {editingId && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto"
+          className="aa-backdrop fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 overflow-y-auto"
           onClick={cancelEdit}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8 max-h-[calc(100vh-4rem)] overflow-y-auto"
+            className="aa-modal bg-white rounded-2xl shadow-xl w-full max-w-2xl my-8 max-h-[calc(100vh-4rem)] overflow-y-auto"
             onClick={e => e.stopPropagation()}
           >
             <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
@@ -369,11 +459,11 @@ export default function BranchesPage() {
               </div>
             </div>
             <div className="sticky bottom-0 bg-white border-t border-slate-200 px-6 py-4 flex gap-3">
-              <button onClick={cancelEdit} className="flex-1 bg-slate-100 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-200 transition">
-                Cancelar
+              <button onClick={cancelEdit} className="aa-btn flex-1 bg-slate-100 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-200">
+                <span className="relative z-10">Cancelar</span>
               </button>
-              <button onClick={saveEdit} disabled={savingEdit} className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition">
-                {savingEdit ? 'Guardando...' : 'Guardar cambios'}
+              <button onClick={saveEdit} disabled={savingEdit} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2.5 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center">
+                {savingEdit && <span className="aa-spinner" />}<span className="relative z-10">{savingEdit ? 'Guardando...' : 'Guardar cambios'}</span>
               </button>
             </div>
           </div>

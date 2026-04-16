@@ -32,58 +32,67 @@ export default function AdminDashboard() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Panel de administracion</h1>
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Panel de administracion</h1>
         <p className="text-sm text-slate-500 mt-1">Bienvenido {adminName}</p>
       </div>
 
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8 space-y-6">
         {/* Metrics */}
-        {metrics && (
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+        {metrics ? (
+          <div className="aa-stagger grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Comercios activos</p>
-              <p className="text-3xl font-bold text-indigo-700 mt-2">{metrics.activeTenants}</p>
+              <p key={metrics.activeTenants} className="text-3xl font-bold text-indigo-700 mt-2 aa-count tabular-nums">{metrics.activeTenants}</p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Consumidores</p>
-              <p className="text-3xl font-bold text-indigo-700 mt-2">{metrics.totalConsumers}</p>
+              <p key={metrics.totalConsumers} className="text-3xl font-bold text-indigo-700 mt-2 aa-count tabular-nums">{metrics.totalConsumers}</p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">En circulacion</p>
-              <p className="text-3xl font-bold text-emerald-700 mt-2 truncate">
-                {parseFloat(metrics.totalValueInCirculation).toLocaleString()}
+              <p key={metrics.totalValueInCirculation} className="text-3xl font-bold text-emerald-700 mt-2 truncate aa-count tabular-nums">
+                {Math.round(parseFloat(metrics.totalValueInCirculation)).toLocaleString()}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Validaciones 30d</p>
-              <p className="text-3xl font-bold text-slate-800 mt-2">{metrics.validationsLast30Days}</p>
+              <p key={metrics.validationsLast30Days} className="text-3xl font-bold text-slate-800 mt-2 aa-count tabular-nums">{metrics.validationsLast30Days}</p>
             </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 lg:gap-4">
+            {[0,1,2,3].map(i => (
+              <div key={i} className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 space-y-3">
+                <div className="aa-skel h-2 w-2/3" />
+                <div className="aa-skel h-7 w-1/2" />
+              </div>
+            ))}
           </div>
         )}
 
         {/* Navigation cards */}
-        <section>
+        <section className="aa-rise" style={{ animationDelay: '280ms' }}>
           <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">Acciones rapidas</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="aa-stagger grid grid-cols-1 md:grid-cols-3 gap-4">
             <Link
               href="/admin/tenants"
-              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+              className="aa-card block bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
             >
               <p className="font-semibold text-slate-800">Gestion de comercios</p>
               <p className="text-xs text-slate-500 mt-1">Crear, ver y desactivar merchants</p>
             </Link>
             <Link
               href="/admin/ledger"
-              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+              className="aa-card block bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
             >
               <p className="font-semibold text-slate-800">Ledger global</p>
               <p className="text-xs text-slate-500 mt-1">Auditoria de transacciones cross-tenant</p>
             </Link>
             <Link
               href="/admin/adjustments"
-              className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+              className="aa-card block bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
             >
               <p className="font-semibold text-slate-800">Ajustes manuales</p>
               <p className="text-xs text-slate-500 mt-1">Correcciones directas al ledger</p>
@@ -92,9 +101,9 @@ export default function AdminDashboard() {
         </section>
 
         {/* Tenants list */}
-        <section>
+        <section className="aa-rise" style={{ animationDelay: '380ms' }}>
           <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide mb-3">
-            Comercios ({tenants.length})
+            Comercios (<span key={tenants.length} className="aa-count tabular-nums inline-block">{tenants.length}</span>)
           </h2>
           {tenants.length === 0 ? (
             <div className="bg-white rounded-2xl p-8 text-center border border-slate-100">
@@ -102,10 +111,11 @@ export default function AdminDashboard() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {tenants.map(t => (
+              {tenants.map((t, i) => (
                 <div
                   key={t.id}
-                  className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-indigo-200 transition"
+                  className="aa-card aa-row-in bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
+                  style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">

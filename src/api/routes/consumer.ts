@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import prisma from '../../db/client.js';
-import { generateOTP, verifyOTP, issueConsumerTokens, verifyConsumerToken } from '../../services/auth.js';
+import { generateOTP, verifyOTP, issueConsumerTokens, verifyConsumerToken, incrementOtpBucket } from '../../services/auth.js';
 import { findOrCreateConsumerAccount, normalizeVenezuelanPhone, phoneTail } from '../../services/accounts.js';
 import { getAccountBalance, getAccountBalanceBreakdown, getAccountHistory } from '../../services/ledger.js';
 import { validateInvoice } from '../../services/invoice-validation.js';
@@ -27,6 +27,19 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     const phoneNumber = normalizeVenezuelanPhone(rawPhone);
 
+    // Rate limit: at most 3 OTP sends per phone per 15 minutes. Anything above
+    // that is either a bug, a retry loop, or spam — and the real user just sees
+    // their WhatsApp flooded. Bucket counts are stored in the same redis/memory
+    // store used by the OTP service.
+    const bucketCount = await incrementOtpBucket(phoneNumber);
+    if (bucketCount > 3) {
+      console.warn(`[Auth] OTP rate limit hit for ${phoneNumber} (count=${bucketCount})`);
+      return reply.status(429).send({
+        error: 'Demasiados intentos. Espera unos minutos antes de solicitar otro codigo.',
+        retryAfterSeconds: 900,
+      });
+    }
+
     if (tenantSlug) {
       const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
       if (!tenant || tenant.status !== 'active') {
@@ -38,7 +51,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     await sendWhatsAppOTP(phoneNumber, otp);
 
-    console.log(`[Auth] OTP requested: phone=${phoneNumber} slug=${tenantSlug || '(global)'}`);
+    console.log(`[Auth] OTP requested: phone=${phoneNumber} slug=${tenantSlug || '(global)'} bucket=${bucketCount}`);
     return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV !== 'production' ? otp : undefined };
   });
 
@@ -206,8 +219,18 @@ export default async function consumerRoutes(app: FastifyInstance) {
   });
 
   // ---- BALANCE ----
-  app.get('/api/consumer/balance', { preHandler: [requireConsumerAuth] }, async (request) => {
+  app.get('/api/consumer/balance', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;
+
+    // Tenantless (global) tokens cannot resolve a balance. Tell the client
+    // explicitly so it can call select-merchant instead of reading `0` and
+    // silently showing an empty balance.
+    if (!tenantId || !accountId) {
+      return reply.status(409).send({
+        error: 'No merchant selected',
+        requiresMerchantSelection: true,
+      });
+    }
 
     // Get the first asset type for this tenant
     const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
@@ -238,17 +261,57 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
+    // Enrich redemption-type entries with the product they were canjeado by.
+    // The referenceId on a redemption ledger entry is the RedemptionToken id,
+    // which carries the product relation. Without this join, the consumer's
+    // history shows "Canje pendiente / -700" with no hint of what they bought.
+    const redemptionEventTypes = new Set(['REDEMPTION_PENDING', 'REDEMPTION_CONFIRMED', 'REDEMPTION_EXPIRED']);
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    // referenceId shapes: REDEEM-<uuid>, CONFIRMED-<uuid>, EXPIRED-<uuid>.
+    const refToTokenId = (ref: string): string | null => {
+      const stripped = ref.replace(/^(REDEEM|CONFIRMED|EXPIRED)-/i, '');
+      return UUID_RE.test(stripped) ? stripped : null;
+    };
+
+    const tokenIdByRef = new Map<string, string>();
+    for (const e of entries) {
+      if (!redemptionEventTypes.has(e.eventType)) continue;
+      const tid = refToTokenId(e.referenceId);
+      if (tid) tokenIdByRef.set(e.referenceId, tid);
+    }
+    const redemptionTokenIds = Array.from(new Set(tokenIdByRef.values()));
+
+    const tokens = redemptionTokenIds.length > 0
+      ? await prisma.redemptionToken.findMany({
+          where: { id: { in: redemptionTokenIds } },
+          select: { id: true, product: { select: { name: true, photoUrl: true } } },
+        })
+      : [];
+    const productByTokenId = new Map(tokens.map(t => [t.id, t.product]));
+
     return {
-      entries: entries.map(e => ({
-        id: e.id,
-        eventType: e.eventType,
-        entryType: e.entryType,
-        amount: e.amount.toString(),
-        status: e.status,
-        referenceId: e.referenceId,
-        createdAt: e.createdAt,
-        merchantName: tenant?.name || null,
-      })),
+      entries: entries.map(e => {
+        // Prefer metadata stamped at write time (survives token cleanup);
+        // fall back to the token join for older entries.
+        const meta: any = (e as any).metadata || {};
+        const metaProduct = (meta?.productName || meta?.productPhotoUrl)
+          ? { name: meta.productName || null, photoUrl: meta.productPhotoUrl || null }
+          : null;
+        const tid = redemptionEventTypes.has(e.eventType) ? tokenIdByRef.get(e.referenceId) : undefined;
+        const product = metaProduct || (tid ? productByTokenId.get(tid) : undefined);
+        return {
+          id: e.id,
+          eventType: e.eventType,
+          entryType: e.entryType,
+          amount: e.amount.toString(),
+          status: e.status,
+          referenceId: e.referenceId,
+          createdAt: e.createdAt,
+          merchantName: tenant?.name || null,
+          productName: product?.name || null,
+          productPhotoUrl: product?.photoUrl || null,
+        };
+      }),
     };
   });
 
@@ -390,8 +453,15 @@ export default async function consumerRoutes(app: FastifyInstance) {
     // Compute total balance across merchants (note: only meaningful if all use the same unit)
     const totalBalance = merchants.reduce((sum, m) => sum + Number(m.balance), 0);
 
+    // Pick the best display name available across this user's accounts
+    // (verified/non-null wins; otherwise the most recent).
+    const displayName = accounts
+      .map(a => a.displayName)
+      .find((n): n is string => !!n && n.trim().length > 0) || null;
+
     return {
       phoneNumber,
+      displayName,
       merchantCount: merchants.length,
       totalBalance: totalBalance.toFixed(8),
       merchants,

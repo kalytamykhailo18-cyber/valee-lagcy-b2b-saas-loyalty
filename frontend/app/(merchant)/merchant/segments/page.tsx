@@ -147,9 +147,9 @@ export default function SegmentsPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <div className="flex items-center gap-3 flex-wrap">
-          <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Segmentos de clientes</h1>
+          <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Segmentos de clientes</h1>
           <span className="px-3 py-1 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700 uppercase tracking-wide">
             Vista previa - Fase 2
           </span>
@@ -176,20 +176,20 @@ export default function SegmentsPage() {
 
       {/* Summary stats */}
       <div className="px-4 sm:px-6 lg:px-8 pb-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+        <div className="aa-stagger grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="aa-card bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
             <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Segmentos</p>
             <p className="text-2xl font-bold text-slate-800 mt-1">{SEGMENTS.length}</p>
           </div>
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+          <div className="aa-card bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
             <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Clientes en total</p>
             <p className="text-2xl font-bold text-slate-800 mt-1">{totalCustomers}</p>
           </div>
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+          <div className="aa-card bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
             <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Plantillas listas</p>
             <p className="text-2xl font-bold text-slate-800 mt-1">{TEMPLATES.length}</p>
           </div>
-          <div className="bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
+          <div className="aa-card bg-white rounded-2xl p-4 border border-slate-100 shadow-sm">
             <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Envios este mes</p>
             <p className="text-2xl font-bold text-slate-800 mt-1">0</p>
           </div>
@@ -200,11 +200,12 @@ export default function SegmentsPage() {
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         <h2 className="text-lg font-semibold text-slate-800 mb-4">Carpetas dinamicas</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {SEGMENTS.map(segment => (
+          {SEGMENTS.map((segment, i) => (
             <button
               key={segment.id}
               onClick={() => openSegmentDetail(segment)}
-              className={`text-left bg-white rounded-2xl p-5 border ${segment.borderColor} shadow-sm hover:shadow-md transition group`}
+              className={`aa-card aa-row-in text-left bg-white rounded-2xl p-5 border ${segment.borderColor} shadow-sm group`}
+              style={{ animationDelay: `${Math.min(i * 50, 400)}ms` }}
             >
               <div className="flex items-start justify-between mb-3">
                 <div className={`w-12 h-12 rounded-xl ${segment.bgColor} flex items-center justify-center`}>
@@ -224,8 +225,8 @@ export default function SegmentsPage() {
 
       {/* Segment detail modal */}
       {openSegment && (
-        <div className="fixed inset-0 bg-slate-900/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <div className="bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+        <div className="aa-backdrop fixed inset-0 bg-slate-900/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="aa-sheet sm:aa-modal bg-white w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-y-auto">
             {/* Modal header */}
             <div className="sticky top-0 bg-white border-b border-slate-100 p-5 flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
@@ -317,8 +318,8 @@ export default function SegmentsPage() {
 
       {/* Locked feature modal */}
       {showLockedModal && (
-        <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center">
+        <div className="aa-backdrop fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-4">
+          <div className="aa-modal bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 text-center">
             <div className="w-14 h-14 rounded-2xl bg-indigo-100 flex items-center justify-center mx-auto mb-4">
               <MdLockOutline className="w-7 h-7 text-indigo-600" />
             </div>

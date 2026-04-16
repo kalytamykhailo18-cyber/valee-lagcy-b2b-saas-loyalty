@@ -7,10 +7,54 @@ export interface MerchantMetrics {
   activeConsumers30d: number;
   totalRedemptions: number;
   redemptions30d: number;
+  // When the caller asks for the tenant aggregate (no branchId), we also
+  // surface the slice that has no branch_id assigned. This lets the dashboard
+  // explain why "Todas las sucursales" can be greater than the sum of branch
+  // slices: the difference is exactly this unassigned bucket (CSV uploads,
+  // WhatsApp invoices, dual-scan, etc. that never got tagged to a branch).
+  valueIssuedUnassigned?: string;
+  valueRedeemedUnassigned?: string;
 }
 
 export async function getMerchantMetrics(tenantId: string, branchId?: string): Promise<MerchantMetrics> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+  // Sentinel for "entries without any branch_id assigned"
+  if (branchId === '_unassigned') {
+    const [vi] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED'
+        AND entry_type = 'CREDIT' AND status != 'reversed'
+        AND branch_id IS NULL
+    `;
+    const [vr] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'REDEMPTION_CONFIRMED'
+        AND entry_type = 'CREDIT' AND status != 'reversed'
+        AND branch_id IS NULL
+    `;
+    const [ac] = await prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(DISTINCT account_id) as count FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid
+        AND branch_id IS NULL
+        AND account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow', 'verified'))
+        AND created_at >= ${thirtyDaysAgo}
+    `;
+    const totalRedemptions = await prisma.ledgerEntry.count({
+      where: { tenantId, eventType: 'REDEMPTION_CONFIRMED', entryType: 'CREDIT', branchId: null },
+    });
+    const redemptions30d = await prisma.ledgerEntry.count({
+      where: { tenantId, eventType: 'REDEMPTION_CONFIRMED', entryType: 'CREDIT', branchId: null, createdAt: { gte: thirtyDaysAgo } },
+    });
+    return {
+      valueIssued: vi.total,
+      valueRedeemed: vr.total,
+      netCirculation: (parseFloat(vi.total) - parseFloat(vr.total)).toFixed(8),
+      activeConsumers30d: Number(ac.count),
+      totalRedemptions,
+      redemptions30d,
+    };
+  }
 
   // When a branchId is selected, filter all queries to that branch only.
   // branch_id is nullable — entries without a branch are excluded when filtering.
@@ -81,6 +125,19 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
     where: { tenantId, eventType: 'REDEMPTION_CONFIRMED', entryType: 'CREDIT', createdAt: { gte: thirtyDaysAgo } },
   });
 
+  // Also compute the unassigned slice so the dashboard can render it as its
+  // own chip. valueIssuedUnassigned + sum(branch.valueIssued) === valueIssued.
+  const [valueIssuedUnassigned] = await prisma.$queryRaw<[{ total: string }]>`
+    SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
+    WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED'
+      AND entry_type = 'CREDIT' AND status != 'reversed' AND branch_id IS NULL
+  `;
+  const [valueRedeemedUnassigned] = await prisma.$queryRaw<[{ total: string }]>`
+    SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
+    WHERE tenant_id = ${tenantId}::uuid AND event_type = 'REDEMPTION_CONFIRMED'
+      AND entry_type = 'CREDIT' AND status != 'reversed' AND branch_id IS NULL
+  `;
+
   return {
     valueIssued: valueIssued.total,
     valueRedeemed: valueRedeemed.total,
@@ -88,6 +145,8 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
     activeConsumers30d: Number(activeConsumers.count),
     totalRedemptions,
     redemptions30d,
+    valueIssuedUnassigned: valueIssuedUnassigned.total,
+    valueRedeemedUnassigned: valueRedeemedUnassigned.total,
   };
 }
 

@@ -203,17 +203,17 @@ export default function MerchantDashboard() {
         return (
           <>
             {/* Mobile-only header */}
-            <div className="lg:hidden bg-emerald-700 text-white px-4 py-4 flex items-center justify-between">
+            <div className="lg:hidden bg-emerald-700 text-white px-4 py-4 flex items-center justify-between aa-rise-sm">
               <div>
-                <h1 className="text-lg font-bold">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
+                <h1 className="text-lg font-bold tracking-tight">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
                 <p className="text-emerald-200 text-xs mt-0.5">{branchLabel}</p>
               </div>
-              <button onClick={logout} className="text-sm text-emerald-200 hover:text-white">Salir</button>
+              <button onClick={logout} className="text-sm text-emerald-200 hover:text-white transition-colors">Salir</button>
             </div>
 
             {/* Page title (desktop only) */}
-            <div className="hidden lg:block px-8 pt-8 pb-4">
-              <h1 className="text-3xl font-bold text-slate-800">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
+            <div className="hidden lg:block px-8 pt-8 pb-4 aa-rise">
+              <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Bienvenido{staffName ? `, ${staffName}` : ''}</h1>
               <p className="text-slate-500 text-sm mt-1">{branchLabel}</p>
             </div>
           </>
@@ -230,13 +230,19 @@ export default function MerchantDashboard() {
               <select
                 value={selectedBranch}
                 onChange={e => setSelectedBranch(e.target.value)}
-                className="w-full mt-2 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                className="aa-field aa-field-emerald w-full mt-2 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               >
-                <option value="">Todas las sucursales</option>
+                <option value="">Todas las sucursales (total comercio)</option>
                 {branches.filter(b => b.active).map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
+                <option value="_unassigned">Sin sucursal asignada</option>
               </select>
+              {!selectedBranch && metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0 && (
+                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                  De los puntos emitidos, <span className="font-semibold text-amber-600">{Math.round(parseFloat(metrics.valueIssuedUnassigned)).toLocaleString()}</span> no estan asignados a ninguna sucursal (vienen de CSV, WhatsApp, transacciones sin sucursal). Por eso &ldquo;Todas las sucursales&rdquo; no es la suma directa de las sucursales individuales.
+                </p>
+              )}
             </div>
           )}
 
@@ -272,40 +278,40 @@ export default function MerchantDashboard() {
 
         {/* Metrics Cards — 2 cols mobile, 3 cols tablet, 6 cols desktop */}
         {(metrics || analytics) && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 lg:gap-4 mt-6">
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+          <div className="aa-stagger grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 lg:gap-4 mt-6">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Emitido</p>
-              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
+              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate tabular-nums">
                 {Math.round(parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0')).toLocaleString()}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjeado</p>
-              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate">
+              <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate tabular-nums">
                 {Math.round(parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0')).toLocaleString()}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Circulacion</p>
-              <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate">
+              <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate tabular-nums">
                 {Math.round(parseFloat(metrics?.netCirculation || analytics?.netBalance || '0')).toLocaleString()}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Activos 30d</p>
-              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1 tabular-nums">
                 {metrics?.activeConsumers30d ?? analytics?.consumerCount ?? 0}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjes tot.</p>
-              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1 tabular-nums">
                 {metrics?.totalRedemptions ?? 0}
               </p>
             </div>
-            <div className="bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
+            <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjes 30d</p>
-              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1">
+              <p className="text-xl lg:text-2xl font-bold text-slate-800 mt-1 tabular-nums">
                 {metrics?.redemptions30d ?? 0}
               </p>
             </div>
@@ -313,7 +319,7 @@ export default function MerchantDashboard() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-slate-100 mt-6 w-full">
+        <div className="flex gap-1 bg-white rounded-xl p-1 shadow-sm border border-slate-100 mt-6 w-full aa-rise" style={{ animationDelay: '200ms' }}>
           {(['overview', 'products', 'transactions'] as const).map(tab => (
             <button
               key={tab}
@@ -331,44 +337,49 @@ export default function MerchantDashboard() {
 
         {/* Tab Content */}
         {activeTab === 'overview' && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
-            <Link href="/merchant/scanner" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+          <div className="aa-stagger grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mt-4">
+            <Link href="/merchant/scanner" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Escaner QR</p>
               <p className="text-xs text-slate-500 mt-1">Escanear codigos de canje de clientes</p>
             </Link>
-            <Link href="/merchant/dual-scan" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/dual-scan" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Transaccion sin factura</p>
               <p className="text-xs text-slate-500 mt-1">Generar QR para clientes (Pago Movil, efectivo, sin recibo)</p>
             </Link>
-            <Link href="/merchant/csv-upload" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/csv-upload" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Cargar CSV de facturas</p>
               <p className="text-xs text-slate-500 mt-1">Subir el archivo diario de transacciones del POS</p>
             </Link>
-            <Link href="/merchant/products" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/products" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Catalogo de productos</p>
               <p className="text-xs text-slate-500 mt-1">Agregar, editar y gestionar productos</p>
             </Link>
-            <Link href="/merchant/hybrid-deals" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/hybrid-deals" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Promociones hibridas</p>
               <p className="text-xs text-slate-500 mt-1">Ofertas combinadas de efectivo + puntos</p>
             </Link>
-            <Link href="/merchant/customers" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/customers" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Buscar cliente</p>
               <p className="text-xs text-slate-500 mt-1">Consultar cuentas y vincular cedula</p>
             </Link>
-            <Link href="/merchant/branches" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/branches" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Sucursales</p>
               <p className="text-xs text-slate-500 mt-1">Gestionar sucursales y sus QRs</p>
             </Link>
-            <Link href="/merchant/disputes" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/disputes" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Disputas</p>
               <p className="text-xs text-slate-500 mt-1">Resolver reclamos de clientes</p>
             </Link>
-            <Link href="/merchant/recurrence" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/recurrence" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Recurrencia</p>
               <p className="text-xs text-slate-500 mt-1">Reglas de retencion automatica por WhatsApp</p>
             </Link>
-            <Link href="/merchant/settings" className="block bg-white rounded-xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            <Link href="/merchant/segments" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100 relative">
+              <span className="absolute top-3 right-3 text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700">PREVIEW</span>
+              <p className="font-semibold text-slate-800">Segmentos</p>
+              <p className="text-xs text-slate-500 mt-1">Carpetas dinamicas de clientes para campanas</p>
+            </Link>
+            <Link href="/merchant/settings" className="aa-card block bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="font-semibold text-slate-800">Configuracion</p>
               <p className="text-xs text-slate-500 mt-1">Bienvenida, RIF, tasa de cambio Bs/USD</p>
             </Link>

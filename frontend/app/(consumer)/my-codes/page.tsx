@@ -52,29 +52,30 @@ export default function MyCodesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 aa-rise-sm">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <Link href="/consumer" className="text-slate-600 hover:text-indigo-600">
+          <Link href="/consumer" className="text-slate-600 hover:text-indigo-600 transition-transform hover:-translate-x-0.5">
             <MdArrowBack className="w-6 h-6" />
           </Link>
-          <h1 className="text-lg font-bold text-slate-800">Mis codigos activos</h1>
+          <h1 className="text-lg font-bold text-slate-800 tracking-tight">Mis codigos activos</h1>
         </div>
       </header>
 
       <div className="max-w-2xl mx-auto p-4 space-y-3">
         {redemptions.length === 0 ? (
-          <div className="text-center py-16">
+          <div className="text-center py-16 aa-rise">
             <p className="text-slate-500">No tienes codigos activos</p>
-            <Link href="/catalog" className="inline-block mt-4 bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold">
-              Ver catalogo
+            <Link href="/catalog" className="aa-btn aa-btn-primary inline-block mt-4 bg-indigo-600 text-white px-6 py-3 rounded-xl font-semibold">
+              <span className="relative z-10">Ver catalogo</span>
             </Link>
           </div>
         ) : (
-          redemptions.map(r => (
+          redemptions.map((r, i) => (
             <button
               key={r.id}
               onClick={() => setSelected(r)}
-              className="w-full bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3 hover:border-indigo-300 transition"
+              className="aa-card aa-row-in w-full bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex items-center gap-3"
+              style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}
             >
               {r.productPhoto ? (
                 <img src={r.productPhoto} alt={r.productName} className="w-16 h-16 rounded-lg object-cover" />
@@ -129,16 +130,16 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
 
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-4">
-      <div className="w-full max-w-sm">
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 mb-6">
+      <div className="w-full max-w-sm aa-rise">
+        <button onClick={onBack} className="flex items-center gap-2 text-slate-600 hover:text-indigo-600 mb-6 transition-transform hover:-translate-x-0.5">
           <MdArrowBack className="w-5 h-5" /> Volver
         </button>
-        <h2 className="text-xl font-bold text-indigo-600 mb-2 text-center">{redemption.productName}</h2>
+        <h2 className="text-xl font-bold text-indigo-600 mb-2 text-center tracking-tight">{redemption.productName}</h2>
         <p className="text-sm text-slate-500 text-center mb-6">
           {Math.round(parseFloat(redemption.amount)).toLocaleString()} pts
           {redemption.cashAmount && parseFloat(redemption.cashAmount) > 0 && ` + $${redemption.cashAmount}`}
         </p>
-        <div className="bg-slate-100 rounded-2xl p-8 flex justify-center">
+        <div className="bg-slate-100 rounded-2xl p-8 flex justify-center animate-qr-build">
           {qrUrl ? (
             <img src={qrUrl} alt="QR de canje" className="w-64 h-64 rounded-lg" />
           ) : (
@@ -155,7 +156,7 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
           </div>
         )}
         <p className="text-center text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
-        <p className="text-center text-lg font-bold text-indigo-600 mt-2">
+        <p key={secondsLeft} className="text-center text-lg font-bold text-indigo-600 mt-2 aa-count tabular-nums">
           Expira en {formatTime(secondsLeft)}
         </p>
       </div>

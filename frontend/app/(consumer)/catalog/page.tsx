@@ -214,18 +214,18 @@ export default function Catalog() {
   // Queued result screen
   if (redeemResult?.queued) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm text-center">
-          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+      <div className="aa-backdrop min-h-screen flex items-center justify-center p-4">
+        <div className="aa-modal bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm text-center">
+          <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-check">
             <span className="text-3xl">~</span>
           </div>
-          <h2 className="text-lg font-bold text-amber-700">Canje en cola</h2>
+          <h2 className="text-lg font-bold text-amber-700 tracking-tight">Canje en cola</h2>
           <p className="text-sm text-slate-500 mt-2">{redeemResult.message}</p>
           <button
             onClick={() => { setRedeemResult(null); setSelectedProduct(null) }}
-            className="mt-6 bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium w-full"
+            className="aa-btn aa-btn-primary mt-6 bg-indigo-600 text-white px-6 py-3 rounded-xl font-medium w-full"
           >
-            Entendido
+            <span className="relative z-10">Entendido</span>
           </button>
         </div>
       </div>
@@ -236,9 +236,9 @@ export default function Catalog() {
   if (selectedProduct) {
     const balanceAfter = (effectiveBalance - parseFloat(selectedProduct.redemptionCost)).toFixed(0)
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm animate-fade-in">
-          <h2 className="text-lg font-bold">Confirmar canje</h2>
+      <div className="aa-backdrop min-h-screen flex items-center justify-center p-4">
+        <div className="aa-modal bg-white rounded-2xl p-6 shadow-lg w-full max-w-sm">
+          <h2 className="text-lg font-bold tracking-tight">Confirmar canje</h2>
           <div className="mt-4 space-y-2">
             <p className="text-slate-600"><span className="font-medium">Producto:</span> {selectedProduct.name}</p>
             <p className="text-slate-600"><span className="font-medium">Costo:</span> {Math.round(parseFloat(selectedProduct.redemptionCost)).toLocaleString()} pts</p>
@@ -248,11 +248,11 @@ export default function Catalog() {
             <p className="text-red-500 text-sm mt-3">{redeemResult.message}</p>
           )}
           <div className="mt-6 flex gap-3">
-            <button onClick={() => { setSelectedProduct(null); setRedeemResult(null) }} className="flex-1 bg-slate-100 py-3 rounded-xl font-medium">
-              Cancelar
+            <button onClick={() => { setSelectedProduct(null); setRedeemResult(null) }} className="aa-btn flex-1 bg-slate-100 py-3 rounded-xl font-medium">
+              <span className="relative z-10">Cancelar</span>
             </button>
-            <button onClick={confirmRedeem} disabled={redeeming} className="flex-1 bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
-              {redeeming ? 'Procesando...' : 'Confirmar'}
+            <button onClick={confirmRedeem} disabled={redeeming} className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center">
+              {redeeming && <span className="aa-spinner" />}<span className="relative z-10">{redeeming ? 'Procesando...' : 'Confirmar'}</span>
             </button>
           </div>
         </div>
@@ -264,9 +264,9 @@ export default function Catalog() {
 
   return (
     <div className="min-h-screen p-4">
-      <div className="flex items-center gap-3 mb-4">
-        <Link href="/consumer" className="text-indigo-600 text-2xl">&larr;</Link>
-        <h1 className="text-xl font-bold">Catalogo</h1>
+      <div className="flex items-center gap-3 mb-4 aa-rise-sm">
+        <Link href="/consumer" className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <h1 className="text-xl font-bold tracking-tight">Catalogo</h1>
       </div>
 
       {/* Offline / Sync indicator */}
@@ -289,10 +289,10 @@ export default function Catalog() {
       )}
 
       <p className="text-sm text-slate-500 mb-4">
-        Tu saldo: <span className="font-bold text-indigo-600">{effectiveBalance.toLocaleString()} pts</span>
+        Tu saldo: <span className="font-bold text-indigo-600">{Math.round(effectiveBalance).toLocaleString()} pts</span>
         {pendingCount > 0 && (
           <span className="text-xs text-amber-600 ml-2">
-            ({getLocalPendingBalance().toLocaleString()} pts pendientes)
+            ({Math.round(getLocalPendingBalance()).toLocaleString()} pts pendientes)
           </span>
         )}
       </p>
@@ -305,13 +305,14 @@ export default function Catalog() {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        {products.map(product => {
+        {products.map((product, i) => {
           const canAfford = parseFloat(product.redemptionCost) <= effectiveBalance
           return (
             <div
               key={product.id}
               onClick={() => handleProductClick(product)}
-              className={`bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer transition hover:shadow-md ${!canAfford ? 'grayscale opacity-70' : ''}`}
+              className={`aa-card aa-row-in bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer ${!canAfford ? 'grayscale opacity-70' : ''}`}
+              style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
             >
               <div className="h-32 bg-slate-100 flex items-center justify-center">
                 {product.photoUrl ? (
@@ -325,8 +326,8 @@ export default function Catalog() {
                 <p className="text-indigo-600 font-bold text-sm">{Math.round(parseFloat(product.redemptionCost)).toLocaleString()} pts</p>
                 <p className="text-xs text-slate-400">{product.stock} disponibles</p>
                 {canAfford ? (
-                  <button className="w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
-                    Canjear
+                  <button className="aa-btn aa-btn-primary w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
+                    <span className="relative z-10">Canjear</span>
                   </button>
                 ) : (
                   <button className="w-full mt-2 bg-slate-200 text-slate-500 text-xs py-2 rounded-lg font-medium cursor-not-allowed" disabled>

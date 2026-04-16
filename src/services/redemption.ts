@@ -97,6 +97,12 @@ export async function initiateRedemption(params: {
   const pointsAmount = pointsToDeduct.toFixed(8);
   const referenceId = `REDEEM-${uuidv4()}`;
 
+  // Product info stamped into ledger metadata. Historically we relied on the
+  // RedemptionToken row for lookups, but those get purged once expired/used,
+  // leaving the ledger pointer dangling. Stamping product name+photo here lets
+  // the consumer history keep showing "Cafe Gratis" forever.
+  const productMeta = { productId: product.id, productName: product.name, productPhotoUrl: product.photoUrl || null };
+
   // Write PENDING_REDEMPTION double-entry for the POINTS portion (skip if 0 points — full cash)
   let ledgerResult;
   if (pointsToDeduct > 0) {
@@ -109,7 +115,9 @@ export async function initiateRedemption(params: {
       assetTypeId,
       referenceId,
       referenceType: 'redemption_token',
-      metadata: isHybrid ? { hybrid: true, cashAmount: cashPortion, pointsDeducted: pointsToDeduct, fullPointsCost } : undefined,
+      metadata: isHybrid
+        ? { ...productMeta, hybrid: true, cashAmount: cashPortion, pointsDeducted: pointsToDeduct, fullPointsCost }
+        : productMeta,
     });
   } else {
     // Full cash — create a minimal ledger record with the cash amount as metadata only
@@ -123,7 +131,7 @@ export async function initiateRedemption(params: {
       assetTypeId,
       referenceId,
       referenceType: 'redemption_token',
-      metadata: { hybrid: true, fullCash: true, cashAmount: cashPortion, pointsDeducted: 0, fullPointsCost },
+      metadata: { ...productMeta, hybrid: true, fullCash: true, cashAmount: cashPortion, pointsDeducted: 0, fullPointsCost },
     });
   }
 
@@ -238,7 +246,16 @@ export async function processRedemption(params: {
       },
     });
     if (!record) {
-      return { success: false, message: 'Codigo de 6 digitos no valido o expirado.' };
+      const usedOrExpired = await prisma.redemptionToken.findFirst({
+        where: { tenantId: params.cashierTenantId, shortCode: tokenStr },
+      });
+      if (usedOrExpired?.status === 'used') {
+        return { success: false, message: 'Este codigo ya fue canjeado.' };
+      }
+      if (usedOrExpired?.status === 'expired') {
+        return { success: false, message: 'Este codigo ya expiro.' };
+      }
+      return { success: false, message: 'Codigo de 6 digitos no valido.' };
     }
     payload = {
       tokenId: record.id,
@@ -338,7 +355,12 @@ export async function processRedemption(params: {
     referenceId: `CONFIRMED-${payload.tokenId}`,
     referenceType: 'redemption_token',
     branchId: params.branchId || null,
-    metadata: { cashierId: params.cashierStaffId, productId: payload.productId },
+    metadata: {
+      cashierId: params.cashierStaffId,
+      productId: payload.productId,
+      productName: product?.name || null,
+      productPhotoUrl: product?.photoUrl || null,
+    },
   });
 
   // Record platform revenue (redemption fee) if configured
@@ -412,6 +434,8 @@ export async function expireRedemption(tokenId: string): Promise<void> {
   const holdingAccount = await getSystemAccount(tokenRecord.tenantId, 'redemption_holding');
   if (!holdingAccount) throw new Error('redemption_holding not found');
 
+  const product = await prisma.product.findUnique({ where: { id: tokenRecord.productId } });
+
   // Write REDEMPTION_EXPIRED reversal: debit holding, credit consumer (return value)
   await writeDoubleEntry({
     tenantId: tokenRecord.tenantId,
@@ -422,6 +446,11 @@ export async function expireRedemption(tokenId: string): Promise<void> {
     assetTypeId: tokenRecord.assetTypeId,
     referenceId: `EXPIRED-${tokenId}`,
     referenceType: 'redemption_token',
+    metadata: {
+      productId: tokenRecord.productId,
+      productName: product?.name || null,
+      productPhotoUrl: product?.photoUrl || null,
+    },
   });
 
   await prisma.redemptionToken.update({

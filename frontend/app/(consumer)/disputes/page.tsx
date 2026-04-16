@@ -46,15 +46,15 @@ export default function ConsumerDisputesPage() {
   if (submitted) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="w-full max-w-sm text-center space-y-4">
-          <div className="text-5xl">✅</div>
-          <h2 className="text-xl font-bold text-slate-700">Reclamo enviado</h2>
+        <div className="w-full max-w-sm text-center space-y-4 aa-pop">
+          <div className="text-5xl animate-check">✅</div>
+          <h2 className="text-xl font-bold text-slate-700 tracking-tight">Reclamo enviado</h2>
           <p className="text-slate-500 text-sm">
             Tu reclamo ha sido recibido. El comercio lo revisara y te notificaremos cuando haya una respuesta.
           </p>
           <button onClick={() => router.push('/consumer')}
-            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 transition">
-            Volver al inicio
+            className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700">
+            <span className="relative z-10">Volver al inicio</span>
           </button>
         </div>
       </div>
@@ -64,12 +64,12 @@ export default function ConsumerDisputesPage() {
   return (
     <div className="min-h-screen pb-20">
       {/* Header */}
-      <div className="bg-white shadow-sm p-4 flex items-center gap-3">
-        <Link href="/consumer" className="text-indigo-600 text-2xl">&larr;</Link>
-        <h1 className="text-lg font-bold text-slate-800">Enviar reclamo</h1>
+      <div className="bg-white shadow-sm p-4 flex items-center gap-3 aa-rise-sm">
+        <Link href="/consumer" className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <h1 className="text-lg font-bold text-slate-800 tracking-tight">Enviar reclamo</h1>
       </div>
 
-      <div className="p-4 space-y-4">
+      <div className="p-4 space-y-4 aa-rise" style={{ animationDelay: '60ms' }}>
         <div className="bg-indigo-50 rounded-xl p-4">
           <p className="text-sm text-indigo-700">
             Describe tu problema o reclamo. Puedes adjuntar una captura de pantalla como evidencia. El comercio revisara tu caso y te notificara la resolucion.
@@ -82,7 +82,7 @@ export default function ConsumerDisputesPage() {
           <textarea value={description}
             onChange={e => setDescription(e.target.value)}
             placeholder="Explica tu problema en detalle..."
-            className="w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm h-32 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+            className="aa-field w-full mt-1 px-4 py-3 rounded-xl border border-slate-200 text-sm h-32 resize-none" />
         </div>
 
         {/* Screenshot Upload */}
@@ -106,13 +106,13 @@ export default function ConsumerDisputesPage() {
           </div>
         </div>
 
-        {error && <p className="text-red-500 text-sm">{error}</p>}
+        {error && <p className="aa-pop text-red-500 text-sm">{error}</p>}
 
         {/* Submit Button */}
         <button onClick={handleSubmit}
           disabled={submitting || !description.trim()}
-          className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition">
-          {submitting ? 'Enviando...' : 'Enviar reclamo'}
+          className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center">
+          {submitting && <span className="aa-spinner" />}<span className="relative z-10">{submitting ? 'Enviando...' : 'Enviar reclamo'}</span>
         </button>
       </div>
     </div>

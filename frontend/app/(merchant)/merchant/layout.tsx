@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, type ReactNode, type ComponentType } from 'react'
+import { useState, useEffect, useCallback, type ReactNode, type ComponentType } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   MdDashboard, MdQrCodeScanner, MdAccessTime, MdInventory2,
   MdLocalOffer, MdUploadFile, MdPeople, MdStorefront, MdAutorenew,
-  MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups,
+  MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups, MdArrowBack,
 } from 'react-icons/md'
 
 interface NavItem {
@@ -41,6 +41,13 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   const [tenantLogoUrl, setTenantLogoUrl] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  // `authChecked` gates protected page rendering until we've confirmed we
+  // actually have a session. Without this, the internals flash visible to an
+  // unauthenticated user for the tick between mount and the redirect firing.
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authorized, setAuthorized] = useState(false)
+
+  const PUBLIC_ROUTES = ['/merchant/login', '/merchant/signup', '/merchant/scanner']
 
   useEffect(() => {
     setMounted(true)
@@ -49,7 +56,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   // Re-read localStorage on every navigation. This is required because the layout
   // does NOT remount when going from /merchant/login → /merchant, so a single
   // mount-time read would miss the role/name written by the login page.
-  useEffect(() => {
+  const runAuthCheck = useCallback(() => {
     const storedRole = localStorage.getItem('staffRole')
     const storedToken = localStorage.getItem('accessToken')
     setRole(storedRole)
@@ -59,12 +66,39 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     setDrawerOpen(false)
 
     // Auth guard: if visiting a protected merchant route without a session,
-    // redirect to login. Public routes (login/signup/scanner) are handled below.
-    const publicRoutes = ['/merchant/login', '/merchant/signup', '/merchant/scanner']
-    if (!publicRoutes.includes(pathname) && (!storedToken || !storedRole)) {
-      router.replace('/merchant/login')
+    // redirect to login. Public routes (login/signup/scanner) are allowed.
+    const isPublic = PUBLIC_ROUTES.includes(pathname)
+    const hasSession = !!storedToken && !!storedRole
+    if (!isPublic && !hasSession) {
+      setAuthorized(false)
+      setAuthChecked(true)
+      // Hard nav rather than router.replace so the back/forward cache doesn't
+      // resurrect the protected page we just bounced out of.
+      window.location.replace('/merchant/login')
+    } else {
+      setAuthorized(true)
+      setAuthChecked(true)
     }
-  }, [pathname, router])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname])
+
+  useEffect(() => { runAuthCheck() }, [runAuthCheck])
+
+  // Re-run the check when the tab becomes visible again (user switched away and
+  // came back) or when the page is restored from the bfcache via swipe-back.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'visible') runAuthCheck() }
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) runAuthCheck() }
+    const onStorage = (e: StorageEvent) => { if (e.key === 'accessToken' || e.key === 'staffRole') runAuthCheck() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [runAuthCheck])
 
   // Fetch tenant info if not in localStorage (first visit after login)
   useEffect(() => {
@@ -99,7 +133,9 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     localStorage.removeItem('staffName')
     localStorage.removeItem('tenantName')
     localStorage.removeItem('tenantLogoUrl')
-    router.push('/merchant/login')
+    // Hard navigation — router.push keeps the previous page in the back/forward
+    // cache, letting a logged-out user swipe back into the merchant internals.
+    window.location.href = '/merchant/login'
   }
 
   const visibleNav = NAV_ITEMS.filter(item => {
@@ -201,7 +237,33 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
       )}
 
       <main className="lg:pl-64 min-h-screen">
-        {children}
+        {/* Mobile top bar with back arrow — only on sub-pages, not dashboard */}
+        {mounted && pathname !== '/merchant' && !PUBLIC_ROUTES.includes(pathname) && (
+          <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-20">
+            <button
+              onClick={() => {
+                // Use browser back so the dashboard restores the scroll position
+                // the user was at before entering this sub-page. Falls back to
+                // /merchant if there's no history (direct URL entry).
+                if (window.history.length > 1) router.back()
+                else window.location.href = '/merchant'
+              }}
+              className="text-emerald-700 hover:-translate-x-0.5 transition-transform"
+            >
+              <MdArrowBack className="w-6 h-6" />
+            </button>
+            <span className="text-sm font-semibold text-slate-700 truncate">
+              {visibleNav.find(n => pathname.startsWith(n.href) && n.href !== '/merchant')?.label || 'Valee'}
+            </span>
+          </div>
+        )}
+        {(!authChecked || !authorized) ? (
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          children
+        )}
       </main>
     </div>
   )

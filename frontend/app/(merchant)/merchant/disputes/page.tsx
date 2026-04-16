@@ -72,8 +72,8 @@ export default function DisputesPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Disputas</h1>
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Disputas</h1>
         <p className="text-sm text-slate-500 mt-1">Revisa y resuelve reclamos enviados por tus clientes</p>
       </div>
 
@@ -92,20 +92,27 @@ export default function DisputesPage() {
         </div>
 
         {message && (
-          <div className="mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">{message}</div>
+          <div className="aa-pop mb-4 bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-700">{message}</div>
         )}
 
         {loading ? (
-          <p className="text-center text-slate-400 mt-8">Cargando...</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[0,1,2].map(i => (
+              <div key={i} className="bg-white rounded-2xl p-5 border border-slate-100 space-y-3">
+                <div className="aa-skel h-4 w-3/4" />
+                <div className="aa-skel h-2 w-1/2" />
+              </div>
+            ))}
+          </div>
         ) : disputes.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 border border-slate-100 text-center">
+          <div className="bg-white rounded-2xl p-12 border border-slate-100 text-center aa-rise">
             <MdAssignment className="w-12 h-12 text-slate-400 mx-auto" />
             <p className="text-slate-500 mt-4">No hay disputas {statusFilter ? STATUS_LABELS[statusFilter]?.toLowerCase() + 's' : 'pendientes'}</p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {disputes.map(d => (
-              <div key={d.id} className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition">
+            {disputes.map((d, i) => (
+              <div key={d.id} className="aa-card aa-row-in bg-white rounded-2xl p-5 shadow-sm border border-slate-100" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
               {/* Header */}
               <div className="flex items-start justify-between">
                 <div className="flex-1 cursor-pointer" onClick={() => setExpandedId(expandedId === d.id ? null : d.id)}>
@@ -190,8 +197,8 @@ export default function DisputesPage() {
                           </div>
                           <button onClick={() => handleResolve(d.id)}
                             disabled={resolving || !resolveForm.reason.trim()}
-                            className="w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50">
-                            {resolving ? 'Procesando...' : 'Confirmar'}
+                            className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 flex items-center justify-center">
+                            {resolving && <span className="aa-spinner" />}<span className="relative z-10">{resolving ? 'Procesando...' : 'Confirmar'}</span>
                           </button>
                         </>
                       )}

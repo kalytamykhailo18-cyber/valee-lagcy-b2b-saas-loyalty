@@ -33,6 +33,8 @@ interface HistoryEntry {
   referenceId: string
   createdAt: string
   merchantName: string | null
+  productName?: string | null
+  productPhotoUrl?: string | null
 }
 
 const EVENT_LABELS: Record<string, string> = {
@@ -137,39 +139,66 @@ function ConsumerApp() {
   }, [merchantSlugFromUrl])
 
   async function loadData() {
-    try {
-      const [balData, histData, accData, catData, activeCodes] = await Promise.all([
-        api.getBalance(),
-        api.getHistory(),
-        api.getAccount(),
-        api.getCatalog(50, 0),
-        api.getActiveRedemptions().catch(() => ({ redemptions: [] })),
-      ])
+    // Use allSettled so one failing call (e.g. /balance when the token is
+    // still tenantless) doesn't throw away the successful ones. Previously a
+    // single failure left every piece of state at its initial value — balance
+    // would render as "0" even though the merchant does have points.
+    const results = await Promise.allSettled([
+      api.getBalance(),
+      api.getHistory(),
+      api.getAccount(),
+      api.getCatalog(50, 0),
+      api.getActiveRedemptions(),
+    ])
+
+    const [balR, histR, accR, catR, activeR] = results
+    const firstAuthFail = results.find(r => r.status === 'rejected' && (r.reason?.status === 401 || r.reason?.status === 403))
+    if (firstAuthFail) {
+      localStorage.removeItem('accessToken')
+      localStorage.removeItem('refreshToken')
+      setScreen('login')
+      return
+    }
+
+    // If /balance is 409, the token has no merchant scope yet. Try to upgrade
+    // via select-merchant using the URL slug (or persisted one) before giving
+    // up and showing a stale empty balance.
+    if (balR.status === 'rejected' && balR.reason?.status === 409 && balR.reason?.requiresMerchantSelection) {
+      const slug = merchantSlugFromUrl || localStorage.getItem('tenantSlug')
+      if (slug) {
+        try {
+          const upgraded = await api.selectMerchant(slug)
+          localStorage.setItem('accessToken', upgraded.accessToken)
+          localStorage.setItem('refreshToken', upgraded.refreshToken)
+          logEvent('balance_409_upgrade_ok', slug)
+          return loadData()
+        } catch (e: any) {
+          logEvent('balance_409_upgrade_fail', `${slug}: ${e?.message || e?.error || 'unknown'}`)
+        }
+      }
+    }
+
+    if (balR.status === 'fulfilled') {
+      const balData = balR.value
       setBalance(balData.balance)
       setConfirmedBalance(balData.confirmed || balData.balance)
       setProvisionalBalance(balData.provisional || '0')
       setUnitLabel(balData.unitLabel)
       setAssetTypeId(balData.assetTypeId)
       if (balData.assetTypeId) localStorage.setItem('assetTypeId', balData.assetTypeId)
-      setHistory(histData.entries)
-      setAccount(accData)
-      setProducts(catData.products || [])
-      setActiveCodesCount(activeCodes.redemptions?.length || 0)
+    } else {
+      logEvent('balance_fail', `${balR.reason?.status || '?'}: ${balR.reason?.error || balR.reason?.message || 'unknown'}`)
+    }
 
-      if (!localStorage.getItem('welcomeDismissed') && histData.entries.length === 0) {
+    if (histR.status === 'fulfilled') {
+      setHistory(histR.value.entries)
+      if (!localStorage.getItem('welcomeDismissed') && histR.value.entries.length === 0) {
         setShowWelcome(true)
       }
-    } catch (err: any) {
-      logEvent('loadData_fail', `err=${err?.message || err?.error || 'unknown'}`)
-      // Only logout on true auth failures (401/403). Network errors or 500s
-      // should keep the user on the main screen so they can retry.
-      if (err?.status === 401 || err?.status === 403) {
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
-        setScreen('login')
-      }
-      // otherwise stay on main — user sees stale data but can retry
     }
+    if (accR.status === 'fulfilled') setAccount(accR.value)
+    if (catR.status === 'fulfilled') setProducts(catR.value.products || [])
+    if (activeR.status === 'fulfilled') setActiveCodesCount(activeR.value.redemptions?.length || 0)
   }
 
   async function handleRequestOTP() {
@@ -231,9 +260,7 @@ function ConsumerApp() {
   function logout() {
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
-    setScreen('login')
-    setBalance('0')
-    setHistory([])
+    window.location.href = '/'
   }
 
   // ---- LOADING SCREEN (checking token) ----
@@ -250,7 +277,7 @@ function ConsumerApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-sm space-y-6">
-          <div className="text-center">
+          <div className="text-center aa-rise">
             <h1 className="text-3xl font-extrabold tracking-tight text-indigo-700">Valee</h1>
             <p className="text-slate-500 mt-2">Ingresa tu numero para comenzar</p>
           </div>
@@ -302,9 +329,9 @@ function ConsumerApp() {
                   <button
                     onClick={handleRequestOTP}
                     disabled={loading || !isValid}
-                    className="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 transition mt-3"
+                    className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 mt-3 flex items-center justify-center"
                   >
-                    {loading ? 'Enviando...' : 'Enviar codigo OTP'}
+                    {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Enviando...' : 'Enviar codigo OTP'}</span>
                   </button>
                   <p className="text-xs text-slate-400 text-center pt-2">
                     Recibiras un codigo por WhatsApp para verificar tu numero.
@@ -323,11 +350,11 @@ function ConsumerApp() {
     return (
       <div className="min-h-screen flex items-center justify-center p-4">
         <div className="w-full max-w-sm space-y-6">
-          <div className="text-center">
-            <h1 className="text-2xl font-bold text-indigo-600">Verificacion</h1>
+          <div className="text-center aa-rise">
+            <h1 className="text-2xl font-bold text-indigo-600 tracking-tight">Verificacion</h1>
             <p className="text-slate-500 mt-1">Ingresa el codigo de 6 digitos enviado a tu WhatsApp</p>
           </div>
-          <div className="space-y-4">
+          <div className="space-y-4 aa-rise" style={{ animationDelay: '80ms' }}>
             <input
               type="text"
               inputMode="numeric"
@@ -337,16 +364,16 @@ function ConsumerApp() {
               value={otp}
               onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={e => e.key === 'Enter' && otp.length === 6 && handleVerifyOTP()}
-              className="w-full px-4 py-3 rounded-xl border border-slate-200 text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="aa-field w-full px-4 py-3 rounded-xl border border-slate-200 text-center text-2xl tracking-widest"
             />
-            {error && <p className="text-red-500 text-sm">{error}</p>}
+            {error && <p className="text-red-500 text-sm aa-pop">{error}</p>}
             <button
               onClick={handleVerifyOTP} disabled={loading || otp.length !== 6}
-              className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 transition"
+              className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center"
             >
-              {loading ? 'Verificando...' : 'Verificar'}
+              {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Verificando...' : 'Verificar'}</span>
             </button>
-            <button onClick={() => setScreen('login')} className="w-full text-slate-500 py-2">
+            <button onClick={() => setScreen('login')} className="w-full text-slate-500 py-2 hover:text-slate-700 transition-colors">
               Volver
             </button>
           </div>
@@ -357,8 +384,12 @@ function ConsumerApp() {
 
   // ---- MAIN SCREEN ----
   const displayBalance = Math.round(parseFloat(balance) - getLocalPendingBalance()).toLocaleString()
-  const userName = account?.displayName || account?.phoneNumber || ''
-  const greeting = userName ? `Hola ${userName}` : 'Hola!'
+  // Greet with the name the merchant linked in "Buscar cliente". If no name is
+  // on file we deliberately skip the phone fallback — showing the number feels
+  // robotic and clutters the hero.
+  const greeting = account?.displayName
+    ? `Hola ${account.displayName}`
+    : 'Hola'
   const regularProducts = products.filter((p: any) => !p.cashPrice || Number(p.cashPrice) === 0)
   const hybridProducts = products.filter((p: any) => p.cashPrice && Number(p.cashPrice) > 0)
   const userBalance = parseFloat(balance) - getLocalPendingBalance()
@@ -367,32 +398,40 @@ function ConsumerApp() {
     <div className="min-h-screen bg-slate-50 pb-32">
       {/* Welcome Card */}
       {showWelcome && (
-        <div className="bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-6">
-          <h2 className="text-xl font-bold">Bienvenido a Valee!</h2>
+        <div className="aa-pop bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-6">
+          <h2 className="text-xl font-bold tracking-tight">Bienvenido a Valee!</h2>
           <p className="mt-2 text-indigo-100 text-sm">Tu programa de recompensas. Escanea facturas, acumula puntos y canjealos por productos.</p>
-          <button onClick={dismissWelcome} className="mt-4 bg-white text-indigo-600 px-4 py-2 rounded-lg font-medium text-sm">
-            Entendido
+          <button onClick={dismissWelcome} className="aa-btn mt-4 bg-white text-indigo-600 px-4 py-2 rounded-lg font-medium text-sm">
+            <span className="relative z-10">Entendido</span>
           </button>
         </div>
       )}
 
-      {/* Header: Valee + merchant + logout */}
-      <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-xl font-extrabold tracking-tight text-indigo-700">Valee</span>
+      {/* Header: back to hub + merchant label + logout
+          "Mis comercios" goes back to the multi-merchant landing at / without
+          dropping the session (that's what "Salir" is for). */}
+      <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <Link
+            href="/"
+            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors whitespace-nowrap"
+          >
+            <MdChevronRight className="w-4 h-4 rotate-180" />
+            Mis comercios
+          </Link>
           {account?.merchantName && (
             <>
               <span className="text-slate-300">|</span>
-              <span className="text-sm font-semibold text-slate-600 truncate max-w-[160px]">{account.merchantName}</span>
+              <span className="text-sm font-semibold text-slate-600 truncate">{account.merchantName}</span>
             </>
           )}
         </div>
-        <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition">Salir</button>
+        <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition whitespace-nowrap">Salir</button>
       </div>
 
       {/* Greeting */}
-      <div className="px-4 pt-5">
-        <h1 className="text-2xl font-bold text-slate-800">{greeting}</h1>
+      <div className="px-4 pt-5 aa-rise-sm">
+        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">{greeting}</h1>
       </div>
 
       {/* Offline indicators */}
@@ -405,12 +444,13 @@ function ConsumerApp() {
       {/* Balance Bar (clickable → toggle history) */}
       <button
         onClick={() => setShowHistory(!showHistory)}
-        className="mx-4 mt-4 w-[calc(100%-2rem)] bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl p-5 text-white shadow-lg text-left active:scale-[0.98] transition-transform"
+        className="aa-rise mx-4 mt-4 w-[calc(100%-2rem)] bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl p-5 text-white shadow-lg text-left active:scale-[0.98] transition-transform"
+        style={{ animationDelay: '60ms' }}
       >
         <div className="flex items-center justify-between">
           <div>
             <p className="text-indigo-200 text-xs uppercase tracking-wide">Tu saldo</p>
-            <p className="text-3xl font-extrabold tracking-tight mt-1">{displayBalance}</p>
+            <p key={displayBalance} className="text-3xl font-extrabold tracking-tight mt-1 aa-count tabular-nums">{displayBalance}</p>
             <p className="text-indigo-200 text-xs mt-0.5">{unitLabel}</p>
           </div>
           <div className="flex flex-col items-center gap-1">
@@ -462,12 +502,24 @@ function ConsumerApp() {
           ) : (
             <div className="divide-y divide-slate-50 max-h-64 overflow-y-auto">
               {history.map(entry => (
-                <div key={entry.id} className="px-4 py-3 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-sm text-slate-700">{EVENT_LABELS[entry.eventType] || entry.eventType}</p>
-                    <p className="text-xs text-slate-400">{new Date(entry.createdAt).toLocaleDateString('es-VE')}</p>
+                <div key={entry.id} className="px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    {entry.productPhotoUrl ? (
+                      <img src={entry.productPhotoUrl} alt={entry.productName || ''} className="w-10 h-10 rounded-lg object-cover flex-shrink-0 border border-slate-100" />
+                    ) : entry.productName ? (
+                      <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center flex-shrink-0">
+                        <MdCardGiftcard className="w-5 h-5 text-indigo-400" />
+                      </div>
+                    ) : null}
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm text-slate-700 truncate">{EVENT_LABELS[entry.eventType] || entry.eventType}</p>
+                      {entry.productName && (
+                        <p className="text-xs text-slate-500 truncate">{entry.productName}</p>
+                      )}
+                      <p className="text-xs text-slate-400">{new Date(entry.createdAt).toLocaleDateString('es-VE')}</p>
+                    </div>
                   </div>
-                  <p className={`font-bold text-sm ${entry.entryType === 'CREDIT' ? 'text-emerald-600' : 'text-red-500'}`}>
+                  <p className={`font-bold text-sm flex-shrink-0 tabular-nums ${entry.entryType === 'CREDIT' ? 'text-emerald-600' : 'text-red-500'}`}>
                     {entry.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(entry.amount)).toLocaleString()}
                   </p>
                 </div>
@@ -479,7 +531,7 @@ function ConsumerApp() {
 
       {/* Product Catalog — Carousel */}
       {regularProducts.length > 0 && (
-        <div className="mt-6">
+        <div className="mt-6 aa-rise" style={{ animationDelay: '180ms' }}>
           <div className="px-4 flex items-center justify-between mb-3">
             <h2 className="font-bold text-slate-800">Canjea tus puntos</h2>
             <Link href="/catalog" className="text-indigo-600 text-xs font-semibold">Ver todo</Link>
@@ -516,7 +568,7 @@ function ConsumerApp() {
 
       {/* Hybrid Deals Catalog — Carousel */}
       {hybridProducts.length > 0 && (
-        <div className="mt-6">
+        <div className="mt-6 aa-rise" style={{ animationDelay: '240ms' }}>
           <div className="px-4 flex items-center justify-between mb-3">
             <h2 className="font-bold text-slate-800 flex items-center gap-2">
               <MdLocalOffer className="w-5 h-5 text-amber-500" />
@@ -566,20 +618,20 @@ function ConsumerApp() {
       )}
 
       {/* Bottom Fixed Actions */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg z-10">
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg z-10 aa-rise-sm">
         <Link
           href="/scan"
-          className="flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-[0.97] transition"
+          className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700"
         >
-          <MdCameraAlt className="w-5 h-5" />
-          Escanear factura
+          <MdCameraAlt className="w-5 h-5 relative z-10" />
+          <span className="relative z-10">Escanear factura</span>
         </Link>
         <Link
           href="/catalog"
-          className="flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-emerald-700 active:scale-[0.97] transition"
+          className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-emerald-700"
         >
-          <MdCardGiftcard className="w-5 h-5" />
-          Canjear premios
+          <MdCardGiftcard className="w-5 h-5 relative z-10" />
+          <span className="relative z-10">Canjear premios</span>
         </Link>
       </div>
     </div>

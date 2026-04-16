@@ -3,8 +3,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { MdCameraAlt, MdDescription, MdVerifiedUser, MdStars, MdQrCodeScanner, MdPhotoLibrary } from 'react-icons/md'
 import type { ComponentType } from 'react'
+import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import Link from 'next/link'
+
+/**
+ * Merchant-entry QR codes encode a wa.me deep link that carries a hidden
+ * `[MERCHANT:<slug>]` tag (and optionally `:BRANCH:<id>`). When the consumer
+ * PWA scans one, we don't want to push the user out to WhatsApp — we want to
+ * keep them in the app and route them to that merchant's storefront.
+ * Returns the slug if the decoded text looks like a merchant QR, otherwise null.
+ */
+function parseMerchantSlug(decoded: string): string | null {
+  const m = decoded.match(/\[MERCHANT:([a-z0-9][a-z0-9-]{0,48}[a-z0-9])(?::BRANCH:[^\]]+)?\]/i)
+  return m ? m[1].toLowerCase() : null
+}
 
 type Stage = 'idle' | 'processing' | 'result'
 
@@ -17,6 +30,7 @@ const ANIMATION_STEPS: Array<{ label: string; Icon: ComponentType<{ className?: 
 const SCANNER_ID = 'scan-unified-camera'
 
 export default function ScanPage() {
+  const router = useRouter()
   const [stage, setStage] = useState<Stage>('idle')
   const [animStep, setAnimStep] = useState(0)
   const [result, setResult] = useState<any>(null)
@@ -69,6 +83,17 @@ export default function ScanPage() {
   const processQrToken = useCallback(async (token: string) => {
     if (isProcessingRef.current) return
     isProcessingRef.current = true
+
+    // 1) Merchant entry QR (wa.me link with [MERCHANT:slug] tag).
+    //    Route the user to that merchant's consumer view instead of bouncing
+    //    them out to WhatsApp.
+    const slug = parseMerchantSlug(token)
+    if (slug) {
+      await stopScanner()
+      router.push(`/consumer?tenant=${encodeURIComponent(slug)}`)
+      return
+    }
+
     setStage('processing')
     setAnimStep(ANIMATION_STEPS.length)
     await stopScanner()
@@ -80,7 +105,7 @@ export default function ScanPage() {
       setResult({ kind: 'qr', success: false, message: e.error || 'No se pudo procesar el QR' })
     }
     setStage('result')
-  }, [stopScanner])
+  }, [stopScanner, router])
 
   const startScanner = useCallback(async () => {
     setCameraError(null)
@@ -97,7 +122,23 @@ export default function ScanPage() {
 
       await scanner.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 200, height: 200 }, disableFlip: false },
+        {
+          fps: 10,
+          qrbox: { width: 240, height: 240 },
+          disableFlip: false,
+          // Request continuous autofocus so the camera keeps receipts sharp
+          // as the user moves the phone. Most browsers silently ignore unknown
+          // advanced constraints so this is safe.
+          videoConstraints: {
+            facingMode: 'environment',
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            advanced: [
+              { focusMode: 'continuous' },
+              { focusDistance: { min: 0, ideal: 0.2, max: 1 } },
+            ],
+          },
+        } as any,
         (decodedText: string) => {
           if (!isProcessingRef.current && decodedText.trim()) {
             processQrToken(decodedText.trim())
@@ -105,6 +146,17 @@ export default function ScanPage() {
         },
         () => {}
       )
+
+      // Belt-and-suspenders: force continuous autofocus via the raw track API
+      // for browsers that accept applyConstraints but not the nested advanced
+      // field in getUserMedia.
+      try {
+        const videoEl = document.querySelector<HTMLVideoElement>(`#${SCANNER_ID} video`)
+        const track = (videoEl?.srcObject as MediaStream | null)?.getVideoTracks?.()[0]
+        if (track && 'applyConstraints' in track) {
+          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' } as any] }).catch(() => {})
+        }
+      } catch {}
     } catch (err: any) {
       const msg = typeof err === 'string' ? err : err?.message || 'No se pudo acceder a la camara'
       setCameraError(msg)
@@ -170,24 +222,24 @@ export default function ScanPage() {
           {result.message && <p className="text-white/90">{result.message}</p>}
           {result.valueAssigned && (
             <p className="text-4xl font-extrabold tracking-tight">
-              +{parseFloat(result.valueAssigned).toLocaleString()} pts
+              +{Math.round(parseFloat(result.valueAssigned)).toLocaleString()} pts
             </p>
           )}
           {result.newBalance && (
-            <p className="text-white/80">Nuevo saldo: {parseFloat(result.newBalance).toLocaleString()} pts</p>
+            <p className="text-white/80">Nuevo saldo: {Math.round(parseFloat(result.newBalance)).toLocaleString()} pts</p>
           )}
           <div className="flex flex-col gap-3 pt-4">
             <button
               onClick={reset}
-              className="bg-white/20 backdrop-blur px-6 py-3 rounded-xl font-semibold hover:bg-white/30 transition"
+              className="aa-btn bg-white/20 backdrop-blur px-6 py-3 rounded-xl font-semibold hover:bg-white/30"
             >
-              Escanear otra
+              <span className="relative z-10">Escanear otra</span>
             </button>
             <Link
               href="/consumer"
-              className="bg-white text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-slate-100 transition"
+              className="aa-btn bg-white text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-slate-100"
             >
-              Volver al inicio
+              <span className="relative z-10">Volver al inicio</span>
             </Link>
           </div>
         </div>
@@ -196,23 +248,40 @@ export default function ScanPage() {
   }
 
   // IDLE: live camera with QR detection + invoice photo capture
+  // fixed + inset-0 + dvh units keep the action bar visible above iOS Safari's
+  // dynamic bottom chrome (previously h-screen hid the capture buttons below
+  // the fold on phones).
   return (
-    <div className="h-screen bg-slate-900 text-white flex flex-col overflow-hidden">
-      <header className="px-4 py-2 flex items-center gap-3 flex-shrink-0 absolute top-0 left-0 right-0 z-10 bg-gradient-to-b from-black/60 to-transparent">
-        <Link href="/consumer" className="text-2xl">&larr;</Link>
-        <h1 className="text-lg font-bold">Escanear</h1>
+    <div className="fixed inset-0 bg-slate-900 text-white flex flex-col" style={{ height: '100dvh' }}>
+      <header className="px-4 py-3 flex items-center gap-3 flex-shrink-0 absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 via-black/30 to-transparent">
+        <Link href="/consumer" className="text-2xl hover:-translate-x-0.5 transition-transform">&larr;</Link>
+        <h1 className="text-lg font-bold tracking-tight">Escanear</h1>
       </header>
 
       <div className="flex-1 relative bg-black overflow-hidden">
         <div id={SCANNER_ID} className="w-full h-full" />
+
+        {/* Corner brackets to signal the capture area + hint */}
+        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+          <div className="relative w-64 h-64">
+            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-white/70 rounded-tl-xl" />
+            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-white/70 rounded-tr-xl" />
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-white/70 rounded-bl-xl" />
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-white/70 rounded-br-xl" />
+          </div>
+        </div>
+
         {cameraError && (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-800/90 p-6">
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-800/95 p-6">
             <p className="text-red-300 text-sm text-center">{cameraError}</p>
           </div>
         )}
       </div>
 
-      <div className="flex-shrink-0 bg-slate-900 px-4 pt-2 pb-4 space-y-2">
+      <div
+        className="flex-shrink-0 bg-gradient-to-t from-slate-900 via-slate-900 to-slate-900/95 px-4 pt-3 space-y-3"
+        style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 48px)' }}
+      >
         <p className="text-center text-xs text-slate-400">Apunta al QR del cajero o toma foto de tu factura</p>
 
         <input
@@ -232,10 +301,10 @@ export default function ScanPage() {
                 fileRef.current.click()
               }
             }}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition"
+            className="aa-btn aa-btn-primary bg-indigo-600 hover:bg-indigo-700 text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 text-base"
           >
-            <MdCameraAlt className="w-5 h-5" />
-            Tomar foto
+            <MdCameraAlt className="w-6 h-6 relative z-10" />
+            <span className="relative z-10">Tomar foto</span>
           </button>
           <button
             onClick={() => {
@@ -244,10 +313,10 @@ export default function ScanPage() {
                 fileRef.current.click()
               }
             }}
-            className="bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition"
+            className="aa-btn aa-btn-dark bg-slate-700 hover:bg-slate-600 text-white py-4 rounded-2xl font-semibold flex items-center justify-center gap-2 text-base"
           >
-            <MdPhotoLibrary className="w-5 h-5" />
-            Galeria
+            <MdPhotoLibrary className="w-6 h-6 relative z-10" />
+            <span className="relative z-10">Galeria</span>
           </button>
         </div>
 

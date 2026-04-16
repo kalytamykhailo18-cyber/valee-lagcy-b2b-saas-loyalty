@@ -30,9 +30,31 @@ export default function Home() {
   const [merchants, setMerchants] = useState<MerchantAccount[]>([])
   const [totalBalance, setTotalBalance] = useState('0')
   const [phoneNumber, setPhoneNumber] = useState('')
+  const [displayName, setDisplayName] = useState<string | null>(null)
   const [affiliated, setAffiliated] = useState<AffiliatedMerchant[]>([])
 
   useEffect(() => { load() }, [])
+
+  // Re-check auth when the tab becomes visible or the page is restored from
+  // bfcache (back/forward swipe). Without this, swiping back after logout
+  // shows the previous authenticated view.
+  useEffect(() => {
+    const recheck = () => {
+      const t = localStorage.getItem('accessToken')
+      if (!t && authenticated) window.location.reload()
+    }
+    const onVis = () => { if (document.visibilityState === 'visible') recheck() }
+    const onShow = (e: PageTransitionEvent) => { if (e.persisted) recheck() }
+    const onStorage = (e: StorageEvent) => { if (e.key === 'accessToken') recheck() }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('pageshow', onShow)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('pageshow', onShow)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [authenticated])
 
   async function load() {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
@@ -43,6 +65,7 @@ export default function Home() {
         setMerchants(data.merchants)
         setTotalBalance(data.totalBalance)
         setPhoneNumber(data.phoneNumber)
+        setDisplayName(data.displayName || null)
         setLoading(false)
         return
       } catch {
@@ -60,9 +83,9 @@ export default function Home() {
   function logout() {
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
-    setAuthenticated(false)
-    setMerchants([])
-    load()
+    // Hard navigation clears the bfcache so swiping back won't resurrect
+    // the authenticated page.
+    window.location.href = '/'
   }
 
   if (loading) {
@@ -102,10 +125,17 @@ export default function Home() {
 
         {/* Main content */}
         <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
+          {/* Greeting */}
+          <div className="mb-4 lg:mb-6 aa-rise-sm">
+            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
+              Hola{displayName ? `, ${displayName}` : ''}
+            </h1>
+          </div>
+
           {/* Total balance card */}
-          <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl p-6 sm:p-8 lg:p-10 text-white shadow-xl">
+          <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl p-6 sm:p-8 lg:p-10 text-white shadow-xl aa-rise">
             <p className="text-indigo-200 text-sm sm:text-base">Tu saldo total</p>
-            <p className="text-5xl sm:text-6xl lg:text-7xl font-bold mt-2 tracking-tight">
+            <p key={totalBalance} className="text-5xl sm:text-6xl lg:text-7xl font-bold mt-2 tracking-tight aa-count tabular-nums">
               {Math.round(parseFloat(totalBalance)).toLocaleString()}
             </p>
             <p className="text-indigo-200 text-sm sm:text-base mt-2">
@@ -126,10 +156,11 @@ export default function Home() {
                 Tus comercios
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 lg:gap-6">
-                {merchants.map(m => (
+                {merchants.map((m, i) => (
                   <div
                     key={m.accountId}
-                    className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden hover:shadow-md transition-shadow"
+                    className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
+                    style={{ animationDelay: `${Math.min(i * 60, 360)}ms` }}
                   >
                     <div className="p-5 flex items-center justify-between border-b border-slate-100">
                       <div>
@@ -142,7 +173,7 @@ export default function Home() {
                         onClick={() => {
                           router.push(`/consumer?tenant=${m.tenantSlug}`)
                         }}
-                        className="text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-100 transition-colors"
+                        className="aa-btn text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-100"
                       >
                         Ver detalle
                       </button>
@@ -177,7 +208,7 @@ export default function Home() {
                                   {p.name}
                                 </p>
                                 <p className="text-xs text-indigo-600 font-bold">
-                                  {parseFloat(p.redemptionCost).toLocaleString()} pts
+                                  {Math.round(parseFloat(p.redemptionCost)).toLocaleString()} pts
                                 </p>
                               </div>
                             )
@@ -230,7 +261,7 @@ export default function Home() {
       {/* Hero */}
       <div className="max-w-6xl mx-auto px-6 sm:px-8 lg:px-12 pt-12 lg:pt-24 pb-8 lg:pb-16 text-white">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-          <div>
+          <div className="aa-rise">
             <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold mb-4 tracking-tight">
               Valee
             </h1>

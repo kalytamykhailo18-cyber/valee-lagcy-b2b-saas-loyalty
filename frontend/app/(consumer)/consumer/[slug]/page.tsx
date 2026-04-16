@@ -23,7 +23,10 @@ export default function MerchantConsumerPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <p className="text-slate-500">Cargando...</p>
+      <div className="text-center aa-rise">
+        <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
+        <p className="text-slate-500 mt-4">Cargando...</p>
+      </div>
     </div>
   )
 }

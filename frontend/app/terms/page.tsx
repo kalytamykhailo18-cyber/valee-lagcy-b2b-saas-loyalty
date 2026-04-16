@@ -8,7 +8,7 @@ export const metadata = {
 export default function TermsPage() {
   return (
     <div className="min-h-screen flex flex-col bg-emerald-50">
-      <header className="py-6 text-center">
+      <header className="py-6 text-center aa-rise-sm">
         <Link
           href="/"
           className="inline-block text-3xl font-extrabold tracking-tight text-emerald-700 hover:text-emerald-800 transition-colors"
@@ -19,13 +19,13 @@ export default function TermsPage() {
 
       <main className="flex-1">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 lg:p-10">
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 lg:p-10 aa-rise" style={{ animationDelay: '80ms' }}>
             <header className="mb-8 border-b border-slate-200 pb-6">
               <h1 className="text-3xl lg:text-4xl font-extrabold tracking-tight text-slate-900">Terminos y condiciones</h1>
               <p className="text-sm text-slate-500 mt-2">Ultima actualizacion: abril de 2026</p>
             </header>
 
-            <div className="space-y-6 text-slate-700 leading-relaxed">
+            <div className="aa-stagger space-y-6 text-slate-700 leading-relaxed">
               <section>
                 <h2 className="text-xl font-semibold text-slate-900 mb-2">1. Aceptacion de los terminos</h2>
                 <p>

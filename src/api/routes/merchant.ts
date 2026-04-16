@@ -5,7 +5,7 @@ import { authenticateStaff, issueStaffTokens, verifyStaffToken } from '../../ser
 import { processCSV } from '../../services/csv-upload.js';
 import { enqueueCsvJob } from '../../services/workers.js';
 import { processRedemption } from '../../services/redemption.js';
-import { upgradeToVerified, normalizeVenezuelanPhone } from '../../services/accounts.js';
+import { upgradeToVerified, normalizeVenezuelanPhone, phoneTail } from '../../services/accounts.js';
 import { getAccountBalance, getAccountHistory } from '../../services/ledger.js';
 import { requireStaffAuth, requireOwnerRole } from '../middleware/auth.js';
 import { verifyAndResolveLedgerEntry } from '../../services/qr-token.js';
@@ -21,7 +21,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- PUBLIC SIGNUP (no auth required) ----
   app.post('/api/merchant/signup', async (request, reply) => {
     const {
-      businessName, slug, ownerName, ownerEmail, password,
+      businessName, slug: slugInput, ownerName, ownerEmail, password,
       address, contactPhone, rif, description,
     } = request.body as {
       businessName?: string;
@@ -39,8 +39,35 @@ export default async function merchantRoutes(app: FastifyInstance) {
     if (!businessName || businessName.trim().length < 2) {
       return reply.status(400).send({ error: 'El nombre del comercio es obligatorio (minimo 2 caracteres)' });
     }
-    if (!slug || !/^[a-z0-9](?:[a-z0-9-]{1,48}[a-z0-9])?$/.test(slug)) {
-      return reply.status(400).send({ error: 'El slug debe tener 2-50 caracteres, solo minusculas, numeros y guiones' });
+
+    // Auto-derive slug from the business name when the client doesn't send one.
+    // The slug is still the public URL identifier (valee.app/?merchant=<slug>),
+    // but we no longer make the user pick it during signup — they can rename
+    // it later from Configuracion.
+    function deriveSlug(name: string): string {
+      return name.toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s-]/g, '')
+        .trim()
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .slice(0, 50)
+        .replace(/^-+|-+$/g, '');
+    }
+    let slug = (slugInput || '').trim().toLowerCase() || deriveSlug(businessName);
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,48}[a-z0-9])?$/.test(slug)) {
+      // Fall back to a sanitized derivation if the provided one failed validation
+      slug = deriveSlug(businessName);
+    }
+    if (!slug || slug.length < 2) {
+      return reply.status(400).send({ error: 'No pude generar un identificador valido a partir del nombre. Usa al menos 2 letras o numeros.' });
+    }
+    // Ensure uniqueness by appending a short random suffix on collision.
+    let attempts = 0;
+    while (await prisma.tenant.findUnique({ where: { slug } })) {
+      if (attempts++ > 5) break;
+      const suffix = Math.random().toString(36).slice(2, 6);
+      slug = `${deriveSlug(businessName).slice(0, 45)}-${suffix}`;
     }
     if (!ownerName || ownerName.trim().length < 2) {
       return reply.status(400).send({ error: 'Nombre del propietario obligatorio' });
@@ -68,10 +95,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
       }
     }
 
-    // Check slug not taken
+    // Slug uniqueness already handled by the auto-suffix loop above. If after
+    // all retries we still have a collision, refuse — extremely unlikely.
     const existingSlug = await prisma.tenant.findUnique({ where: { slug } });
     if (existingSlug) {
-      return reply.status(409).send({ error: 'Ese slug ya esta en uso. Elige otro.' });
+      return reply.status(409).send({ error: 'No pude reservar un identificador unico para el comercio. Intenta de nuevo.' });
     }
 
     // Check RIF not already registered
@@ -163,14 +191,35 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
   // ---- AUTH: Staff login ----
   app.post('/api/merchant/auth/login', async (request, reply) => {
-    const { email, password, tenantSlug } = request.body as { email: string; password: string; tenantSlug: string };
+    const { email, password, tenantSlug } = request.body as { email: string; password: string; tenantSlug?: string };
 
-    if (!email || !password || !tenantSlug) {
-      return reply.status(400).send({ error: 'email, password, and tenantSlug are required' });
+    if (!email || !password) {
+      return reply.status(400).send({ error: 'email and password required' });
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
-    if (!tenant) return reply.status(404).send({ error: 'Merchant not found' });
+    // Resolve tenant: explicit slug wins; otherwise try to infer it from the
+    // email. The slug only becomes mandatory when the same email exists as
+    // staff in more than one tenant (rare in practice — typically a consultant
+    // working for several stores).
+    let tenant = null as Awaited<ReturnType<typeof prisma.tenant.findUnique>>;
+    if (tenantSlug) {
+      tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
+      if (!tenant) return reply.status(404).send({ error: 'Merchant not found' });
+    } else {
+      const matches = await prisma.staff.findMany({
+        where: { email, active: true },
+        include: { tenant: true },
+      });
+      if (matches.length === 0) return reply.status(401).send({ error: 'Invalid credentials' });
+      if (matches.length > 1) {
+        return reply.status(409).send({
+          error: 'Este email esta vinculado a varios comercios. Indica el codigo del comercio.',
+          requiresTenantSlug: true,
+          tenantOptions: matches.map(m => ({ slug: m.tenant.slug, name: m.tenant.name })),
+        });
+      }
+      tenant = matches[0].tenant;
+    }
 
     const staff = await authenticateStaff(email, password, tenant.id);
     if (!staff) return reply.status(401).send({ error: 'Invalid credentials' });
@@ -252,6 +301,52 @@ export default async function merchantRoutes(app: FastifyInstance) {
       errorDetails: batch.errorDetails,
       createdAt: batch.createdAt,
       completedAt: batch.completedAt,
+    };
+  });
+
+  // List invoices (from CSV uploads + claimed/pending). Provides the "did my
+  // CSV actually land?" visibility the merchant dashboard was missing.
+  app.get('/api/merchant/invoices', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { status, batchId, search, limit = '50', offset = '0' } = request.query as {
+      status?: string; batchId?: string; search?: string; limit?: string; offset?: string;
+    };
+    const where: any = { tenantId };
+    if (status) where.status = status;
+    if (batchId) where.uploadBatchId = batchId;
+    if (search) where.invoiceNumber = { contains: search, mode: 'insensitive' };
+
+    const [invoices, total] = await Promise.all([
+      prisma.invoice.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: Math.min(parseInt(limit) || 50, 200),
+        skip: parseInt(offset) || 0,
+      }),
+      prisma.invoice.count({ where }),
+    ]);
+
+    const statusCounts = await prisma.invoice.groupBy({
+      by: ['status'],
+      where: { tenantId },
+      _count: { _all: true },
+    });
+    const counts: Record<string, number> = { available: 0, claimed: 0, pending_validation: 0, rejected: 0 };
+    for (const row of statusCounts) counts[row.status] = row._count._all;
+
+    return {
+      invoices: invoices.map(i => ({
+        id: i.id,
+        invoiceNumber: i.invoiceNumber,
+        amount: i.amount.toString(),
+        transactionDate: i.transactionDate,
+        customerPhone: i.customerPhone,
+        status: i.status,
+        uploadBatchId: i.uploadBatchId,
+        createdAt: i.createdAt,
+      })),
+      total,
+      counts,
     };
   });
 
@@ -399,12 +494,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
     if (!token) return reply.status(400).send({ error: 'token is required' });
 
-    // Idempotency check: use the token itself as the natural idempotency key
-    const idempotencyKey = `scan:${tenantId}:${token}`;
-    const cached = await checkIdempotencyKey(idempotencyKey);
-    if (cached) {
-      return cached;
-    }
+    // No idempotency cache here. The RedemptionToken row itself becomes
+    // status='used' on the first successful scan, so any second scan correctly
+    // gets rejected with "This QR has already been used." Caching the success
+    // result for 24h made repeated scans look successful — Eric was hitting
+    // exactly that. The token table is the canonical dedup mechanism.
 
     const result = await processRedemption({
       token,
@@ -413,17 +507,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
     });
 
     if (!result.success) {
-      // Audit failure
       await prisma.$executeRaw`
         INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, failure_reason, created_at)
         VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff',
           ${request.staff!.role}::"AuditActorRole", 'QR_SCAN_FAILURE', 'failure', ${result.message}, now())
       `;
-    }
-
-    // Store idempotency after successful scan
-    if (result.success) {
-      await storeIdempotencyKey(idempotencyKey, 'scan_redemption', result);
     }
 
     return result;
@@ -501,11 +589,20 @@ export default async function merchantRoutes(app: FastifyInstance) {
       if (assetType) {
         balance = await getAccountBalance(acc.id, assetType.id, tenantId);
       }
-      const invoiceCount = await prisma.invoice.count({
-        where: { tenantId, consumerAccountId: acc.id },
-      });
+      // Invoices can be linked to the account directly (consumer_account_id)
+      // OR only carry customer_phone (older CSV rows, before the auto-credit
+      // link was added). Match both so older data still shows up.
+      const tail = phoneTail(acc.phoneNumber);
+      const invoiceWhere: any = {
+        tenantId,
+        OR: [
+          { consumerAccountId: acc.id },
+          ...(tail.length === 10 ? [{ customerPhone: { endsWith: tail } }] : []),
+        ],
+      };
+      const invoiceCount = await prisma.invoice.count({ where: invoiceWhere });
       const lastInvoice = await prisma.invoice.findFirst({
-        where: { tenantId, consumerAccountId: acc.id },
+        where: invoiceWhere,
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true, invoiceNumber: true, amount: true, status: true },
       });
@@ -552,9 +649,17 @@ export default async function merchantRoutes(app: FastifyInstance) {
         ${request.staff!.role}::"AuditActorRole", 'CUSTOMER_LOOKUP', ${account.id}::uuid, 'success', now())
     `;
 
-    // Get invoice submission history
+    // Get invoice submission history — match by linked account OR by phone
+    // tail so CSV rows without consumer_account_id still surface.
+    const tail = phoneTail(account.phoneNumber);
     const invoices = await prisma.invoice.findMany({
-      where: { tenantId, consumerAccountId: account.id },
+      where: {
+        tenantId,
+        OR: [
+          { consumerAccountId: account.id },
+          ...(tail.length === 10 ? [{ customerPhone: { endsWith: tail } }] : []),
+        ],
+      },
       orderBy: { createdAt: 'desc' },
       take: 20,
     });
@@ -1414,10 +1519,36 @@ export default async function merchantRoutes(app: FastifyInstance) {
   app.post('/api/merchant/branches/:id/generate-qr', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
     const { id } = request.params as { id: string };
+    const { reason } = (request.body || {}) as { reason?: string };
 
-    // Verify branch belongs to tenant
     const branch = await prisma.branch.findFirst({ where: { id, tenantId } });
     if (!branch) return reply.status(404).send({ error: 'Branch not found' });
+
+    // If the branch already has a QR, this is a REGENERATION — require a
+    // reason and enforce a max of 2 regenerations. This discourages casual
+    // re-rolling (the printed QR becomes useless) and creates an audit trail
+    // that surfaces sabotage attempts.
+    const isRegen = !!branch.qrCodeUrl;
+    if (isRegen) {
+      if (!reason || reason.trim().length < 3) {
+        return reply.status(400).send({ error: 'Debes indicar la razon del cambio de QR.' });
+      }
+      // Only count actual regenerations (isRegen=true), not the initial generation.
+      const priorRegens = await prisma.auditLog.count({
+        where: {
+          tenantId,
+          actionType: 'BRANCH_QR_GENERATED',
+          metadata: { path: ['branchId'], equals: id },
+          AND: { metadata: { path: ['isRegen'], equals: true } },
+        },
+      });
+      if (priorRegens >= 2) {
+        return reply.status(403).send({
+          error: 'Este QR ya fue regenerado 2 veces. Para otro cambio, comunicate con el equipo de Valee.',
+          regenCount: priorRegens,
+        });
+      }
+    }
 
     try {
       const result = await generateBranchQR(id);
@@ -1425,7 +1556,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       await prisma.$executeRaw`
         INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
         VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'BRANCH_QR_GENERATED', 'success',
-          ${JSON.stringify({ branchId: id, branchName: branch.name })}::jsonb, now())
+          ${JSON.stringify({ branchId: id, branchName: branch.name, isRegen, reason: reason?.trim() || null })}::jsonb, now())
       `;
 
       return { success: true, deepLink: result.deepLink, qrCodeUrl: result.qrCodeUrl };

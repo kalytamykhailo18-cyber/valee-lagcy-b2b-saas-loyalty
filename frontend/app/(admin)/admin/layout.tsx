@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, type ReactNode, type ComponentType } from 'react'
+import { useState, useEffect, useCallback, type ReactNode, type ComponentType } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
@@ -26,9 +26,47 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [authChecked, setAuthChecked] = useState(false)
+  const [authorized, setAuthorized] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
   useEffect(() => { setDrawerOpen(false) }, [pathname])
+
+  // Auth guard: block rendering admin internals until we confirm a session.
+  const runAuthCheck = useCallback(() => {
+    if (pathname === '/admin/login') {
+      setAuthorized(true)
+      setAuthChecked(true)
+      return
+    }
+    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    if (!token) {
+      setAuthorized(false)
+      setAuthChecked(true)
+      // Hard nav so bfcache doesn't restore the previous protected page.
+      window.location.replace('/admin/login')
+    } else {
+      setAuthorized(true)
+      setAuthChecked(true)
+    }
+  }, [pathname])
+
+  useEffect(() => { runAuthCheck() }, [runAuthCheck])
+
+  // Re-run on tab focus, bfcache restore, and cross-tab storage changes.
+  useEffect(() => {
+    const onVisibility = () => { if (document.visibilityState === 'visible') runAuthCheck() }
+    const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) runAuthCheck() }
+    const onStorage = (e: StorageEvent) => { if (e.key === 'adminToken' || e.key === 'accessToken') runAuthCheck() }
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('pageshow', onPageShow)
+    window.addEventListener('storage', onStorage)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('pageshow', onPageShow)
+      window.removeEventListener('storage', onStorage)
+    }
+  }, [runAuthCheck])
 
   if (pathname === '/admin/login') {
     return <>{children}</>
@@ -39,7 +77,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     localStorage.removeItem('adminRefreshToken')
     localStorage.removeItem('accessToken')
     localStorage.removeItem('adminName')
-    router.push('/admin/login')
+    // Hard nav so bfcache doesn't restore the previous page if the user swipes back.
+    window.location.href = '/admin/login'
   }
 
   const sidebarContent = (
@@ -113,7 +152,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       )}
 
       <main className="lg:pl-64 min-h-screen">
-        {children}
+        {(!authChecked || !authorized) ? (
+          <div className="min-h-screen flex items-center justify-center">
+            <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : (
+          children
+        )}
       </main>
     </div>
   )

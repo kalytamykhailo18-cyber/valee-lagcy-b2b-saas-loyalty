@@ -90,9 +90,9 @@ export default function ConsumerDualScanPage() {
 
   return (
     <div className="min-h-screen bg-slate-900 text-white">
-      <div className="bg-slate-800 p-4 flex items-center gap-3">
-        <Link href="/consumer" className="text-white text-2xl">&larr;</Link>
-        <h1 className="text-lg font-bold">Escanear QR del comercio</h1>
+      <div className="bg-slate-800 p-4 flex items-center gap-3 aa-rise-sm">
+        <Link href="/consumer" className="text-white text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <h1 className="text-lg font-bold tracking-tight">Escanear QR del comercio</h1>
       </div>
 
       {state === 'scanning' && (
@@ -124,13 +124,13 @@ export default function ConsumerDualScanPage() {
                 value={tokenInput}
                 onChange={e => setTokenInput(e.target.value)}
                 placeholder="Pega el codigo del QR aqui"
-                className="w-full bg-slate-800 text-white px-4 py-3 rounded-xl text-sm h-32 resize-none border border-slate-700 focus:outline-none focus:border-indigo-500"
+                className="aa-field w-full bg-slate-800 text-white px-4 py-3 rounded-xl text-sm h-32 resize-none border border-slate-700 focus:border-indigo-500"
               />
               <button
                 onClick={handleManualScan}
                 disabled={!tokenInput.trim()}
-                className="w-full bg-indigo-600 text-white py-3 rounded-xl font-medium disabled:opacity-50"
-              >Confirmar</button>
+                className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-medium disabled:opacity-50"
+              ><span className="relative z-10">Confirmar</span></button>
             </div>
           )}
         </div>
@@ -144,14 +144,14 @@ export default function ConsumerDualScanPage() {
       )}
 
       {state === 'success' && result && (
-        <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-emerald-600">
-          <MdCheckCircle className="w-20 h-20 mx-auto mb-4 animate-pulse" />
-          <p className="text-2xl font-bold mb-2">Bienvenido!</p>
+        <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-emerald-600 animate-fade-in">
+          <MdCheckCircle className="w-20 h-20 mx-auto mb-4 animate-check" />
+          <p className="text-2xl font-bold mb-2 tracking-tight">Bienvenido!</p>
           <p className="text-emerald-100 text-center mb-6">{result.message}</p>
           {result.valueAssigned && (
-            <div className="bg-emerald-700 rounded-2xl p-6 w-full max-w-xs text-center">
+            <div className="aa-pop bg-emerald-700 rounded-2xl p-6 w-full max-w-xs text-center">
               <p className="text-emerald-200 text-sm">Ganaste</p>
-              <p className="text-4xl font-bold">{parseFloat(result.valueAssigned).toLocaleString()}</p>
+              <p className="text-4xl font-bold tabular-nums">{Math.round(parseFloat(result.valueAssigned)).toLocaleString()}</p>
               <p className="text-emerald-200 text-sm mt-2">puntos</p>
             </div>
           )}
@@ -159,9 +159,9 @@ export default function ConsumerDualScanPage() {
       )}
 
       {state === 'error' && (
-        <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-red-600">
-          <MdCancel className="w-20 h-20 mx-auto mb-4" />
-          <p className="text-2xl font-bold mb-2">No se pudo procesar</p>
+        <div className="flex flex-col items-center justify-center min-h-[80vh] p-4 bg-red-600 animate-fade-in">
+          <MdCancel className="w-20 h-20 mx-auto mb-4 animate-check" />
+          <p className="text-2xl font-bold mb-2 tracking-tight">No se pudo procesar</p>
           <p className="text-red-100 text-center max-w-xs">{errorMsg}</p>
         </div>
       )}

@@ -89,8 +89,8 @@ export default function DualScanPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Transaccion sin factura</h1>
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Transaccion sin factura</h1>
         <p className="text-sm text-slate-500 mt-1">Genera un codigo QR temporal para clientes que pagan sin recibo (efectivo, Pago Movil, Zelle)</p>
       </div>
 
@@ -98,7 +98,7 @@ export default function DualScanPage() {
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         <div className="max-w-xl mx-auto">
           {!token ? (
-            <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5">
+            <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5 aa-rise" style={{ animationDelay: '80ms' }}>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto de la transaccion</label>
                 <input
@@ -106,7 +106,7 @@ export default function DualScanPage() {
                   value={amount}
                   onChange={e => setAmount(e.target.value)}
                   placeholder="Ej: 500.00"
-                  className="w-full mt-2 px-4 py-4 rounded-xl border border-slate-200 text-2xl font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="aa-field aa-field-emerald w-full mt-2 px-4 py-4 rounded-xl border border-slate-200 text-2xl font-bold text-slate-800 tabular-nums"
                   autoFocus
                   min="0"
                   step="0.01"
@@ -117,7 +117,7 @@ export default function DualScanPage() {
               </div>
 
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
+                <div className="aa-pop bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">
                   {error}
                 </div>
               )}
@@ -125,28 +125,28 @@ export default function DualScanPage() {
               <button
                 onClick={generate}
                 disabled={generating || !amount}
-                className="w-full bg-emerald-600 text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50 hover:bg-emerald-700 transition"
+                className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center"
               >
-                {generating ? 'Generando...' : 'Generar QR'}
+                {generating && <span className="aa-spinner" />}<span className="relative z-10">{generating ? 'Generando...' : 'Generar QR'}</span>
               </button>
             </div>
           ) : (
-            <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 text-center space-y-5">
+            <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 text-center space-y-5 aa-pop">
               <div>
                 <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto</p>
-                <p className="text-4xl lg:text-5xl font-bold text-emerald-700 mt-2">
+                <p className="text-4xl lg:text-5xl font-bold text-emerald-700 mt-2 tabular-nums">
                   Bs {parseFloat(amount).toLocaleString()}
                 </p>
               </div>
 
               <p className="text-sm text-slate-500">Muestra este codigo al cliente</p>
 
-              <div className="inline-block bg-white border-4 border-emerald-200 rounded-2xl p-4">
+              <div className="inline-block bg-white border-4 border-emerald-200 rounded-2xl p-4 animate-qr-build">
                 <QRImage value={token} />
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4">
-                <p className="text-4xl font-bold text-emerald-700">{secondsLeft}s</p>
+                <p key={secondsLeft} className="text-4xl font-bold text-emerald-700 aa-count tabular-nums">{secondsLeft}s</p>
                 <p className="text-xs text-slate-500 mt-1 uppercase tracking-wide">Tiempo restante</p>
               </div>
 

@@ -24,6 +24,21 @@ export async function generateOTP(phoneNumber: string): Promise<string> {
   return otp;
 }
 
+/**
+ * Rate limit bucket for OTP requests. Returns the count of OTP sessions
+ * created for this phone within the last 15 minutes AFTER recording the
+ * current attempt. Callers reject with 429 when the returned value exceeds
+ * their allowed threshold.
+ */
+export async function incrementOtpBucket(phoneNumber: string): Promise<number> {
+  const since = new Date(Date.now() - 15 * 60 * 1000);
+  // Count prior attempts; the current call adds one to the bucket.
+  const prior = await prisma.otpSession.count({
+    where: { phoneNumber, createdAt: { gt: since } },
+  });
+  return prior + 1;
+}
+
 export async function verifyOTP(phoneNumber: string, otp: string): Promise<boolean> {
   const session = await prisma.otpSession.findFirst({
     where: {

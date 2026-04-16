@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
+import { ImageLightbox } from '@/components/ImageLightbox'
 
 interface Settings {
   welcomeBonusAmount: number
@@ -63,6 +64,7 @@ export default function SettingsPage() {
   const [refCurrency, setRefCurrency] = useState('usd')
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
   const [uploadingLogo, setUploadingLogo] = useState(false)
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [address, setAddress] = useState('')
   const [contactPhone, setContactPhone] = useState('')
@@ -117,30 +119,12 @@ export default function SettingsPage() {
 
   async function save() {
     setMessage('')
-    setRifError('')
-    // Validate RIF if any part is filled
-    const anyRifPart = rifBody.trim() || rifCheck.trim()
-    let builtRif = ''
-    if (anyRifPart) {
-      if (!rifBody || rifBody.length < 7 || rifBody.length > 9) {
-        setRifError('El cuerpo del RIF debe tener entre 7 y 9 digitos')
-        return
-      }
-      if (!rifCheck || rifCheck.length !== 1) {
-        setRifError('El digito verificador es obligatorio (1 digito)')
-        return
-      }
-      if (!/^\d+$/.test(rifBody) || !/^\d$/.test(rifCheck)) {
-        setRifError('El RIF solo puede contener numeros')
-        return
-      }
-      builtRif = `${rifPrefix}-${rifBody}-${rifCheck}`
-    }
+    // RIF removed from the UI to reduce friction. Backend keeps the column
+    // for any pre-existing values; we just don't update it from here.
     setSaving(true)
     try {
       const updated = await api.updateMerchantSettings({
         welcomeBonusAmount: Number(welcomeBonus),
-        rif: builtRif,
         preferredExchangeSource: exchangeSource || null,
         referenceCurrency: refCurrency,
         logoUrl: logoUrl,
@@ -197,16 +181,17 @@ export default function SettingsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
+      <ImageLightbox src={lightboxSrc} alt="Logo" onClose={() => setLightboxSrc(null)} />
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Configuracion</h1>
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Configuracion</h1>
         <p className="text-sm text-slate-500 mt-1">Ajustes del comercio, tasa de cambio y plan</p>
       </div>
 
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         {message && (
-          <div className={`mb-4 p-3 rounded-xl text-sm ${message.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
+          <div className={`aa-pop mb-4 p-3 rounded-xl text-sm ${message.startsWith('Error') ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'}`}>
             {message}
           </div>
         )}
@@ -223,26 +208,26 @@ export default function SettingsPage() {
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre del comercio <span className="text-red-500">*</span></label>
                   <input type="text" value={name} onChange={e => setName(e.target.value)} maxLength={255}
                     placeholder="Ej: Farmacia Central"
-                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" />
                 </div>
                 <div>
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion</label>
                   <input type="text" value={address} onChange={e => setAddress(e.target.value)} maxLength={500}
                     placeholder="Av. Principal, Valencia, Carabobo"
-                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" />
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Telefono de contacto</label>
                     <input type="tel" value={contactPhone} onChange={e => setContactPhone(e.target.value)} maxLength={30}
                       placeholder="0414-1234567"
-                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Email de contacto</label>
                     <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} maxLength={255}
                       placeholder="info@comercio.com"
-                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -250,7 +235,7 @@ export default function SettingsPage() {
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sitio web</label>
                     <input type="text" value={website} onChange={e => setWebsite(e.target.value)} maxLength={500}
                       placeholder="www.micomercio.com"
-                      className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                      className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" />
                   </div>
                   <div>
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Instagram</label>
@@ -280,7 +265,15 @@ export default function SettingsPage() {
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Logo del comercio</label>
                   <div className="mt-2 flex items-center gap-4">
                     {logoUrl ? (
-                      <img src={logoUrl} alt="Logo" className="w-20 h-20 rounded-xl object-cover border border-slate-200" />
+                      <button
+                        type="button"
+                        onClick={() => setLightboxSrc(logoUrl)}
+                        className="group relative cursor-zoom-in"
+                        aria-label="Ver logo en grande"
+                      >
+                        <img src={logoUrl} alt="Logo" className="w-20 h-20 rounded-xl object-cover border border-slate-200 transition group-hover:opacity-90 group-hover:scale-[1.02]" />
+                        <span className="absolute inset-0 rounded-xl bg-black/0 group-hover:bg-black/20 flex items-center justify-center text-white text-[10px] font-semibold opacity-0 group-hover:opacity-100 transition">Ver</span>
+                      </button>
                     ) : (
                       <div className="w-20 h-20 rounded-xl bg-slate-100 border-2 border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs text-center px-2">
                         Sin logo
@@ -303,48 +296,8 @@ export default function SettingsPage() {
                 <div>
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos de bienvenida</label>
                   <input type="number" value={welcomeBonus} onChange={e => setWelcomeBonus(e.target.value)}
-                    className="w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" min="0" />
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" min="0" />
                   <p className="text-xs text-slate-400 mt-1">Cuantos puntos recibe cada cliente nuevo. 0 desactiva.</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio</label>
-                  <div className={`mt-1 flex items-stretch gap-2 ${rifError ? '' : ''}`}>
-                    <select
-                      value={rifPrefix}
-                      onChange={e => { setRifPrefix(e.target.value as any); if (rifError) setRifError('') }}
-                      className={`px-3 py-2.5 rounded-lg border text-sm bg-white focus:outline-none focus:ring-2 font-semibold ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
-                    >
-                      <option value="J">J</option>
-                      <option value="V">V</option>
-                      <option value="E">E</option>
-                      <option value="G">G</option>
-                      <option value="P">P</option>
-                    </select>
-                    <span className="self-center text-slate-400">-</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={rifBody}
-                      onChange={e => { setRifBody(e.target.value.replace(/\D/g, '').slice(0, 9)); if (rifError) setRifError('') }}
-                      placeholder="12345678"
-                      maxLength={9}
-                      className={`flex-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 font-mono ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
-                    />
-                    <span className="self-center text-slate-400">-</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={rifCheck}
-                      onChange={e => { setRifCheck(e.target.value.replace(/\D/g, '').slice(0, 1)); if (rifError) setRifError('') }}
-                      placeholder="0"
-                      maxLength={1}
-                      className={`w-12 px-2 py-2.5 rounded-lg border text-sm text-center focus:outline-none focus:ring-2 font-mono ${rifError ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
-                    />
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Prefijo: J (juridico), V (venezolano), E (extranjero), G (gobierno), P (pasaporte). 7-9 digitos + verificador.
-                  </p>
-                  {rifError && <p className="text-xs text-red-500 mt-1">{rifError}</p>}
                 </div>
               </div>
             </section>
@@ -390,8 +343,8 @@ export default function SettingsPage() {
             </section>
 
             <button onClick={save} disabled={saving}
-              className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50 hover:bg-emerald-700 transition">
-              {saving ? 'Guardando...' : 'Guardar cambios'}
+              className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold text-sm disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center">
+              {saving && <span className="aa-spinner" />}<span className="relative z-10">{saving ? 'Guardando...' : 'Guardar cambios'}</span>
             </button>
           </div>
 

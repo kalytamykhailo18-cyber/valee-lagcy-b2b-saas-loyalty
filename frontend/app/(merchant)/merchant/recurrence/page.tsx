@@ -159,17 +159,17 @@ export default function RecurrencePage() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
-      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
+      <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800">Recurrencia</h1>
+            <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Recurrencia</h1>
             <p className="text-sm text-slate-500 mt-1">Automatiza mensajes de reactivacion para clientes que no regresan</p>
           </div>
           <button
             onClick={() => { if (showForm) cancelEdit(); else setShowForm(true) }}
-            className="bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 shadow-sm transition"
+            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
           >
-            {showForm ? 'Cancelar' : '+ Nueva regla'}
+            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nueva regla'}</span>
           </button>
         </div>
       </div>
@@ -198,7 +198,7 @@ export default function RecurrencePage() {
                 value={form.name}
                 maxLength={80}
                 onChange={e => { setForm({ ...form, name: e.target.value }); if (errors.name) setErrors({ ...errors, name: '' }) }}
-                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.name ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.name ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
             </div>
@@ -211,7 +211,7 @@ export default function RecurrencePage() {
                   max={365}
                   value={form.intervalDays}
                   onChange={e => { setForm({ ...form, intervalDays: e.target.value }); if (errors.intervalDays) setErrors({ ...errors, intervalDays: '' }) }}
-                  className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.intervalDays ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                  className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.intervalDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
                 {errors.intervalDays && <p className="text-red-500 text-xs mt-1">{errors.intervalDays}</p>}
               </div>
@@ -223,7 +223,7 @@ export default function RecurrencePage() {
                   max={90}
                   value={form.graceDays}
                   onChange={e => { setForm({ ...form, graceDays: e.target.value }); if (errors.graceDays) setErrors({ ...errors, graceDays: '' }) }}
-                  className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.graceDays ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                  className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.graceDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
                 {errors.graceDays && <p className="text-red-500 text-xs mt-1">{errors.graceDays}</p>}
               </div>
@@ -235,7 +235,7 @@ export default function RecurrencePage() {
                 maxLength={500}
                 onChange={e => { setForm({ ...form, messageTemplate: e.target.value }); if (errors.messageTemplate) setErrors({ ...errors, messageTemplate: '' }) }}
                 placeholder="Hola {name}! Hace {days} dias que no te vemos. Te regalamos {bonus} puntos!"
-                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm h-24 resize-none focus:outline-none focus:ring-2 ${errors.messageTemplate ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm h-24 resize-none focus:outline-none focus:ring-2 ${errors.messageTemplate ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               <div className="flex justify-between items-center mt-1">
                 <p className="text-xs text-slate-400">Variables: {'{name}'}, {'{days}'}, {'{bonus}'} (minimo 20, maximo 500)</p>
@@ -251,7 +251,7 @@ export default function RecurrencePage() {
                 placeholder="50"
                 value={form.bonusAmount}
                 onChange={e => { setForm({ ...form, bonusAmount: e.target.value }); if (errors.bonusAmount) setErrors({ ...errors, bonusAmount: '' }) }}
-                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.bonusAmount ? 'border-red-300 focus:ring-red-400' : 'border-slate-200 focus:ring-emerald-500'}`}
+                className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.bonusAmount ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               {errors.bonusAmount && <p className="text-red-500 text-xs mt-1">{errors.bonusAmount}</p>}
             </div>
@@ -288,9 +288,9 @@ export default function RecurrencePage() {
               <button
                 onClick={handleCreate}
                 disabled={loading}
-                className="flex-1 bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 transition"
+                className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-3 rounded-xl text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center"
               >
-                {loading ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear regla'}
+                {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Guardando...' : editingId ? 'Guardar cambios' : 'Crear regla'}</span>
               </button>
             </div>
           </div>
@@ -305,11 +305,11 @@ export default function RecurrencePage() {
             </div>
           ) : (
             <div className="space-y-4">
-              {rules.map(r => {
+              {rules.map((r, idx) => {
                 const eligible = eligibleByRule[r.id]
                 const isExpanded = expandedRule === r.id
                 return (
-                  <div key={r.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 hover:shadow-md hover:border-emerald-200 transition overflow-hidden">
+                  <div key={r.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(idx * 40, 360)}ms` }}>
                     <div className="p-5">
                       <div className="flex items-start justify-between gap-2 mb-3">
                         <p className="font-semibold text-slate-800 truncate">{r.name}</p>
