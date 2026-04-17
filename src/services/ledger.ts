@@ -42,9 +42,15 @@ function computeHash(
   const hmacSecret = process.env.HMAC_SECRET;
   if (!hmacSecret) throw new Error('HMAC_SECRET is not configured');
 
+  // Normalize amount to a canonical string so writeDoubleEntry and
+  // verifyHashChain agree regardless of what the caller passed in
+  // (e.g. "28" at write time vs "28.00000000" when read back from a
+  // Prisma Decimal column). Without this, every chain validation failed.
+  const canonicalAmount = Number(amount).toFixed(8);
+
   const payload = [
     entryId, tenantId, eventType, entryType,
-    accountId, amount, assetTypeId, referenceId,
+    accountId, canonicalAmount, assetTypeId, referenceId,
     prevHash || 'GENESIS',
   ].join('|');
 
@@ -255,27 +261,36 @@ export async function getAccountHistory(
 // ============================================================
 
 export async function verifyHashChain(tenantId: string): Promise<{ valid: boolean; brokenAt?: string }> {
-  const entries = await prisma.ledgerEntry.findMany({
-    where: { tenantId },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: {
-      id: true, tenantId: true, eventType: true, entryType: true,
-      accountId: true, amount: true, assetTypeId: true,
-      referenceId: true, prevHash: true, hash: true,
-    },
-  });
+  // Order matters: writeDoubleEntry always writes DEBIT first then CREDIT and
+  // chains credit.prevHash = debit.hash. Both rows have the same createdAt
+  // (same transaction). Alphabetical "CREDIT" < "DEBIT" is the wrong tiebreak,
+  // so we force DEBIT-before-CREDIT with an explicit CASE on the ORDER BY.
+  const entries = await prisma.$queryRaw<Array<{
+    id: string; tenant_id: string; event_type: string; entry_type: string;
+    account_id: string; amount: string; asset_type_id: string;
+    reference_id: string; prev_hash: string | null; hash: string;
+  }>>`
+    SELECT id, tenant_id, event_type, entry_type, account_id,
+           amount::text AS amount, asset_type_id, reference_id,
+           prev_hash, hash
+    FROM ledger_entries
+    WHERE tenant_id = ${tenantId}::uuid
+    ORDER BY created_at ASC,
+             CASE entry_type WHEN 'DEBIT' THEN 0 ELSE 1 END ASC,
+             id ASC
+  `;
 
   let expectedPrevHash: string | null = null;
 
   for (const row of entries) {
-    if (row.prevHash !== expectedPrevHash) {
+    if (row.prev_hash !== expectedPrevHash) {
       return { valid: false, brokenAt: row.id };
     }
 
     const recomputed = computeHash(
-      row.id, row.tenantId, row.eventType, row.entryType,
-      row.accountId, Number(row.amount).toFixed(8), row.assetTypeId,
-      row.referenceId, row.prevHash
+      row.id, row.tenant_id, row.event_type, row.entry_type,
+      row.account_id, row.amount, row.asset_type_id,
+      row.reference_id, row.prev_hash
     );
 
     if (recomputed !== row.hash) {

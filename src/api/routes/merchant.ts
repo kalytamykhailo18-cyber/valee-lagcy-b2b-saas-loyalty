@@ -256,9 +256,20 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- CSV UPLOAD (Owner only) ----
   app.post('/api/merchant/csv-upload', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
-    const { csvContent, async: useAsync } = request.body as { csvContent: string; async?: boolean };
+    const { csvContent, async: useAsync, requestId } = request.body as { csvContent: string; async?: boolean; requestId?: string };
 
     if (!csvContent) return reply.status(400).send({ error: 'csvContent is required' });
+
+    // Client-supplied requestId idempotency. Re-submitting the same batch
+    // (e.g. owner double-clicks upload, or the client retries after a flaky
+    // connection) returns the first result instead of re-running processCSV.
+    // Per-row idempotency is already guaranteed by the UNIQUE(tenant_id,
+    // invoice_number) constraint — this just avoids redoing the parse.
+    if (requestId) {
+      const cacheKey = `csv:${tenantId}:${requestId}`;
+      const cached = await checkIdempotencyKey(cacheKey);
+      if (cached) return cached;
+    }
 
     // Plan limit check
     const { enforceLimit } = await import('../../services/plan-limits.js');
@@ -268,11 +279,19 @@ export default async function merchantRoutes(app: FastifyInstance) {
     // If async=true and Redis is configured, queue the job
     if (useAsync && process.env.REDIS_URL) {
       const jobId = await enqueueCsvJob(csvContent, tenantId, staffId);
-      return { success: true, jobId, status: 'queued', message: 'CSV processing queued' };
+      const queuedResult = { success: true, jobId, status: 'queued', message: 'CSV processing queued' };
+      if (requestId) {
+        await storeIdempotencyKey(`csv:${tenantId}:${requestId}`, 'csv_upload', queuedResult);
+      }
+      return queuedResult;
     }
 
     // Otherwise process synchronously
     const result = await processCSV(csvContent, tenantId, staffId);
+
+    if (requestId) {
+      await storeIdempotencyKey(`csv:${tenantId}:${requestId}`, 'csv_upload', result);
+    }
 
     // Audit log
     await prisma.$executeRaw`
@@ -490,21 +509,31 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- CASHIER QR SCANNER ----
   app.post('/api/merchant/scan-redemption', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { staffId, tenantId } = request.staff!;
-    const { token } = request.body as { token: string };
+    const { token, requestId } = request.body as { token: string; requestId?: string };
 
     if (!token) return reply.status(400).send({ error: 'token is required' });
 
-    // No idempotency cache here. The RedemptionToken row itself becomes
-    // status='used' on the first successful scan, so any second scan correctly
-    // gets rejected with "This QR has already been used." Caching the success
-    // result for 24h made repeated scans look successful — Eric was hitting
-    // exactly that. The token table is the canonical dedup mechanism.
+    // Client-supplied requestId idempotency: a client offline-queue resubmit of
+    // the SAME scan should return the first result, not re-process. Canonical
+    // protection against double-processing is still the RedemptionToken row
+    // itself (status='used' on first scan, second scan rejects), but retries
+    // that hit us before the token mutates benefit from this cache.
+    if (requestId) {
+      const cacheKey = `scan:${tenantId}:${requestId}`;
+      const cached = await checkIdempotencyKey(cacheKey);
+      if (cached) return cached;
+    }
 
     const result = await processRedemption({
       token,
       cashierStaffId: staffId,
       cashierTenantId: tenantId,
     });
+
+    if (requestId) {
+      const cacheKey = `scan:${tenantId}:${requestId}`;
+      await storeIdempotencyKey(cacheKey, 'redemption_scan', result);
+    }
 
     if (!result.success) {
       await prisma.$executeRaw`
