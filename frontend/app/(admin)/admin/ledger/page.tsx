@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
+import { formatPoints } from '@/lib/format'
 
 export default function LedgerAudit() {
   const [entries, setEntries] = useState<any[]>([])
@@ -273,7 +274,7 @@ export default function LedgerAudit() {
                       <p className="text-xs text-slate-500">{new Date(e.createdAt).toLocaleString('es-VE')}</p>
                     </div>
                     <span className={`al-amount font-bold text-lg flex-shrink-0 tabular-nums ${e.entryType === 'CREDIT' ? 'text-emerald-600' : 'text-red-500'}`}>
-                      {e.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(e.amount)).toLocaleString()}
+                      {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
                     </span>
                   </div>
                 </div>

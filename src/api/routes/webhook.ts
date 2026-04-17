@@ -120,22 +120,46 @@ export default async function webhookRoutes(app: FastifyInstance) {
       }
     }
 
-    // If no tenant identified, look up existing account
+    // If no tenant identified, figure out the active merchant context for this
+    // phone. Falling back to "most recently created account" was wrong — if a
+    // user has accounts in two merchants, new messages always routed to the
+    // older one. Instead, use the tenant of the user's most recent ledger
+    // activity: that's the merchant they're currently interacting with.
     if (!tenantId) {
       const { PrismaClient } = await import('@prisma/client');
       const prisma = new PrismaClient();
-      const existingAccount = await prisma.account.findFirst({
-        where: { phoneNumber: formattedPhone, accountType: { in: ['shadow', 'verified'] } },
-        orderBy: { createdAt: 'desc' },
-      });
-      await prisma.$disconnect();
+      try {
+        const accounts = await prisma.account.findMany({
+          where: { phoneNumber: formattedPhone, accountType: { in: ['shadow', 'verified'] } },
+          select: { id: true, tenantId: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        });
 
-      if (existingAccount) {
-        tenantId = existingAccount.tenantId;
-      } else {
-        await sendWhatsAppMessage(formattedPhone,
-          'No pudimos identificar tu comercio. Por favor escanea el codigo QR del comercio para comenzar.');
-        return reply.status(200).send({ status: 'no_tenant' });
+        if (accounts.length === 0) {
+          await sendWhatsAppMessage(formattedPhone,
+            'No pudimos identificar tu comercio. Por favor escanea el codigo QR del comercio para comenzar.');
+          await prisma.$disconnect();
+          return reply.status(200).send({ status: 'no_tenant' });
+        }
+
+        if (accounts.length === 1) {
+          tenantId = accounts[0].tenantId;
+        } else {
+          // Multiple merchants → pick by latest ledger activity (which includes
+          // the welcome bonus from the most recent QR scan).
+          const lastActive = await prisma.ledgerEntry.findFirst({
+            where: { accountId: { in: accounts.map(a => a.id) } },
+            orderBy: { createdAt: 'desc' },
+            select: { accountId: true, tenantId: true },
+          });
+          if (lastActive) {
+            tenantId = lastActive.tenantId;
+          } else {
+            tenantId = accounts[0].tenantId;
+          }
+        }
+      } finally {
+        await prisma.$disconnect();
       }
     }
 

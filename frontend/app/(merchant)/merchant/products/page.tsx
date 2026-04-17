@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { MdCardGiftcard } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
+import { formatPoints, formatCash } from '@/lib/format'
 
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
@@ -342,10 +343,10 @@ export default function ProductManagement() {
                       <div className="flex items-center justify-between mt-3">
                         <div>
                           <p className="text-lg font-bold text-emerald-700">
-                            {Math.round(parseFloat(p.redemptionCost)).toLocaleString()} <span className="text-xs font-medium text-slate-500">pts</span>
+                            {formatPoints(p.redemptionCost)} <span className="text-xs font-medium text-slate-500">pts</span>
                           </p>
                           {p.cashPrice && Number(p.cashPrice) > 0 && (
-                            <p className="text-sm font-bold text-amber-600">+ ${Number(p.cashPrice).toLocaleString()}</p>
+                            <p className="text-sm font-bold text-amber-600">+ ${formatCash(p.cashPrice)}</p>
                           )}
                         </div>
                         <div className="text-right">

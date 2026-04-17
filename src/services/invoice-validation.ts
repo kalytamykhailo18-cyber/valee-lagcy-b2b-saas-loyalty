@@ -540,7 +540,13 @@ export async function validateInvoice(params: {
     const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
     const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
     if (!poolAccount) throw new Error('issued_value_pool not found');
-    const loyaltyValue = await convertToLoyaltyValue(extracted.total_amount.toString(), tenantId, assetTypeId);
+    const loyaltyValue = await convertToLoyaltyValue(
+      extracted.total_amount.toString(),
+      tenantId,
+      assetTypeId,
+      invoice.transactionDate || undefined,
+      'bs',
+    );
     await writeDoubleEntry({
       tenantId,
       eventType: 'INVOICE_CLAIMED',

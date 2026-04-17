@@ -103,12 +103,6 @@ export default function PrivacyPolicyPage() {
           Inicio
         </Link>
         <Link
-          href="/merchant/login"
-          className="hover:text-emerald-700 hover:underline underline-offset-4 transition-colors"
-        >
-          Acceso comercio
-        </Link>
-        <Link
           href="/admin/login"
           className="hover:text-emerald-700 hover:underline underline-offset-4 transition-colors"
         >

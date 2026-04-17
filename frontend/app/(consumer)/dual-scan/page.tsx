@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { MdCheckCircle, MdCancel } from 'react-icons/md'
 import { api } from '@/lib/api'
 import Link from 'next/link'
+import { formatPoints } from '@/lib/format'
 
 type State = 'scanning' | 'processing' | 'success' | 'error'
 
@@ -151,7 +152,7 @@ export default function ConsumerDualScanPage() {
           {result.valueAssigned && (
             <div className="aa-pop bg-emerald-700 rounded-2xl p-6 w-full max-w-xs text-center">
               <p className="text-emerald-200 text-sm">Ganaste</p>
-              <p className="text-4xl font-bold tabular-nums">{Math.round(parseFloat(result.valueAssigned)).toLocaleString()}</p>
+              <p className="text-4xl font-bold tabular-nums">{formatPoints(result.valueAssigned)}</p>
               <p className="text-emerald-200 text-sm mt-2">puntos</p>
             </div>
           )}

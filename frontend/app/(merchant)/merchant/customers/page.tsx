@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import { MdPeople, MdSearch, MdVerified, MdPerson } from 'react-icons/md'
+import { formatPoints, formatCash } from '@/lib/format'
 
 interface Customer {
   id: string
@@ -188,7 +189,7 @@ export default function CustomersPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-emerald-700 text-sm">{Math.round(parseFloat(c.balance)).toLocaleString()}</p>
+                        <p className="font-bold text-emerald-700 text-sm">{formatPoints(c.balance)}</p>
                         <p className="text-[10px] text-slate-400">{unitLabel}</p>
                       </div>
                     </div>
@@ -293,7 +294,7 @@ export default function CustomersPage() {
 
                   <div className="mt-4 pt-4 border-t border-slate-100">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Saldo</p>
-                    <p className="text-3xl font-bold text-emerald-700 mt-1">{Math.round(parseFloat(selected.balance)).toLocaleString()}</p>
+                    <p className="text-3xl font-bold text-emerald-700 mt-1">{formatPoints(selected.balance)}</p>
                   </div>
 
                   {/* Identity upgrade */}
@@ -334,13 +335,19 @@ export default function CustomersPage() {
                   {!selected.invoices?.length ? (
                     <p className="text-sm text-slate-400">Sin facturas</p>
                   ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <div className="space-y-2 max-h-56 overflow-y-auto">
                       {selected.invoices.map((inv: any) => (
-                        <div key={inv.id} className="flex justify-between items-center py-1.5 border-b border-slate-50 last:border-0">
-                          <span className="text-sm text-slate-700 truncate mr-2">{inv.invoiceNumber}</span>
+                        <div key={inv.id} className="flex justify-between items-start gap-2 py-2 border-b border-slate-50 last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm text-slate-700 font-mono truncate">{inv.invoiceNumber}</p>
+                            <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                              {inv.uploadedAt && <span>Subida: {new Date(inv.uploadedAt).toLocaleDateString('es-VE')}</span>}
+                              {inv.branch?.name ? <span>· {inv.branch.name}</span> : <span>· Sin sucursal</span>}
+                            </div>
+                          </div>
                           <div className="text-right flex-shrink-0">
-                            <p className="text-sm font-semibold">{parseFloat(inv.amount).toLocaleString()}</p>
-                            <span className={`text-xs ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{inv.status}</span>
+                            <p className="text-sm font-semibold">${formatCash(inv.amount)}</p>
+                            <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{inv.status}</span>
                           </div>
                         </div>
                       ))}
@@ -359,7 +366,7 @@ export default function CustomersPage() {
                         <div key={e.id} className="flex justify-between items-center py-1.5 border-b border-slate-50 last:border-0">
                           <span className="text-xs text-slate-600 truncate mr-2">{e.eventType}</span>
                           <span className={`text-sm font-semibold ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
-                            {e.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(e.amount)).toLocaleString()}
+                            {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
                           </span>
                         </div>
                       ))}

@@ -172,7 +172,11 @@ export async function initiateRedemption(params: {
   }
   if (!shortCode) shortCode = String(Math.floor(100000 + Math.random() * 900000));
 
-  // Store in redemption_tokens table
+  // Store in redemption_tokens table.
+  // `createdAt` is passed explicitly (not defaulted to DB's now()) so the
+  // timestamp matches exactly what was HMAC-signed above — otherwise the QR
+  // token reconstructed by /active-redemptions ends up with a different
+  // `createdAt` and the signature check fails on scan.
   await prisma.redemptionToken.create({
     data: {
       id: tokenId,
@@ -187,6 +191,7 @@ export async function initiateRedemption(params: {
       shortCode,
       expiresAt,
       ledgerPendingEntryId: ledgerResult.debit.id,
+      createdAt: now,
     },
   });
 

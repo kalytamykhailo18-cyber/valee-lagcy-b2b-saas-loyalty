@@ -24,10 +24,9 @@ export async function generateWhatsAppDeepLink(merchantSlug: string, merchantNam
     const tenant = await prisma.tenant.findUnique({ where: { slug: merchantSlug }, select: { name: true } });
     name = tenant?.name || merchantSlug;
   }
-  // The pre-filled message the customer sees when they scan the QR. Keep it
-  // warm and simple — the [MERCHANT:] tag at the end is invisible to most
-  // users (it scrolls off on small screens) and the bot strips it on receipt.
-  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${name} [MERCHANT:${merchantSlug}]`);
+  // Pre-filled text the customer sees when they scan the QR. Framed as a
+  // referral code so the slug looks intentional, not like a technical tag.
+  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${name} ✨ Ref: ${merchantSlug}`);
   return `https://wa.me/${botPhone}?text=${text}`;
 }
 
@@ -94,7 +93,7 @@ export async function generateBranchQR(branchId: string): Promise<{
 
   // Branch QR includes both tenant slug and branch ID
   const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${branch.tenant.name} - ${branch.name} [MERCHANT:${branch.tenant.slug}:BRANCH:${branch.id}]`);
+  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${branch.tenant.name} - ${branch.name} ✨ Ref: ${branch.tenant.slug}/${branch.id}`);
   const deepLink = `https://wa.me/${botPhone}?text=${text}`;
 
   const qrBuffer = await generateQRImage(deepLink);

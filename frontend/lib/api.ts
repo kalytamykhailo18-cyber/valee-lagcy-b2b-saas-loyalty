@@ -67,6 +67,19 @@ async function request(path: string, options: RequestInit = {}) {
     headers: { ...baseHeaders, ...options.headers },
   });
 
+  // Defensive JSON parse: when the upstream is briefly down or nginx returns
+  // an HTML error page, the raw "Unexpected token '<'" is useless to the user.
+  // Parse once, catch HTML, and bubble a friendly error instead.
+  async function safeJson(r: Response): Promise<any> {
+    const text = await r.text();
+    if (!text) return {};
+    try { return JSON.parse(text); }
+    catch {
+      const snippet = text.trim().slice(0, 60);
+      throw { status: r.status, error: `El servidor respondio con un formato inesperado (${r.status}). Intenta de nuevo.`, rawPreview: snippet };
+    }
+  }
+
   // Auto-refresh on 401: try refreshing the token and retry ONCE
   if (res.status === 401 && !path.includes('/auth/')) {
     const refreshed = await tryRefreshToken();
@@ -79,20 +92,18 @@ async function request(path: string, options: RequestInit = {}) {
         ...options,
         headers: { ...retryHeaders, ...options.headers },
       });
-      const retryData = await retryRes.json();
+      const retryData = await safeJson(retryRes);
       if (!retryRes.ok) {
-        // If retry also fails with 401, refresh token is also invalid — kick to login
         if (retryRes.status === 401) redirectToLogin();
         throw { status: retryRes.status, ...retryData };
       }
       return retryData;
     } else {
-      // Refresh failed — session truly expired, kick to login
       redirectToLogin();
     }
   }
 
-  const data = await res.json();
+  const data = await safeJson(res);
   if (!res.ok) throw { status: res.status, ...data };
   return data;
 }
@@ -259,6 +270,8 @@ export const api = {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request(`/api/merchant/transactions${qs}`);
   },
+  getRedemptionStatus: (tokenId: string) =>
+    request(`/api/consumer/redemption-status/${tokenId}`),
   getRecurrenceRules: () => request('/api/merchant/recurrence-rules'),
   createRecurrenceRule: (data: any) =>
     request('/api/merchant/recurrence-rules', { method: 'POST', body: JSON.stringify(data) }),

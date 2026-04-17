@@ -299,9 +299,19 @@ export default async function consumerRoutes(app: FastifyInstance) {
           : null;
         const tid = redemptionEventTypes.has(e.eventType) ? tokenIdByRef.get(e.referenceId) : undefined;
         const product = metaProduct || (tid ? productByTokenId.get(tid) : undefined);
+
+        // Welcome-bonus credits are written under ADJUSTMENT_MANUAL with a
+        // WELCOME- referenceId and metadata.type === 'welcome_bonus'. Emit a
+        // virtual event type so the consumer UI can label them correctly.
+        const effectiveEventType =
+          e.eventType === 'ADJUSTMENT_MANUAL'
+          && (e.referenceId?.startsWith('WELCOME-') || meta?.type === 'welcome_bonus')
+            ? 'WELCOME_BONUS'
+            : e.eventType;
+
         return {
           id: e.id,
-          eventType: e.eventType,
+          eventType: effectiveEventType,
           entryType: e.entryType,
           amount: e.amount.toString(),
           status: e.status,
@@ -389,8 +399,11 @@ export default async function consumerRoutes(app: FastifyInstance) {
     const { phoneNumber } = request.consumer!;
     const tail = phoneTail(phoneNumber);
 
-    // Use last-10-digit matching so legacy accounts stored in any phone format
-    // (with/without +, with/without leading 0, with separators) still resolve.
+    // Load every account this phone has across tenants so we can (1) always
+    // include tenants where the consumer already has a balance even if they
+    // have no published products right now, and (2) attach balance / accountId
+    // to tenants listed for discovery. Last-10-digit matching handles legacy
+    // phone-format variants.
     const allAccounts = await prisma.account.findMany({
       where: tail.length === 10
         ? { phoneNumber: { endsWith: tail }, accountType: { in: ['shadow', 'verified'] } }
@@ -399,20 +412,42 @@ export default async function consumerRoutes(app: FastifyInstance) {
       orderBy: { createdAt: 'desc' },
     });
 
-    // Deduplicate: if the same user has multiple account records for the same
-    // tenant (from phone-format variations), keep only the most recent.
-    // Also filter out inactive tenants.
-    const seenTenants = new Set<string>();
-    const accounts = allAccounts.filter(acc => {
-      if (acc.tenant.status !== 'active') return false;
-      if (seenTenants.has(acc.tenantId)) return false;
-      seenTenants.add(acc.tenantId);
-      return true;
+    // Deduplicate accounts by tenant, keeping the most recent (already ordered desc).
+    const accountByTenant = new Map<string, typeof allAccounts[number]>();
+    for (const acc of allAccounts) {
+      if (!accountByTenant.has(acc.tenantId)) accountByTenant.set(acc.tenantId, acc);
+    }
+
+    // Tenants with at least one active in-stock product — these are safe to
+    // surface even to users who don't have an account there yet (discovery).
+    const tenantsWithProducts = await prisma.tenant.findMany({
+      where: {
+        status: 'active',
+        products: { some: { active: true, stock: { gt: 0 } } },
+      },
     });
 
-    const merchants = await Promise.all(accounts.map(async (acc) => {
+    // Union: tenants-with-products ∪ tenants-where-this-user-has-an-account.
+    // The latter bucket catches merchants where the user still has accumulated
+    // points even if the merchant has no active products today — hiding those
+    // would make balances appear to vanish.
+    const tenantsById = new Map<string, { id: string; name: string; slug: string; status: string }>();
+    for (const t of tenantsWithProducts) {
+      tenantsById.set(t.id, { id: t.id, name: t.name, slug: t.slug, status: t.status });
+    }
+    for (const acc of allAccounts) {
+      if (acc.tenant.status !== 'active') continue;
+      if (!tenantsById.has(acc.tenantId)) {
+        tenantsById.set(acc.tenantId, { id: acc.tenant.id, name: acc.tenant.name, slug: acc.tenant.slug, status: acc.tenant.status });
+      }
+    }
+    const candidateTenants = Array.from(tenantsById.values());
+
+    const merchantsRaw = await Promise.all(candidateTenants.map(async (tenant) => {
+      const acc = accountByTenant.get(tenant.id) || null;
+
       // Pick the tenant's primary asset type
-      const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId: acc.tenantId } });
+      const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId: tenant.id } });
       const assetType = assetConfig
         ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
         : await prisma.assetType.findFirst();
@@ -420,24 +455,27 @@ export default async function consumerRoutes(app: FastifyInstance) {
       let balance = '0';
       let unitLabel = 'pts';
       if (assetType) {
-        balance = await getAccountBalance(acc.id, assetType.id, acc.tenantId);
+        if (acc) {
+          balance = await getAccountBalance(acc.id, assetType.id, tenant.id);
+        }
         unitLabel = assetType.unitLabel;
       }
 
       // Top 3 products by lowest cost (entry-level redemptions are most attractive)
       const topProducts = await prisma.product.findMany({
-        where: { tenantId: acc.tenantId, active: true, stock: { gt: 0 } },
+        where: { tenantId: tenant.id, active: true, stock: { gt: 0 } },
         orderBy: { redemptionCost: 'asc' },
         take: 3,
         select: { id: true, name: true, photoUrl: true, redemptionCost: true, stock: true },
       });
 
       return {
-        accountId: acc.id,
-        tenantId: acc.tenantId,
-        tenantName: acc.tenant.name,
-        tenantSlug: acc.tenant.slug,
-        accountType: acc.accountType,
+        accountId: acc?.id || null,
+        tenantId: tenant.id,
+        tenantName: tenant.name,
+        tenantSlug: tenant.slug,
+        accountType: acc?.accountType || null,
+        hasAccount: !!acc,
         balance,
         unitLabel,
         topProducts: topProducts.map(p => ({
@@ -450,12 +488,26 @@ export default async function consumerRoutes(app: FastifyInstance) {
       };
     }));
 
+    // Final filter: show the merchant if EITHER the user has a balance there OR
+    // it has at least one active product to redeem. A merchant with zero
+    // products AND zero balance is noise.
+    const merchants = merchantsRaw.filter(m => Number(m.balance) > 0 || m.topProducts.length > 0);
+
+    // Sort: merchants with a balance first (by balance desc), then merchants
+    // the user has an account in but no balance, then the rest alphabetically.
+    merchants.sort((a, b) => {
+      const ba = Number(a.balance), bb = Number(b.balance);
+      if (ba !== bb) return bb - ba;
+      if (a.hasAccount !== b.hasAccount) return a.hasAccount ? -1 : 1;
+      return a.tenantName.localeCompare(b.tenantName);
+    });
+
     // Compute total balance across merchants (note: only meaningful if all use the same unit)
     const totalBalance = merchants.reduce((sum, m) => sum + Number(m.balance), 0);
 
     // Pick the best display name available across this user's accounts
     // (verified/non-null wins; otherwise the most recent).
-    const displayName = accounts
+    const displayName = allAccounts
       .map(a => a.displayName)
       .find((n): n is string => !!n && n.trim().length > 0) || null;
 
@@ -652,6 +704,31 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // ---- ACTIVE REDEMPTION CODES ----
   // Returns pending redemption tokens that haven't expired yet, so the consumer
   // can re-open the QR if they navigated away.
+  // Status of a single redemption token the consumer is holding. The PWA polls
+  // this so the moment the cashier scans the QR, the consumer's screen can swap
+  // from "aqui esta tu QR" to "canje verificado con exito" without waiting for
+  // the TTL countdown to finish.
+  app.get('/api/consumer/redemption-status/:tokenId', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { accountId, tenantId } = request.consumer!;
+    const { tokenId } = request.params as { tokenId: string };
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(tokenId)) return reply.status(400).send({ error: 'Invalid tokenId' });
+
+    const token = await prisma.redemptionToken.findFirst({
+      where: { id: tokenId, tenantId, consumerAccountId: accountId },
+      select: { id: true, status: true, usedAt: true, expiresAt: true, product: { select: { name: true } } },
+    });
+    if (!token) return reply.status(404).send({ error: 'Token not found' });
+
+    return {
+      tokenId: token.id,
+      status: token.status, // pending | used | expired
+      usedAt: token.usedAt,
+      expiresAt: token.expiresAt,
+      productName: token.product?.name || null,
+    };
+  });
+
   app.get('/api/consumer/active-redemptions', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { accountId, tenantId } = request.consumer!;
     const now = new Date();
@@ -669,12 +746,15 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     return {
       redemptions: tokens.map(t => {
-        // Reconstruct the full signed token (base64 JSON of { payload, signature })
+        // Reconstruct the full signed token (base64 JSON of { payload, signature }).
+        // `amount` must use the same fixed(8) representation the signer used —
+        // Decimal.toString() drops trailing zeros ("12" vs "12.00000000") and a
+        // single char diff in the re-serialized JSON breaks the HMAC check.
         const payload = {
           tokenId: t.id,
           consumerAccountId: t.consumerAccountId,
           productId: t.productId,
-          amount: t.amount.toString(),
+          amount: t.amount.toFixed(8),
           tenantId: t.tenantId,
           assetTypeId: t.assetTypeId,
           createdAt: t.createdAt.toISOString(),
@@ -726,6 +806,13 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     if (!token) {
       return reply.status(400).send({ error: 'token is required' });
+    }
+    if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim().length < 7) {
+      // Tokens issued during certain partial-session states can miss the phone
+      // (e.g. a user who lost their cookie but still has a stale accessToken).
+      // Without this guard the service crashed with a Prisma validation error
+      // instead of returning a friendly message.
+      return reply.status(401).send({ error: 'Sesion sin telefono. Vuelve a iniciar sesion para procesar el canje.' });
     }
 
     const { confirmDualScan } = await import('../../services/dual-scan.js');

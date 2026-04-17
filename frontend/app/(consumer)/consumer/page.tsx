@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import Link from 'next/link'
 import { getLocalPendingBalance, getPendingCount, syncPendingActions, purgeExpiredActions, type QueuedAction } from '@/lib/offline-queue'
 import { useOnlineStatus } from '@/lib/use-online-status'
+import { formatPoints, formatCash } from '@/lib/format'
 
 type Screen = 'loading' | 'login' | 'otp' | 'main'
 
@@ -39,6 +40,7 @@ interface HistoryEntry {
 
 const EVENT_LABELS: Record<string, string> = {
   INVOICE_CLAIMED: 'Factura validada',
+  PRESENCE_VALIDATED: 'Pago en efectivo',
   REDEMPTION_PENDING: 'Canje pendiente',
   REDEMPTION_CONFIRMED: 'Canje procesado',
   REDEMPTION_EXPIRED: 'Canje expirado',
@@ -241,10 +243,14 @@ function ConsumerApp() {
           loadData()
           return
         } catch {
-          // Fall through to multicommerce landing
+          // Fall through to multicommerce hub
         }
       }
-      window.location.href = '/'
+      // No tenant in URL → land on the multicommerce hub directly (we're
+      // already at /consumer, just flip to main; the hub gate handles the
+      // render). Previously this redirected to '/' which dumped the user
+      // back on the public landing.
+      setScreen('main')
     } catch (e: any) {
       setError(e.error || 'Invalid OTP')
     } finally {
@@ -275,10 +281,15 @@ function ConsumerApp() {
   // ---- LOGIN SCREEN ----
   if (screen === 'login') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <Link href="/" className="absolute top-4 left-4 text-sm text-slate-500 hover:text-indigo-700 hover:-translate-x-0.5 transition-transform inline-flex items-center gap-1">
+          <span>&larr;</span> Volver al inicio
+        </Link>
         <div className="w-full max-w-sm space-y-6">
           <div className="text-center aa-rise">
-            <h1 className="text-3xl font-extrabold tracking-tight text-indigo-700">Valee</h1>
+            <Link href="/" className="inline-block">
+              <h1 className="text-3xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors">Valee</h1>
+            </Link>
             <p className="text-slate-500 mt-2">Ingresa tu numero para comenzar</p>
           </div>
           <div className="space-y-2">
@@ -348,7 +359,10 @@ function ConsumerApp() {
   // ---- OTP SCREEN ----
   if (screen === 'otp') {
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
+      <div className="min-h-screen flex flex-col items-center justify-center p-4">
+        <Link href="/" className="absolute top-4 left-4 text-sm text-slate-500 hover:text-indigo-700 hover:-translate-x-0.5 transition-transform inline-flex items-center gap-1">
+          <span>&larr;</span> Volver al inicio
+        </Link>
         <div className="w-full max-w-sm space-y-6">
           <div className="text-center aa-rise">
             <h1 className="text-2xl font-bold text-indigo-600 tracking-tight">Verificacion</h1>
@@ -376,14 +390,41 @@ function ConsumerApp() {
             <button onClick={() => setScreen('login')} className="w-full text-slate-500 py-2 hover:text-slate-700 transition-colors">
               Volver
             </button>
+            {/* Meta WhatsApp API only delivers free-form messages (like our OTP)
+                inside a 24h window that opens when the user messages the business.
+                First-time users never hit this window, so the OTP arrives silently
+                dropped. Giving them a one-tap link to say "Hola" to Valee opens
+                the window — then a Reenviar gets the OTP through. */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mt-2 text-center">
+              <p className="text-xs text-amber-800 font-medium">No te llego el codigo?</p>
+              <p className="text-xs text-amber-700 mt-1">
+                Envia <b>Hola</b> a nuestro WhatsApp y vuelve a pedir el codigo.
+              </p>
+              <a
+                href="https://wa.me/584144018263?text=Hola"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-block mt-2 bg-emerald-600 text-white px-4 py-1.5 rounded-lg text-xs font-semibold hover:bg-emerald-700"
+              >
+                Abrir WhatsApp
+              </a>
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
-  // ---- MAIN SCREEN ----
-  const displayBalance = Math.round(parseFloat(balance) - getLocalPendingBalance()).toLocaleString()
+  // ---- MULTICOMMERCE HUB ----
+  // Routing is driven purely by URL: no ?tenant= → hub. Previously we also
+  // checked `account.merchantName`, but when the user navigated away from
+  // /consumer?tenant=X the stale state kept them on the single-merchant view.
+  if (screen === 'main' && !merchantSlugFromUrl) {
+    return <MultiMerchantHub />
+  }
+
+  // ---- SINGLE-MERCHANT MAIN SCREEN ----
+  const displayBalance = formatPoints(parseFloat(balance) - getLocalPendingBalance())
   // Greet with the name the merchant linked in "Buscar cliente". If no name is
   // on file we deliberately skip the phone fallback — showing the number feels
   // robotic and clutters the hero.
@@ -408,12 +449,12 @@ function ConsumerApp() {
       )}
 
       {/* Header: back to hub + merchant label + logout
-          "Mis comercios" goes back to the multi-merchant landing at / without
-          dropping the session (that's what "Salir" is for). */}
+          "Mis comercios" goes back to the multi-merchant hub at /consumer
+          without dropping the session (that's what "Salir" is for). */}
       <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <Link
-            href="/"
+            href="/consumer"
             className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors whitespace-nowrap"
           >
             <MdChevronRight className="w-4 h-4 rotate-180" />
@@ -441,55 +482,63 @@ function ConsumerApp() {
         </div>
       )}
 
-      {/* Balance Bar (clickable → toggle history) */}
-      <button
-        onClick={() => setShowHistory(!showHistory)}
-        className="aa-rise mx-4 mt-4 w-[calc(100%-2rem)] bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl p-5 text-white shadow-lg text-left active:scale-[0.98] transition-transform"
-        style={{ animationDelay: '60ms' }}
+      {/* Balance hero — tap to expand history */}
+      <section
+        className="aa-rise mx-4 mt-5 bg-gradient-to-br from-indigo-600 via-indigo-700 to-indigo-900 rounded-3xl p-6 sm:p-7 text-white overflow-hidden relative"
+        style={{ animationDelay: '60ms', boxShadow: '0 1px 2px rgba(15,23,42,0.08), 0 20px 40px -16px rgba(79,70,229,0.35)' }}
       >
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-indigo-200 text-xs uppercase tracking-wide">Tu saldo</p>
-            <p key={displayBalance} className="text-3xl font-extrabold tracking-tight mt-1 aa-count tabular-nums">{displayBalance}</p>
-            <p className="text-indigo-200 text-xs mt-0.5">{unitLabel}</p>
-          </div>
-          <div className="flex flex-col items-center gap-1">
+        {/* Subtle decorative glow */}
+        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/10 rounded-full blur-3xl" />
+        <div className="relative">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-indigo-200 font-semibold mb-1.5">Tu saldo</p>
+              <p key={displayBalance} className="text-[56px] sm:text-6xl font-bold tracking-tight tabular-nums leading-none break-all aa-count">
+                {displayBalance}
+              </p>
+              <p className="text-indigo-200 text-sm mt-2.5">{unitLabel}</p>
+            </div>
             {account?.levelName && (
-              <div className="flex items-center gap-1 bg-white/20 backdrop-blur-sm rounded-full px-3 py-1">
+              <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 border border-white/20 flex-shrink-0">
                 <MdStarRate className="w-4 h-4 text-amber-300" />
-                <span className="text-xs font-bold">{account.levelName}</span>
+                <span className="text-xs font-bold tracking-tight">{account.levelName}</span>
               </div>
             )}
-            <MdChevronRight className={`w-5 h-5 text-indigo-200 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
           </div>
-        </div>
-        {parseFloat(provisionalBalance) > 0 && (
-          <div className="mt-2 inline-flex items-center gap-1.5 bg-indigo-500/40 backdrop-blur-sm rounded-lg px-2.5 py-1 text-xs">
-            <MdLock className="w-3.5 h-3.5" />
-            <span>{Math.round(parseFloat(provisionalBalance)).toLocaleString()} en verificacion</span>
-          </div>
-        )}
-      </button>
 
-      {/* Level Progress Bar */}
-      {account?.nextLevelName && account?.pointsToNextLevel > 0 && (
-        <div className="mx-4 mt-2 bg-white rounded-xl p-3 border border-slate-100 shadow-sm">
-          <div className="flex items-center justify-between text-xs mb-1.5">
-            <span className="text-slate-500">Nivel {account.levelName}</span>
-            <span className="text-indigo-600 font-semibold">
-              {Math.round(account.pointsToNextLevel).toLocaleString()} pts para {account.nextLevelName}
-            </span>
-          </div>
-          <div className="w-full bg-slate-100 rounded-full h-2">
-            <div
-              className="bg-gradient-to-r from-indigo-500 to-indigo-600 h-2 rounded-full transition-all"
-              style={{
-                width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`
-              }}
-            />
-          </div>
+          {parseFloat(provisionalBalance) > 0 && (
+            <div className="mt-4 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
+              <MdLock className="w-3.5 h-3.5" />
+              <span>{formatPoints(provisionalBalance)} en verificacion</span>
+            </div>
+          )}
+
+          {account?.nextLevelName && account?.pointsToNextLevel > 0 && (
+            <div className="mt-6">
+              <div className="flex items-center justify-between text-[11px] mb-2 text-indigo-100">
+                <span className="font-semibold">{account.levelName}</span>
+                <span className="tabular-nums">{formatPoints(account.pointsToNextLevel)} para {account.nextLevelName}</span>
+              </div>
+              <div className="w-full bg-white/15 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="bg-gradient-to-r from-amber-300 to-white h-1.5 rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowHistory(!showHistory)}
+            className="mt-5 text-xs font-semibold text-indigo-100 hover:text-white inline-flex items-center gap-1 transition-colors"
+          >
+            {showHistory ? 'Ocultar historial' : 'Ver historial'}
+            <MdChevronRight className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
+          </button>
         </div>
-      )}
+      </section>
 
       {/* Transaction History (expandable) */}
       {showHistory && (
@@ -520,7 +569,7 @@ function ConsumerApp() {
                     </div>
                   </div>
                   <p className={`font-bold text-sm flex-shrink-0 tabular-nums ${entry.entryType === 'CREDIT' ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {entry.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(entry.amount)).toLocaleString()}
+                    {entry.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(entry.amount)}
                   </p>
                 </div>
               ))}
@@ -531,33 +580,32 @@ function ConsumerApp() {
 
       {/* Product Catalog — Carousel */}
       {regularProducts.length > 0 && (
-        <div className="mt-6 aa-rise" style={{ animationDelay: '180ms' }}>
-          <div className="px-4 flex items-center justify-between mb-3">
-            <h2 className="font-bold text-slate-800">Canjea tus puntos</h2>
-            <Link href="/catalog" className="text-indigo-600 text-xs font-semibold">Ver todo</Link>
+        <div className="mt-8 aa-rise" style={{ animationDelay: '180ms' }}>
+          <div className="px-4 flex items-end justify-between mb-4">
+            <h2 className="font-bold text-slate-900 text-xl tracking-tight">Canjea tus puntos</h2>
+            <Link href="/catalog" className="text-indigo-600 text-sm font-semibold hover:text-indigo-800">Ver todo</Link>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2 snap-x snap-mandatory scrollbar-hide">
+          <div className="flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory scrollbar-hide">
             {regularProducts.map((p: any) => {
               const canAfford = userBalance >= parseFloat(p.redemptionCost)
               return (
                 <Link
                   key={p.id}
                   href="/catalog"
-                  className={`flex-shrink-0 w-36 snap-start rounded-2xl border overflow-hidden transition active:scale-95 ${
-                    canAfford ? 'border-slate-200 bg-white shadow-sm' : 'border-slate-100 bg-slate-50 opacity-60'
-                  }`}
+                  className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${canAfford ? '' : 'opacity-50 grayscale'}`}
                 >
-                  <div className="w-36 h-36 bg-slate-100 flex items-center justify-center overflow-hidden">
+                  <div className="w-full aspect-square bg-slate-100 rounded-2xl overflow-hidden" style={{ boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 20px -10px rgba(15,23,42,0.12)' }}>
                     {p.photoUrl ? (
                       <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                     ) : (
-                      <MdCardGiftcard className="w-10 h-10 text-slate-300" />
+                      <div className="w-full h-full flex items-center justify-center">
+                        <MdCardGiftcard className="w-12 h-12 text-slate-300" />
+                      </div>
                     )}
                   </div>
-                  <div className="p-2.5">
-                    <p className="text-xs font-semibold text-slate-800 truncate">{p.name}</p>
-                    <p className="text-xs text-indigo-600 font-bold mt-0.5">{Math.round(parseFloat(p.redemptionCost)).toLocaleString()} pts</p>
-                    <p className="text-[10px] text-slate-400 mt-0.5">{p.stock} disponibles</p>
+                  <div className="mt-3">
+                    <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
+                    <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
                   </div>
                 </Link>
               )
@@ -568,32 +616,33 @@ function ConsumerApp() {
 
       {/* Hybrid Deals Catalog — Carousel */}
       {hybridProducts.length > 0 && (
-        <div className="mt-6 aa-rise" style={{ animationDelay: '240ms' }}>
-          <div className="px-4 flex items-center justify-between mb-3">
-            <h2 className="font-bold text-slate-800 flex items-center gap-2">
+        <div className="mt-8 aa-rise" style={{ animationDelay: '240ms' }}>
+          <div className="px-4 flex items-end justify-between mb-4">
+            <h2 className="font-bold text-slate-900 text-xl tracking-tight flex items-center gap-2">
               <MdLocalOffer className="w-5 h-5 text-amber-500" />
               Puntos + Efectivo
             </h2>
           </div>
-          <div className="flex gap-3 overflow-x-auto px-4 pb-2 snap-x snap-mandatory scrollbar-hide">
+          <div className="flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory scrollbar-hide">
             {hybridProducts.map((p: any) => (
               <Link
                 key={p.id}
                 href="/catalog"
-                className="flex-shrink-0 w-36 snap-start rounded-2xl border border-amber-200 bg-gradient-to-b from-amber-50 to-white shadow-sm overflow-hidden active:scale-95 transition"
+                className="flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform"
               >
-                <div className="w-36 h-36 bg-amber-50 flex items-center justify-center overflow-hidden">
+                <div className="w-full aspect-square bg-gradient-to-b from-amber-50 to-white rounded-2xl overflow-hidden border border-amber-100" style={{ boxShadow: '0 1px 2px rgba(245,158,11,0.08), 0 8px 20px -10px rgba(245,158,11,0.20)' }}>
                   {p.photoUrl ? (
                     <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                   ) : (
-                    <MdLocalOffer className="w-10 h-10 text-amber-300" />
+                    <div className="w-full h-full flex items-center justify-center">
+                      <MdLocalOffer className="w-12 h-12 text-amber-300" />
+                    </div>
                   )}
                 </div>
-                <div className="p-2.5">
-                  <p className="text-xs font-semibold text-slate-800 truncate">{p.name}</p>
-                  <p className="text-xs text-indigo-600 font-bold mt-0.5">{Math.round(parseFloat(p.redemptionCost)).toLocaleString()} pts</p>
-                  <p className="text-xs text-amber-600 font-bold">+ ${Number(p.cashPrice).toLocaleString()}</p>
-                  <p className="text-[10px] text-slate-400 mt-0.5">{p.stock} disponibles</p>
+                <div className="mt-3">
+                  <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
+                  <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                  <p className="text-xs text-amber-600 font-bold mt-0.5">+ ${formatCash(p.cashPrice)}</p>
                 </div>
               </Link>
             ))}
@@ -634,6 +683,223 @@ function ConsumerApp() {
           <span className="relative z-10">Canjear premios</span>
         </Link>
       </div>
+    </div>
+  )
+}
+
+
+// ============================================================
+// MULTICOMMERCE HUB — list all merchants this consumer has points in
+// Used when a logged-in consumer visits /consumer without a specific tenant.
+// Previously this view lived at `/` but Eric wanted the root to be a public
+// landing page — this component keeps the same behavior at /consumer.
+// ============================================================
+interface MerchantAccount {
+  accountId: string | null
+  tenantId: string
+  tenantName: string
+  tenantSlug: string
+  balance: string
+  unitLabel: string
+  hasAccount?: boolean
+  topProducts: Array<{ id: string; name: string; photoUrl: string | null; redemptionCost: string; stock: number }>
+}
+
+function MultiMerchantHub() {
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [merchants, setMerchants] = useState<MerchantAccount[]>([])
+  const [totalBalance, setTotalBalance] = useState('0')
+  const [phoneNumber, setPhoneNumber] = useState('')
+  const [displayName, setDisplayName] = useState<string | null>(null)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data: any = await api.getAllAccounts()
+        setMerchants(data.merchants || [])
+        setTotalBalance(data.totalBalance || '0')
+        setPhoneNumber(data.phoneNumber || '')
+        setDisplayName(data.displayName || null)
+      } catch {
+        // /all-accounts failed — kick to public landing, let them log in again
+        localStorage.removeItem('accessToken')
+        localStorage.removeItem('refreshToken')
+        window.location.href = '/'
+      }
+      setLoading(false)
+    })()
+  }, [])
+
+  function logout() {
+    localStorage.removeItem('accessToken')
+    localStorage.removeItem('refreshToken')
+    window.location.href = '/'
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="w-12 h-12 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-white">
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <Link href="/" className="inline-block text-xl sm:text-2xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors">Valee</Link>
+            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 truncate">{phoneNumber}</p>
+          </div>
+          <button onClick={logout} className="text-xs sm:text-sm font-medium text-slate-500 hover:text-indigo-700 hover:underline underline-offset-4 transition-colors whitespace-nowrap flex-shrink-0">Cerrar sesion</button>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
+        <div className="mb-3 sm:mb-4 lg:mb-6 aa-rise-sm">
+          <h1 className="text-xl sm:text-3xl font-bold text-slate-800 tracking-tight">Hola{displayName ? `, ${displayName}` : ''}</h1>
+        </div>
+
+        <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 text-white shadow-xl aa-rise overflow-hidden">
+          <p className="text-indigo-200 text-xs sm:text-base">Tu saldo total</p>
+          <p key={totalBalance} className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-bold mt-2 tracking-tight aa-count tabular-nums break-all leading-none">
+            {formatPoints(totalBalance)}
+          </p>
+          {(() => {
+            const withBalance = merchants.filter(m => Number(m.balance) > 0).length
+            return (
+              <p className="text-indigo-200 text-sm sm:text-base mt-2">
+                puntos en {withBalance} comercio{withBalance !== 1 ? 's' : ''}
+              </p>
+            )
+          })()}
+        </section>
+
+        {(() => {
+          const mine = merchants.filter(m => Number(m.balance) > 0)
+          const others = merchants.filter(m => Number(m.balance) === 0)
+
+          if (merchants.length === 0) {
+            return (
+              <div className="mt-8 bg-white rounded-2xl p-8 text-center border border-slate-200">
+                <p className="text-slate-600 mb-2 font-medium">Aun no hay comercios Valee con productos disponibles.</p>
+                <p className="text-sm text-slate-400">Vuelve en unos dias — estamos sumando comercios constantemente.</p>
+              </div>
+            )
+          }
+
+          return (
+            <>
+              {mine.length > 0 && (
+                <section className="mt-8 sm:mt-10 lg:mt-14">
+                  <h2 className="text-slate-900 font-bold text-lg sm:text-xl tracking-tight mb-4 sm:mb-5 px-1">Tus comercios</h2>
+                  <div className="space-y-4 sm:space-y-5 md:grid md:grid-cols-2 md:gap-5 md:space-y-0 lg:gap-6">
+                    {mine.map((m, i) => (
+                      <div
+                        key={m.tenantId}
+                        onClick={() => router.push(`/consumer?tenant=${m.tenantSlug}`)}
+                        className="aa-card aa-row-in group bg-white rounded-3xl border border-slate-200/70 overflow-hidden cursor-pointer transition-all active:scale-[0.98] hover:shadow-xl hover:border-indigo-200"
+                        style={{ animationDelay: `${Math.min(i * 60, 360)}ms`, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.08)' }}
+                      >
+                        <div className="px-6 pt-6 pb-5 sm:px-7 sm:pt-7 sm:pb-6">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 font-semibold mb-1">Saldo</p>
+                              <p className="text-[42px] sm:text-5xl font-bold text-slate-900 tracking-tight tabular-nums leading-none break-all">
+                                {formatPoints(m.balance)}
+                              </p>
+                              <p className="text-sm text-slate-500 mt-1.5">{m.unitLabel} en <span className="text-slate-900 font-semibold">{m.tenantName}</span></p>
+                            </div>
+                            <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
+                          </div>
+                        </div>
+                        {m.topProducts.length > 0 && (
+                          <div className="px-6 pb-6 sm:px-7 sm:pb-7">
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                              {m.topProducts.map(p => {
+                                const canAfford = Number(m.balance) >= Number(p.redemptionCost)
+                                return (
+                                  <div
+                                    key={p.id}
+                                    className={`flex-shrink-0 w-32 sm:w-36 transition ${canAfford ? '' : 'opacity-40 grayscale'}`}
+                                  >
+                                    {p.photoUrl ? (
+                                      <img src={p.photoUrl} alt={p.name} className="w-full aspect-square object-cover rounded-2xl" />
+                                    ) : (
+                                      <div className="w-full aspect-square bg-slate-100 rounded-2xl flex items-center justify-center">
+                                        <MdCardGiftcard className="w-9 h-9 text-slate-300" />
+                                      </div>
+                                    )}
+                                    <p className="text-sm font-semibold text-slate-800 mt-2 line-clamp-1">{p.name}</p>
+                                    <p className="text-xs text-indigo-600 font-bold tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {others.length > 0 && (
+                <section className="mt-10 sm:mt-12 lg:mt-16">
+                  <h2 className="text-slate-900 font-bold text-lg sm:text-xl tracking-tight mb-1 px-1">Descubre</h2>
+                  <p className="text-sm text-slate-500 mb-4 sm:mb-5 px-1">Otros comercios Valee donde puedes empezar a ganar</p>
+                  <div className="space-y-4 sm:space-y-5 md:grid md:grid-cols-2 md:gap-5 md:space-y-0 lg:gap-6">
+                    {others.map((m, i) => (
+                      <div
+                        key={m.tenantId}
+                        onClick={() => router.push(`/consumer?tenant=${m.tenantSlug}`)}
+                        className="aa-card aa-row-in group bg-white rounded-3xl border border-slate-200/70 overflow-hidden cursor-pointer transition-all active:scale-[0.98] hover:shadow-xl hover:border-indigo-200"
+                        style={{ animationDelay: `${Math.min(i * 60, 360)}ms`, boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 24px -12px rgba(15,23,42,0.08)' }}
+                      >
+                        <div className="px-6 pt-6 pb-5 sm:px-7 sm:pt-7 sm:pb-6">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight truncate">{m.tenantName}</p>
+                              <p className="text-sm text-slate-500 mt-1.5">Gana tus primeros puntos aqui</p>
+                            </div>
+                            <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
+                          </div>
+                        </div>
+                        {m.topProducts.length > 0 && (
+                          <div className="px-6 pb-6 sm:px-7 sm:pb-7">
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-1 px-1">
+                              {m.topProducts.map(p => (
+                                <div key={p.id} className="flex-shrink-0 w-32 sm:w-36">
+                                  {p.photoUrl ? (
+                                    <img src={p.photoUrl} alt={p.name} className="w-full aspect-square object-cover rounded-2xl" />
+                                  ) : (
+                                    <div className="w-full aspect-square bg-slate-100 rounded-2xl flex items-center justify-center">
+                                      <MdCardGiftcard className="w-9 h-9 text-slate-300" />
+                                    </div>
+                                  )}
+                                  <p className="text-sm font-semibold text-slate-800 mt-2 line-clamp-1">{p.name}</p>
+                                  <p className="text-xs text-indigo-600 font-bold tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </>
+          )
+        })()}
+      </main>
+
+      <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm font-medium text-slate-500 border-t border-slate-200 mt-12 space-x-6">
+        <Link href="/privacy" className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors">Privacidad</Link>
+        <Link href="/terms" className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors">Terminos</Link>
+      </footer>
     </div>
   )
 }

@@ -208,13 +208,13 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {mounted && (
+      {mounted && authorized && (
         <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-white border-r border-slate-200 z-40">
           {sidebarContent}
         </aside>
       )}
 
-      {mounted && (
+      {mounted && authorized && (
         <>
           <div
             onClick={() => setDrawerOpen(false)}
@@ -226,7 +226,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {mounted && !drawerOpen && (
+      {mounted && authorized && !drawerOpen && (
         <button
           onClick={() => setDrawerOpen(true)}
           className="lg:hidden fixed bottom-6 left-6 z-30 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-xl flex items-center justify-center hover:bg-emerald-700 active:scale-95 transition"
@@ -238,7 +238,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
 
       <main className="lg:pl-64 min-h-screen">
         {/* Mobile top bar with back arrow — only on sub-pages, not dashboard */}
-        {mounted && pathname !== '/merchant' && !PUBLIC_ROUTES.includes(pathname) && (
+        {mounted && authorized && pathname !== '/merchant' && !PUBLIC_ROUTES.includes(pathname) && (
           <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-20">
             <button
               onClick={() => {

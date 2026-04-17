@@ -13,6 +13,7 @@ import {
   type QueuedAction,
 } from '@/lib/offline-queue'
 import { useOnlineStatus } from '@/lib/use-online-status'
+import { formatPoints, formatCash } from '@/lib/format'
 
 type ScanState = 'scanning' | 'processing' | 'success' | 'failure' | 'queued'
 type InputMode = 'camera' | 'manual'
@@ -213,11 +214,11 @@ export default function CashierScanner() {
           <span className="text-8xl">*</span>
           <h1 className="text-3xl font-bold mt-6">CANJE EXITOSO</h1>
           {result?.productName && <p className="text-xl mt-2">{result.productName}</p>}
-          {result?.amount && <p className="text-2xl font-bold mt-2">{Math.round(parseFloat(result.amount)).toLocaleString()} pts</p>}
+          {result?.amount && <p className="text-2xl font-bold mt-2">{formatPoints(result.amount)} pts</p>}
           {isHybrid && (
             <div className="bg-yellow-400 text-yellow-900 rounded-xl p-4 mt-4 mx-4">
               <p className="text-sm font-bold uppercase">Oferta hibrida</p>
-              <p className="text-3xl font-bold mt-1">${parseFloat(result.cashAmount).toLocaleString()}</p>
+              <p className="text-3xl font-bold mt-1">${formatCash(result.cashAmount)}</p>
               <p className="text-sm font-bold mt-1">Recuerda recibir primero los $, antes de entregar el premio</p>
             </div>
           )}

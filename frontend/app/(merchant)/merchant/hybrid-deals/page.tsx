@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { MdLocalOffer } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
+import { formatPoints } from '@/lib/format'
 
 interface Product {
   id: string
@@ -397,7 +398,7 @@ export default function HybridDealsPage() {
                           <span className="text-slate-400 text-xs px-1">+</span>
                           <div className="text-center flex-1">
                             <p className="text-xs text-slate-500">Puntos</p>
-                            <p className="text-base font-bold text-emerald-700">{Math.round(parseFloat(p.redemptionCost)).toLocaleString()}</p>
+                            <p className="text-base font-bold text-emerald-700">{formatPoints(p.redemptionCost)}</p>
                           </div>
                         </div>
                       </div>

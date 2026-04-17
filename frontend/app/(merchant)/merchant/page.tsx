@@ -4,9 +4,11 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { formatPoints } from '@/lib/format'
 
 const EVENT_LABELS: Record<string, string> = {
   INVOICE_CLAIMED: 'Factura validada',
+  PRESENCE_VALIDATED: 'Pago en efectivo',
   REDEMPTION_PENDING: 'Canje pendiente',
   REDEMPTION_CONFIRMED: 'Canje confirmado',
   REDEMPTION_EXPIRED: 'Canje expirado',
@@ -36,6 +38,7 @@ const STATUS_OPTIONS = [
 interface ProductPerf {
   productId: string
   name: string
+  photoUrl: string | null
   stock: number
   redemptionsTotal: number
   redemptions30d: number
@@ -52,6 +55,10 @@ interface TransactionEntry {
   branchId: string | null
   branchName: string | null
   accountPhone: string | null
+  accountName: string | null
+  productName: string | null
+  productPhotoUrl: string | null
+  invoiceNumber: string | null
   createdAt: string
 }
 
@@ -240,7 +247,7 @@ export default function MerchantDashboard() {
               </select>
               {!selectedBranch && metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0 && (
                 <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                  De los puntos emitidos, <span className="font-semibold text-amber-600">{Math.round(parseFloat(metrics.valueIssuedUnassigned)).toLocaleString()}</span> no estan asignados a ninguna sucursal (vienen de CSV, WhatsApp, transacciones sin sucursal). Por eso &ldquo;Todas las sucursales&rdquo; no es la suma directa de las sucursales individuales.
+                  De los puntos emitidos, <span className="font-semibold text-amber-600">{formatPoints(metrics.valueIssuedUnassigned)}</span> no estan asignados a ninguna sucursal (vienen de CSV, WhatsApp, transacciones sin sucursal). Por eso &ldquo;Todas las sucursales&rdquo; no es la suma directa de las sucursales individuales.
                 </p>
               )}
             </div>
@@ -254,16 +261,16 @@ export default function MerchantDashboard() {
                   <p className="text-4xl font-bold text-emerald-700 mt-1">{parseFloat(parseFloat(multiplier.currentRate).toFixed(2))}x</p>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center">
-                  {['1', '1.5', '2', '3'].map(m => (
+                  {['10', '15', '20', '30'].map(m => (
                     <button key={m} onClick={() => setNewMultiplier(m)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition ${newMultiplier === m ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
                       {m}x
                     </button>
                   ))}
                   <input type="number" step="0.1" min="0.1" placeholder="Otro"
-                    value={!['1','1.5','2','3'].includes(newMultiplier) ? newMultiplier : ''}
+                    value={newMultiplier}
                     onChange={e => setNewMultiplier(e.target.value)}
-                    className="w-20 px-2 py-2 rounded-lg border border-slate-200 text-sm" />
+                    className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
                   {newMultiplier && (
                     <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
                       Aplicar
@@ -282,19 +289,19 @@ export default function MerchantDashboard() {
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Emitido</p>
               <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate tabular-nums">
-                {Math.round(parseFloat(metrics?.valueIssued || analytics?.valueIssued || '0')).toLocaleString()}
+                {formatPoints(metrics?.valueIssued || analytics?.valueIssued || '0')}
               </p>
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjeado</p>
               <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate tabular-nums">
-                {Math.round(parseFloat(metrics?.valueRedeemed || analytics?.valueRedeemed || '0')).toLocaleString()}
+                {formatPoints(metrics?.valueRedeemed || analytics?.valueRedeemed || '0')}
               </p>
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Circulacion</p>
               <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate tabular-nums">
-                {Math.round(parseFloat(metrics?.netCirculation || analytics?.netBalance || '0')).toLocaleString()}
+                {formatPoints(metrics?.netCirculation || analytics?.netBalance || '0')}
               </p>
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
@@ -394,25 +401,34 @@ export default function MerchantDashboard() {
           ) : (
             <div className="space-y-3">
               {productPerf.map(p => (
-                <div key={p.productId} className="bg-white rounded-xl p-4 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="font-medium text-sm">{p.name}</p>
-                    <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-                      Stock: {p.stock}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-2 text-center">
-                    <div>
-                      <p className="text-xs text-slate-500">Canjes totales</p>
-                      <p className="font-bold text-emerald-700">{p.redemptionsTotal}</p>
+                <div key={p.productId} className="aa-card bg-white rounded-xl p-4 shadow-sm flex gap-4 items-center">
+                  {p.photoUrl ? (
+                    <img src={p.photoUrl} alt={p.name} className="w-16 h-16 rounded-xl object-cover border border-slate-100 flex-shrink-0" />
+                  ) : (
+                    <div className="w-16 h-16 rounded-xl bg-slate-100 flex items-center justify-center flex-shrink-0">
+                      <span className="text-2xl">🎁</span>
                     </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Canjes (30d)</p>
-                      <p className="font-bold text-emerald-700">{p.redemptions30d}</p>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <p className="font-medium text-sm truncate">{p.name}</p>
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full flex-shrink-0">
+                        Stock: {p.stock}
+                      </span>
                     </div>
-                    <div>
-                      <p className="text-xs text-slate-500">Valor canjeado</p>
-                      <p className="font-bold text-indigo-600">{Math.round(parseFloat(p.totalValueRedeemed)).toLocaleString()}</p>
+                    <div className="grid grid-cols-3 gap-2 text-center">
+                      <div>
+                        <p className="text-[11px] text-slate-500">Canjes totales</p>
+                        <p className="font-bold text-emerald-700 tabular-nums">{p.redemptionsTotal}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-500">Canjes (30d)</p>
+                        <p className="font-bold text-emerald-700 tabular-nums">{p.redemptions30d}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] text-slate-500">Valor canjeado</p>
+                        <p className="font-bold text-indigo-600 tabular-nums">{formatPoints(p.totalValueRedeemed)}</p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -485,19 +501,34 @@ export default function MerchantDashboard() {
               <p className="text-xs text-slate-500 mb-2">{txTotal} transacciones encontradas</p>
               <div className="space-y-2">
                 {transactions.map(tx => (
-                  <div key={tx.id} className="bg-white rounded-xl p-3 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="text-sm font-medium">{EVENT_LABELS[tx.eventType] || tx.eventType}</p>
-                        <p className="text-xs text-slate-400">{new Date(tx.createdAt).toLocaleString('es-VE')}</p>
-                        {tx.accountPhone && <p className="text-xs text-slate-400">{tx.accountPhone}</p>}
-                        {tx.branchName && <p className="text-xs text-slate-400">Sucursal: {tx.branchName}</p>}
+                  <div key={tx.id} className="aa-card bg-white rounded-xl p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 min-w-0 flex-1">
+                        {tx.productPhotoUrl && (
+                          <img src={tx.productPhotoUrl} alt={tx.productName || ''} className="w-11 h-11 rounded-lg object-cover border border-slate-100 flex-shrink-0" />
+                        )}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-slate-800 truncate">{EVENT_LABELS[tx.eventType] || tx.eventType}</p>
+                          {tx.productName && (
+                            <p className="text-xs text-indigo-600 font-medium truncate">{tx.productName}</p>
+                          )}
+                          {tx.invoiceNumber && (
+                            <p className="text-xs text-slate-500 font-mono truncate">Factura #{tx.invoiceNumber}</p>
+                          )}
+                          <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                            <span>{new Date(tx.createdAt).toLocaleString('es-VE')}</span>
+                            {(tx.accountName || tx.accountPhone) && (
+                              <span>· {tx.accountName || tx.accountPhone}</span>
+                            )}
+                            {tx.branchName && <span>· {tx.branchName}</span>}
+                          </div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className={`font-bold text-sm ${tx.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
-                          {tx.entryType === 'CREDIT' ? '+' : '-'}{Math.round(parseFloat(tx.amount)).toLocaleString()}
+                      <div className="text-right flex-shrink-0">
+                        <p className={`font-bold text-sm tabular-nums ${tx.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
+                          {tx.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(tx.amount)}
                         </p>
-                        <span className={`text-xs px-1.5 py-0.5 rounded ${
+                        <span className={`text-[11px] px-1.5 py-0.5 rounded ${
                           tx.status === 'confirmed' ? 'bg-green-100 text-green-700' :
                           tx.status === 'reversed' ? 'bg-red-100 text-red-700' :
                           'bg-yellow-100 text-yellow-700'

@@ -172,7 +172,13 @@ export async function processCSV(
           try {
             const normalized = normalizeVenezuelanPhone(customerPhone);
             const { account } = await findOrCreateConsumerAccount(tenantId, normalized);
-            const loyaltyValue = await convertToLoyaltyValue(String(amount), tenantId, assetType.id);
+            const loyaltyValue = await convertToLoyaltyValue(
+              String(amount),
+              tenantId,
+              assetType.id,
+              transactionDate || undefined,
+              'bs', // CSV amounts are raw Bs — normalize through exchange rate
+            );
             await writeDoubleEntry({
               tenantId,
               eventType: 'INVOICE_CLAIMED',

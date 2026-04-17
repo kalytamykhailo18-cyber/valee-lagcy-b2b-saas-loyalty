@@ -661,6 +661,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
         ],
       },
       orderBy: { createdAt: 'desc' },
+      include: { branch: { select: { id: true, name: true } } },
       take: 20,
     });
 
@@ -689,7 +690,9 @@ export default async function merchantRoutes(app: FastifyInstance) {
         amount: i.amount.toString(),
         status: i.status,
         transactionDate: i.transactionDate,
+        uploadedAt: i.createdAt,
         createdAt: i.createdAt,
+        branch: i.branch ? { id: i.branch.id, name: i.branch.name } : null,
       })),
     };
   });
@@ -976,8 +979,21 @@ export default async function merchantRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: `preferredExchangeSource must be one of: ${validSources.join(', ')} or null` });
       }
       data.preferredExchangeSource = preferredExchangeSource;
+
+      // Each source only has rates for a specific currency. If the merchant
+      // changes the source, auto-align reference_currency so we never end up
+      // asking for (euro_bcv, usd) — a combination that has no exchange rate
+      // and would silently fall back to treating Bs as if it were the ref
+      // currency, giving absurd point totals.
+      const sourceToCurrency: Record<string, string> = {
+        bcv: 'usd',
+        promedio: 'usd',
+        euro_bcv: 'eur',
+      };
+      const aligned = sourceToCurrency[preferredExchangeSource as string];
+      if (aligned) data.referenceCurrency = aligned;
     }
-    if (referenceCurrency !== undefined) {
+    if (referenceCurrency !== undefined && data.referenceCurrency === undefined) {
       if (!validCurrencies.includes(referenceCurrency)) {
         return reply.status(400).send({ error: `referenceCurrency must be one of: ${validCurrencies.join(', ')}` });
       }
@@ -1087,10 +1103,27 @@ export default async function merchantRoutes(app: FastifyInstance) {
       ? await prisma.assetType.findUnique({ where: { id: config.assetTypeId } })
       : await prisma.assetType.findFirst();
 
+    // Include the current Bs→reference exchange rate so the merchant UI can
+    // preview how many points a given Bs amount will produce before committing
+    // (e.g. the dual-scan "transaccion sin factura" widget).
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { preferredExchangeSource: true, referenceCurrency: true },
+    });
+    let exchangeRateBs: number | null = null;
+    if (tenant?.preferredExchangeSource && tenant.referenceCurrency) {
+      const { getCurrentRate } = await import('../../services/exchange-rates.js');
+      const rate = await getCurrentRate(tenant.preferredExchangeSource, tenant.referenceCurrency);
+      if (rate) exchangeRateBs = rate.rateBs;
+    }
+
     return {
       currentRate: config?.conversionRate?.toString() || assetType?.defaultConversionRate?.toString() || '1',
       defaultRate: assetType?.defaultConversionRate?.toString() || '1',
       assetTypeId: assetType?.id || null,
+      preferredExchangeSource: tenant?.preferredExchangeSource || null,
+      referenceCurrency: tenant?.referenceCurrency || null,
+      exchangeRateBs,
     };
   });
 
@@ -1691,14 +1724,35 @@ export default async function merchantRoutes(app: FastifyInstance) {
       paramIndex++;
     }
 
+    // Deduplicate double-entry: each financial event writes TWO ledger rows
+    // (debit+credit). Showing both doubles the list and confuses the owner —
+    // they see "+12" and "-12" for the same event. Keep the consumer-side row
+    // when it exists (the one touching a shadow/verified account); when both
+    // sides are system accounts (e.g. REDEMPTION_CONFIRMED: holding→pool),
+    // keep the CREDIT row so the event still appears exactly once.
+    conditions.push(`(
+      a.account_type IN ('shadow', 'verified')
+      OR (
+        le.entry_type = 'CREDIT'
+        AND NOT EXISTS (
+          SELECT 1 FROM ledger_entries le2
+          LEFT JOIN accounts a2 ON a2.id = le2.account_id
+          WHERE le2.tenant_id = le.tenant_id
+            AND le2.reference_id = le.reference_id
+            AND a2.account_type IN ('shadow', 'verified')
+        )
+      )
+    )`);
+
     const whereClause = conditions.join(' AND ');
     const lim = Math.min(parseInt(limit) || 50, 200);
     const off = parseInt(offset) || 0;
 
     const entries = await prisma.$queryRawUnsafe<any[]>(`
       SELECT le.id, le.event_type, le.entry_type, le.amount::text, le.status, le.reference_id,
-             le.branch_id, le.created_at,
+             le.branch_id, le.created_at, le.metadata,
              a.phone_number as account_phone,
+             a.display_name as account_name,
              b.name as branch_name
       FROM ledger_entries le
       LEFT JOIN accounts a ON a.id = le.account_id
@@ -1709,22 +1763,40 @@ export default async function merchantRoutes(app: FastifyInstance) {
     `, ...params);
 
     const [countResult] = await prisma.$queryRawUnsafe<[{ count: bigint }]>(`
-      SELECT COUNT(*) as count FROM ledger_entries le WHERE ${whereClause}
+      SELECT COUNT(*) as count
+      FROM ledger_entries le
+      LEFT JOIN accounts a ON a.id = le.account_id
+      WHERE ${whereClause}
     `, ...params);
 
     return {
-      entries: entries.map(e => ({
-        id: e.id,
-        eventType: e.event_type,
-        entryType: e.entry_type,
-        amount: e.amount,
-        status: e.status,
-        referenceId: e.reference_id,
-        branchId: e.branch_id,
-        branchName: e.branch_name,
-        accountPhone: e.account_phone,
-        createdAt: e.created_at,
-      })),
+      entries: entries.map(e => {
+        const meta: any = e.metadata || {};
+        return {
+          id: e.id,
+          eventType: e.event_type,
+          entryType: e.entry_type,
+          amount: e.amount,
+          status: e.status,
+          referenceId: e.reference_id,
+          branchId: e.branch_id,
+          branchName: e.branch_name,
+          accountPhone: e.account_phone,
+          accountName: e.account_name || null,
+          // Product info stamped at write time survives token cleanup; also
+          // pull invoice number when the event is an invoice claim so the
+          // merchant row shows "which invoice" without clicking in. Fallback
+          // to referenceId for INVOICE_CLAIMED rows that predate the metadata
+          // stamping (referenceId on those is the invoice number itself).
+          productName: meta.productName || null,
+          productPhotoUrl: meta.productPhotoUrl || null,
+          invoiceNumber: meta.invoiceNumber
+            || (e.event_type === 'INVOICE_CLAIMED'
+                ? String(e.reference_id || '').replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '')
+                : null),
+          createdAt: e.created_at,
+        };
+      }),
       total: Number(countResult.count),
     };
   });

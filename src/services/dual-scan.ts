@@ -135,6 +135,10 @@ export async function confirmDualScan(params: {
   const tenant = await prisma.tenant.findUnique({ where: { id: payload.tenantId } });
   if (!tenant) return { success: false, message: 'Comercio no encontrado' };
 
+  if (!params.consumerPhone) {
+    return { success: false, message: 'Sesion sin telefono. Vuelve a iniciar sesion en el comercio.' };
+  }
+
   // Find or create the consumer account
   const { account: consumerAccount } = await findOrCreateConsumerAccount(payload.tenantId, params.consumerPhone);
 
@@ -161,19 +165,11 @@ export async function confirmDualScan(params: {
     return { success: false, message: 'Este QR ya fue usado' };
   }
 
-  // Calculate loyalty value (apply BS normalization if tenant uses it)
-  let normalizedAmount = payload.amount;
-  if (tenant.preferredExchangeSource) {
-    const { convertBsToReference } = await import('./exchange-rates.js');
-    const converted = await convertBsToReference(
-      Number(payload.amount),
-      tenant.preferredExchangeSource,
-      tenant.referenceCurrency,
-      new Date(),
-    );
-    if (converted !== null) normalizedAmount = converted.toFixed(8);
-  }
-  const loyaltyValue = await convertToLoyaltyValue(normalizedAmount, payload.tenantId, payload.assetTypeId);
+  // Dual-scan amounts are ALWAYS entered in the tenant's reference currency
+  // (USD or EUR) — this flow is for cash/mobile payments where the cashier
+  // types the bill total directly, not a Bs-denominated invoice total. So we
+  // skip the Bs→reference conversion and apply the multiplier directly.
+  const loyaltyValue = await convertToLoyaltyValue(payload.amount, payload.tenantId, payload.assetTypeId);
 
   const poolAccount = await getSystemAccount(payload.tenantId, 'issued_value_pool');
   if (!poolAccount) return { success: false, message: 'Cuenta del comercio no configurada' };

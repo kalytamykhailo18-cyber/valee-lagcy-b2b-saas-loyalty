@@ -153,6 +153,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
 export interface ProductPerformance {
   productId: string;
   name: string;
+  photoUrl: string | null;
   stock: number;
   redemptionsTotal: number;
   redemptions30d: number;
@@ -182,6 +183,7 @@ export async function getProductPerformance(tenantId: string): Promise<ProductPe
     results.push({
       productId: p.id,
       name: p.name,
+      photoUrl: p.photoUrl,
       stock: p.stock,
       redemptionsTotal: totalTokens,
       redemptions30d: recent,

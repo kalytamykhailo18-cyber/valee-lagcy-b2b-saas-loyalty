@@ -119,6 +119,28 @@ export default function SettingsPage() {
 
   async function save() {
     setMessage('')
+
+    // Phone: 10-15 digits once you strip separators. Anything shorter is
+    // obviously wrong, and merchants were pasting random text before.
+    if (contactPhone.trim()) {
+      const digits = contactPhone.replace(/\D/g, '')
+      if (digits.length < 10 || digits.length > 15) {
+        setMessage('Error: el telefono debe tener entre 10 y 15 digitos')
+        return
+      }
+    }
+
+    // Website: lightweight URL check — accept "something.something" with an
+    // optional protocol. We're not trying to be a full RFC validator.
+    if (website.trim()) {
+      const w = website.trim()
+      const urlLike = /^(https?:\/\/)?([\w-]+\.)+[\w-]{2,}(\/[^\s]*)?$/i
+      if (!urlLike.test(w)) {
+        setMessage('Error: el sitio web no es valido. Ejemplo: www.micomercio.com')
+        return
+      }
+    }
+
     // RIF removed from the UI to reduce friction. Backend keeps the column
     // for any pre-existing values; we just don't update it from here.
     setSaving(true)
@@ -364,7 +386,7 @@ export default function SettingsPage() {
                     <div key={key}>
                       <div className="flex justify-between text-sm text-slate-600 mb-1.5">
                         <span>{ACTION_LABELS[key] || key}</span>
-                        <span className="font-semibold text-slate-800">{u.current.toLocaleString()} / {u.limit.toLocaleString()}</span>
+                        <span className="font-semibold text-slate-800">{u.current} / {u.limit}</span>
                       </div>
                       <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
                         <div

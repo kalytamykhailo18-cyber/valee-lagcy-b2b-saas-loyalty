@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
+import { formatCash } from '@/lib/format'
 
 function QRImage({ value }: { value: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
@@ -26,6 +27,15 @@ function QRImage({ value }: { value: string }) {
   return <img src={dataUrl} alt="QR" className="w-64 h-64 lg:w-80 lg:h-80" />
 }
 
+interface MultiplierInfo {
+  currentRate: string
+  defaultRate: string
+  assetTypeId: string | null
+  preferredExchangeSource?: string | null
+  referenceCurrency?: string | null
+  exchangeRateBs?: number | null
+}
+
 export default function DualScanPage() {
   const [amount, setAmount] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -33,6 +43,30 @@ export default function DualScanPage() {
   const [expiresAt, setExpiresAt] = useState<number | null>(null)
   const [secondsLeft, setSecondsLeft] = useState(0)
   const [error, setError] = useState('')
+  const [multiplier, setMultiplier] = useState<MultiplierInfo | null>(null)
+
+  // Load multiplier + exchange rate so the merchant can preview how many
+  // points a given Bs amount will generate, BEFORE committing the QR.
+  useEffect(() => {
+    (async () => {
+      try {
+        const m = await api.getMultiplier()
+        setMultiplier(m)
+      } catch {}
+    })()
+  }, [])
+
+  // Preview: compute expected points for the current input.
+  // The dual-scan amount is always in the tenant's reference currency
+  // (USD/EUR) — typed directly by the cashier for cash/mobile payments.
+  // Formula: amount × multiplier, floored at 1.
+  const currencySymbol = multiplier?.referenceCurrency === 'eur' ? '€' : '$'
+  const previewPoints = (() => {
+    const n = parseFloat(amount)
+    if (!Number.isFinite(n) || n <= 0 || !multiplier) return null
+    const rate = Number(multiplier.currentRate) || 1
+    return Math.max(1, Math.round(n * rate))
+  })()
 
   // Countdown — compute initial value synchronously so user never sees 0 on mount
   useEffect(() => {
@@ -100,17 +134,26 @@ export default function DualScanPage() {
           {!token ? (
             <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5 aa-rise" style={{ animationDelay: '80ms' }}>
               <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto de la transaccion</label>
-                <input
-                  type="number"
-                  value={amount}
-                  onChange={e => setAmount(e.target.value)}
-                  placeholder="Ej: 500.00"
-                  className="aa-field aa-field-emerald w-full mt-2 px-4 py-4 rounded-xl border border-slate-200 text-2xl font-bold text-slate-800 tabular-nums"
-                  autoFocus
-                  min="0"
-                  step="0.01"
-                />
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto de la transaccion ({currencySymbol})</label>
+                <div className="relative mt-2">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold pointer-events-none text-xl">{currencySymbol}</span>
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={e => setAmount(e.target.value)}
+                    placeholder="30.00"
+                    className="aa-field aa-field-emerald w-full pl-10 pr-4 py-4 rounded-xl border border-slate-200 text-2xl font-bold text-slate-800 tabular-nums"
+                    autoFocus
+                    min="0"
+                    step="0.01"
+                  />
+                </div>
+                {previewPoints !== null && (
+                  <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
+                    <span className="text-sm text-emerald-700">El cliente ganara</span>
+                    <span className="text-lg font-bold text-emerald-700 tabular-nums">{previewPoints} pts</span>
+                  </div>
+                )}
                 <p className="text-xs text-slate-400 mt-2">
                   El cliente escaneara el QR para acumular sus puntos. Sin necesidad de factura fiscal.
                 </p>
@@ -135,14 +178,19 @@ export default function DualScanPage() {
               <div>
                 <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto</p>
                 <p className="text-4xl lg:text-5xl font-bold text-emerald-700 mt-2 tabular-nums">
-                  Bs {parseFloat(amount).toLocaleString()}
+                  {currencySymbol}{formatCash(amount)}
                 </p>
               </div>
 
               <p className="text-sm text-slate-500">Muestra este codigo al cliente</p>
 
               <div className="inline-block bg-white border-4 border-emerald-200 rounded-2xl p-4 animate-qr-build">
-                <QRImage value={token} />
+                {/* Encode a deep link, not the raw token. Native phone cameras
+                    decode a wa.me-style URL and open it in the browser, where
+                    /scan?dual=<token> auto-triggers confirmDualScan. Before
+                    this, the QR was just a base64 string and the consumer saw
+                    raw text with a "Copy" option — "el token no hacia nada". */}
+                <QRImage value={`${typeof window !== 'undefined' ? window.location.origin : 'https://valee.app'}/scan?dual=${encodeURIComponent(token)}`} />
               </div>
 
               <div className="bg-slate-50 rounded-xl p-4">

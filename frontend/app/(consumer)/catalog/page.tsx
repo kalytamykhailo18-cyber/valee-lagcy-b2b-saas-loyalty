@@ -13,6 +13,7 @@ import {
   purgeExpiredActions,
   type QueuedAction,
 } from '@/lib/offline-queue'
+import { formatPoints, formatCash } from '@/lib/format'
 import { useOnlineStatus } from '@/lib/use-online-status'
 
 interface Product {
@@ -175,39 +176,14 @@ export default function Catalog() {
   // QR Result Screen with animation
   if (redeemResult?.success && redeemResult.token) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white p-4">
-        <div className="text-center animate-qr-build">
-          <h2 className="text-xl font-bold text-indigo-600 mb-4">Tu codigo QR de canje</h2>
-          <div className="bg-slate-100 rounded-2xl p-8 inline-block">
-            <QRDisplay value={redeemResult.token} />
-          </div>
-          {redeemResult.shortCode && (
-            <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4">
-              <p className="text-xs text-indigo-600 uppercase tracking-wider font-semibold">Codigo manual</p>
-              <p className="text-3xl font-bold text-indigo-700 tracking-widest font-mono mt-1">{redeemResult.shortCode}</p>
-              <p className="text-xs text-indigo-500 mt-1">Dile este codigo al cajero si no puede escanear</p>
-            </div>
-          )}
-          {redeemResult.cashAmount && parseFloat(redeemResult.cashAmount) > 0 ? (
-            <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mt-4 text-left space-y-2">
-              <p className="text-amber-900 font-bold text-center mb-3">Canje hibrido</p>
-              <p className="text-amber-800"><span className="font-bold">1.</span> Paga <span className="font-bold">${parseFloat(redeemResult.cashAmount).toLocaleString()}</span> en caja</p>
-              <p className="text-amber-800"><span className="font-bold">2.</span> Muestra tu QR al cajero para ser escaneado</p>
-              <p className="text-amber-800"><span className="font-bold">3.</span> Espera tu premio!</p>
-            </div>
-          ) : (
-            <p className="text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
-          )}
-          {redeemResult.expiresAt && (
-            <CountdownTimer expiresAt={redeemResult.expiresAt} onExpired={() => {
-              setRedeemResult(null)
-              setSelectedProduct(null)
-              loadCatalog()
-            }} />
-          )}
-          <Link href="/consumer" className="block mt-6 text-indigo-600 font-medium">Volver al inicio</Link>
-        </div>
-      </div>
+      <QrRedemptionView
+        redeemResult={redeemResult}
+        onClear={() => {
+          setRedeemResult(null)
+          setSelectedProduct(null)
+          loadCatalog()
+        }}
+      />
     )
   }
 
@@ -241,8 +217,8 @@ export default function Catalog() {
           <h2 className="text-lg font-bold tracking-tight">Confirmar canje</h2>
           <div className="mt-4 space-y-2">
             <p className="text-slate-600"><span className="font-medium">Producto:</span> {selectedProduct.name}</p>
-            <p className="text-slate-600"><span className="font-medium">Costo:</span> {Math.round(parseFloat(selectedProduct.redemptionCost)).toLocaleString()} pts</p>
-            <p className="text-slate-600"><span className="font-medium">Saldo despues:</span> {Math.round(parseFloat(balanceAfter)).toLocaleString()} pts</p>
+            <p className="text-slate-600"><span className="font-medium">Costo:</span> {formatPoints(selectedProduct.redemptionCost)} pts</p>
+            <p className="text-slate-600"><span className="font-medium">Saldo despues:</span> {formatPoints(balanceAfter)} pts</p>
           </div>
           {redeemResult && !redeemResult.success && !redeemResult.queued && (
             <p className="text-red-500 text-sm mt-3">{redeemResult.message}</p>
@@ -289,10 +265,10 @@ export default function Catalog() {
       )}
 
       <p className="text-sm text-slate-500 mb-4">
-        Tu saldo: <span className="font-bold text-indigo-600">{Math.round(effectiveBalance).toLocaleString()} pts</span>
+        Tu saldo: <span className="font-bold text-indigo-600">{formatPoints(effectiveBalance)} pts</span>
         {pendingCount > 0 && (
           <span className="text-xs text-amber-600 ml-2">
-            ({Math.round(getLocalPendingBalance()).toLocaleString()} pts pendientes)
+            ({formatPoints(getLocalPendingBalance())} pts pendientes)
           </span>
         )}
       </p>
@@ -323,7 +299,7 @@ export default function Catalog() {
               </div>
               <div className="p-3">
                 <p className="font-medium text-sm truncate">{product.name}</p>
-                <p className="text-indigo-600 font-bold text-sm">{Math.round(parseFloat(product.redemptionCost)).toLocaleString()} pts</p>
+                <p className="text-indigo-600 font-bold text-sm">{formatPoints(product.redemptionCost)} pts</p>
                 <p className="text-xs text-slate-400">{product.stock} disponibles</p>
                 {canAfford ? (
                   <button className="aa-btn aa-btn-primary w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
@@ -356,6 +332,80 @@ export default function Catalog() {
 }
 
 // Simple QR display using canvas
+/**
+ * QR result view with a 3-second poll against /redemption-status. The moment
+ * the cashier scans the code (token.status becomes 'used'), we replace the QR
+ * with a green confirmation screen — Eric's request: "quitarlo con un mensaje
+ * diciendo el canjeo fue verificado con exito".
+ */
+function QrRedemptionView({ redeemResult, onClear }: { redeemResult: any; onClear: () => void }) {
+  const [confirmed, setConfirmed] = useState(false)
+
+  useEffect(() => {
+    if (!redeemResult?.tokenId) return
+    let cancelled = false
+    const check = async () => {
+      try {
+        const s = await api.getRedemptionStatus(redeemResult.tokenId)
+        if (!cancelled && s.status === 'used') setConfirmed(true)
+      } catch {}
+    }
+    check()
+    const interval = setInterval(check, 3000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [redeemResult?.tokenId])
+
+  if (confirmed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-emerald-600 text-white p-6">
+        <div className="text-center space-y-4 max-w-sm animate-check">
+          <div className="text-7xl">✓</div>
+          <h2 className="text-3xl font-bold tracking-tight">Canje verificado con exito</h2>
+          <p className="text-emerald-100">Tu codigo fue escaneado por el comercio. Disfruta tu premio!</p>
+          <Link
+            href="/consumer"
+            className="aa-btn aa-btn-primary inline-block mt-4 bg-white text-emerald-700 px-8 py-3 rounded-xl font-semibold"
+          >
+            <span className="relative z-10">Volver al inicio</span>
+          </Link>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-white p-4">
+      <div className="text-center animate-qr-build">
+        <h2 className="text-xl font-bold text-indigo-600 mb-4">Tu codigo QR de canje</h2>
+        <div className="bg-slate-100 rounded-2xl p-8 inline-block">
+          <QRDisplay value={redeemResult.token} />
+        </div>
+        {redeemResult.shortCode && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4">
+            <p className="text-xs text-indigo-600 uppercase tracking-wider font-semibold">Codigo manual</p>
+            <p className="text-3xl font-bold text-indigo-700 tracking-widest font-mono mt-1">{redeemResult.shortCode}</p>
+            <p className="text-xs text-indigo-500 mt-1">Dile este codigo al cajero si no puede escanear</p>
+          </div>
+        )}
+        {redeemResult.cashAmount && parseFloat(redeemResult.cashAmount) > 0 ? (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 mt-4 text-left space-y-2">
+            <p className="text-amber-900 font-bold text-center mb-3">Canje hibrido</p>
+            <p className="text-amber-800"><span className="font-bold">1.</span> Paga <span className="font-bold">${formatCash(redeemResult.cashAmount)}</span> en caja</p>
+            <p className="text-amber-800"><span className="font-bold">2.</span> Muestra tu QR al cajero para ser escaneado</p>
+            <p className="text-amber-800"><span className="font-bold">3.</span> Espera tu premio!</p>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
+        )}
+        {redeemResult.expiresAt && (
+          <CountdownTimer expiresAt={redeemResult.expiresAt} onExpired={onClear} />
+        )}
+        <Link href="/consumer" className="block mt-6 text-indigo-600 font-medium">Volver al inicio</Link>
+      </div>
+    </div>
+  )
+}
+
 function QRDisplay({ value }: { value: string }) {
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)

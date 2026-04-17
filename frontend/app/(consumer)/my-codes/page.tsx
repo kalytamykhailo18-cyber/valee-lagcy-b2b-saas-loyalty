@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 import { MdArrowBack } from 'react-icons/md'
+import { formatPoints } from '@/lib/format'
 
 interface ActiveRedemption {
   id: string
@@ -84,7 +85,7 @@ export default function MyCodesPage() {
               )}
               <div className="flex-1 text-left">
                 <p className="font-semibold text-slate-800">{r.productName}</p>
-                <p className="text-sm text-indigo-600">{Math.round(parseFloat(r.amount)).toLocaleString()} pts</p>
+                <p className="text-sm text-indigo-600">{formatPoints(r.amount)} pts</p>
                 <p className="text-xs text-slate-400 mt-1">
                   Expira en {formatTime(r.secondsRemaining)}
                 </p>
@@ -107,6 +108,7 @@ function formatTime(seconds: number): string {
 function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: () => void }) {
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [secondsLeft, setSecondsLeft] = useState(redemption.secondsRemaining)
+  const [confirmed, setConfirmed] = useState(false)
 
   useEffect(() => {
     import('qrcode').then(QRCode => {
@@ -128,6 +130,38 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
     return () => clearInterval(interval)
   }, [redemption.expiresAt, onBack])
 
+  // Poll for cashier confirmation so the QR disappears once it's been scanned.
+  useEffect(() => {
+    let cancelled = false
+    const check = async () => {
+      try {
+        const s = await api.getRedemptionStatus(redemption.id)
+        if (!cancelled && s.status === 'used') setConfirmed(true)
+      } catch {}
+    }
+    check()
+    const poll = setInterval(check, 3000)
+    return () => { cancelled = true; clearInterval(poll) }
+  }, [redemption.id])
+
+  if (confirmed) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-emerald-600 text-white p-6">
+        <div className="text-center space-y-4 max-w-sm animate-check">
+          <div className="text-7xl">✓</div>
+          <h2 className="text-3xl font-bold tracking-tight">Canje verificado con exito</h2>
+          <p className="text-emerald-100">{redemption.productName} fue entregado por el comercio.</p>
+          <button
+            onClick={onBack}
+            className="aa-btn aa-btn-primary inline-block mt-4 bg-white text-emerald-700 px-8 py-3 rounded-xl font-semibold"
+          >
+            <span className="relative z-10">Volver</span>
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-white flex flex-col items-center p-4">
       <div className="w-full max-w-sm aa-rise">
@@ -136,7 +170,7 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
         </button>
         <h2 className="text-xl font-bold text-indigo-600 mb-2 text-center tracking-tight">{redemption.productName}</h2>
         <p className="text-sm text-slate-500 text-center mb-6">
-          {Math.round(parseFloat(redemption.amount)).toLocaleString()} pts
+          {formatPoints(redemption.amount)} pts
           {redemption.cashAmount && parseFloat(redemption.cashAmount) > 0 && ` + $${redemption.cashAmount}`}
         </p>
         <div className="bg-slate-100 rounded-2xl p-8 flex justify-center animate-qr-build">

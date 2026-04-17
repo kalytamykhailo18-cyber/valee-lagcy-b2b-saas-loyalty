@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { formatPoints } from '@/lib/format'
 
 export default function AdminDashboard() {
   const [metrics, setMetrics] = useState<any>(null)
@@ -53,7 +54,7 @@ export default function AdminDashboard() {
             <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">En circulacion</p>
               <p key={metrics.totalValueInCirculation} className="text-3xl font-bold text-emerald-700 mt-2 truncate aa-count tabular-nums">
-                {Math.round(parseFloat(metrics.totalValueInCirculation)).toLocaleString()}
+                {formatPoints(metrics.totalValueInCirculation)}
               </p>
             </div>
             <div className="aa-card bg-white rounded-xl p-5 shadow-sm border border-slate-100">

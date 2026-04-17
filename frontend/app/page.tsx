@@ -26,67 +26,27 @@ interface AffiliatedMerchant {
 export default function Home() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [authenticated, setAuthenticated] = useState(false)
-  const [merchants, setMerchants] = useState<MerchantAccount[]>([])
-  const [totalBalance, setTotalBalance] = useState('0')
-  const [phoneNumber, setPhoneNumber] = useState('')
-  const [displayName, setDisplayName] = useState<string | null>(null)
   const [affiliated, setAffiliated] = useState<AffiliatedMerchant[]>([])
+  const [hasSession, setHasSession] = useState(false)
 
-  useEffect(() => { load() }, [])
-
-  // Re-check auth when the tab becomes visible or the page is restored from
-  // bfcache (back/forward swipe). Without this, swiping back after logout
-  // shows the previous authenticated view.
   useEffect(() => {
-    const recheck = () => {
-      const t = localStorage.getItem('accessToken')
-      if (!t && authenticated) window.location.reload()
+    // `/` is ALWAYS the public landing page now. It does not auto-switch to
+    // an authenticated view — that used to cause valee.app to open straight
+    // into someone else's consumer dashboard on a shared computer. The
+    // multicommerce hub lives at /consumer. We just record whether the user
+    // has a session so we can swap the CTA copy from "Ya tengo cuenta" to
+    // "Mi cuenta".
+    if (typeof window !== 'undefined') {
+      setHasSession(!!localStorage.getItem('accessToken'))
     }
-    const onVis = () => { if (document.visibilityState === 'visible') recheck() }
-    const onShow = (e: PageTransitionEvent) => { if (e.persisted) recheck() }
-    const onStorage = (e: StorageEvent) => { if (e.key === 'accessToken') recheck() }
-    document.addEventListener('visibilitychange', onVis)
-    window.addEventListener('pageshow', onShow)
-    window.addEventListener('storage', onStorage)
-    return () => {
-      document.removeEventListener('visibilitychange', onVis)
-      window.removeEventListener('pageshow', onShow)
-      window.removeEventListener('storage', onStorage)
-    }
-  }, [authenticated])
-
-  async function load() {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-    if (token) {
+    ;(async () => {
       try {
-        const data = await api.getAllAccounts()
-        setAuthenticated(true)
-        setMerchants(data.merchants)
-        setTotalBalance(data.totalBalance)
-        setPhoneNumber(data.phoneNumber)
-        setDisplayName(data.displayName || null)
-        setLoading(false)
-        return
-      } catch {
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
-      }
-    }
-    try {
-      const aff = await api.getAffiliatedMerchants()
-      setAffiliated(aff.merchants)
-    } catch {}
-    setLoading(false)
-  }
-
-  function logout() {
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
-    // Hard navigation clears the bfcache so swiping back won't resurrect
-    // the authenticated page.
-    window.location.href = '/'
-  }
+        const aff = await api.getAffiliatedMerchants()
+        setAffiliated(aff.merchants)
+      } catch {}
+      setLoading(false)
+    })()
+  }, [])
 
   if (loading) {
     return (
@@ -97,164 +57,7 @@ export default function Home() {
   }
 
   // ============================================================
-  // AUTHENTICATED — Multicommerce dashboard
-  // ============================================================
-  if (authenticated) {
-    return (
-      <div className="min-h-screen bg-gradient-to-b from-indigo-50 via-white to-white">
-        {/* Header */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-          <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
-            <div>
-              <Link
-                href="/"
-                className="inline-block text-2xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors"
-              >
-                Valee
-              </Link>
-              <p className="text-xs text-slate-400 mt-0.5">{phoneNumber}</p>
-            </div>
-            <button
-              onClick={logout}
-              className="text-sm font-medium text-slate-500 hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-            >
-              Cerrar sesion
-            </button>
-          </div>
-        </header>
-
-        {/* Main content */}
-        <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
-          {/* Greeting */}
-          <div className="mb-4 lg:mb-6 aa-rise-sm">
-            <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight">
-              Hola{displayName ? `, ${displayName}` : ''}
-            </h1>
-          </div>
-
-          {/* Total balance card */}
-          <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-3xl p-6 sm:p-8 lg:p-10 text-white shadow-xl aa-rise">
-            <p className="text-indigo-200 text-sm sm:text-base">Tu saldo total</p>
-            <p key={totalBalance} className="text-5xl sm:text-6xl lg:text-7xl font-bold mt-2 tracking-tight aa-count tabular-nums">
-              {Math.round(parseFloat(totalBalance)).toLocaleString()}
-            </p>
-            <p className="text-indigo-200 text-sm sm:text-base mt-2">
-              puntos en {merchants.length} comercio{merchants.length !== 1 ? 's' : ''}
-            </p>
-          </section>
-
-          {merchants.length === 0 ? (
-            <div className="mt-8 bg-white rounded-2xl p-8 text-center border border-slate-200">
-              <p className="text-slate-600 mb-2 font-medium">Aun no estas registrado en ningun comercio.</p>
-              <p className="text-sm text-slate-400">
-                Visita un comercio Valee y escanea su QR para empezar a ganar puntos.
-              </p>
-            </div>
-          ) : (
-            <section className="mt-8 lg:mt-12">
-              <h2 className="text-slate-700 font-semibold text-sm uppercase tracking-wider mb-4">
-                Tus comercios
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 gap-4 lg:gap-6">
-                {merchants.map((m, i) => (
-                  <div
-                    key={m.accountId}
-                    className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"
-                    style={{ animationDelay: `${Math.min(i * 60, 360)}ms` }}
-                  >
-                    <div className="p-5 flex items-center justify-between border-b border-slate-100">
-                      <div>
-                        <p className="font-bold text-slate-800 text-lg">{m.tenantName}</p>
-                        <p className="text-sm text-indigo-600 font-semibold mt-0.5">
-                          {Math.round(parseFloat(m.balance)).toLocaleString()} {m.unitLabel}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => {
-                          router.push(`/consumer?tenant=${m.tenantSlug}`)
-                        }}
-                        className="aa-btn text-sm bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg font-medium hover:bg-indigo-100"
-                      >
-                        Ver detalle
-                      </button>
-                    </div>
-
-                    {m.topProducts.length > 0 && (
-                      <div className="p-5">
-                        <p className="text-xs text-slate-400 uppercase tracking-wider mb-3">
-                          Top recompensas
-                        </p>
-                        <div className="grid grid-cols-3 gap-3">
-                          {m.topProducts.map(p => {
-                            const canAfford = Number(m.balance) >= Number(p.redemptionCost)
-                            return (
-                              <div
-                                key={p.id}
-                                onClick={() => router.push(`/consumer?tenant=${m.tenantSlug}`)}
-                                className={`bg-slate-50 rounded-xl p-3 text-center cursor-pointer hover:bg-indigo-50 transition ${canAfford ? '' : 'opacity-50 grayscale'}`}
-                              >
-                                {p.photoUrl ? (
-                                  <img
-                                    src={p.photoUrl}
-                                    alt={p.name}
-                                    className="w-full h-20 object-cover rounded-lg mb-2"
-                                  />
-                                ) : (
-                                  <div className="w-full h-20 bg-slate-200 rounded-lg mb-2 flex items-center justify-center text-3xl">
-                                    <MdCardGiftcard className="w-8 h-8 text-slate-400" />
-                                  </div>
-                                )}
-                                <p className="text-xs font-medium text-slate-700 line-clamp-2 mb-1">
-                                  {p.name}
-                                </p>
-                                <p className="text-xs text-indigo-600 font-bold">
-                                  {Math.round(parseFloat(p.redemptionCost)).toLocaleString()} pts
-                                </p>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-        </main>
-
-        <footer className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 text-center text-sm font-medium text-slate-500 border-t border-slate-200 mt-12 space-x-6">
-          <Link
-            href="/merchant/login"
-            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-          >
-            Acceso comercio
-          </Link>
-          <Link
-            href="/merchant/signup"
-            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-          >
-            Registra tu comercio
-          </Link>
-          <Link
-            href="/privacy"
-            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-          >
-            Privacidad
-          </Link>
-          <Link
-            href="/terms"
-            className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-          >
-            Terminos
-          </Link>
-        </footer>
-      </div>
-    )
-  }
-
-  // ============================================================
-  // PUBLIC — Welcoming landing
+  // PUBLIC — Welcoming landing (always shown; session-aware CTA)
   // ============================================================
   return (
     <div className="min-h-screen bg-gradient-to-b from-indigo-600 via-indigo-500 to-indigo-400">
@@ -275,9 +78,9 @@ export default function Home() {
             <div className="hidden lg:block mt-8">
               <Link
                 href="/consumer"
-                className="inline-block bg-white text-indigo-700 font-semibold text-base py-3 px-8 rounded-xl hover:bg-indigo-50 transition-colors shadow-lg"
+                className="aa-btn inline-block bg-white text-indigo-700 font-semibold text-base py-3 px-8 rounded-xl hover:bg-indigo-50 shadow-lg"
               >
-                Ya tengo cuenta
+                <span className="relative z-10">{hasSession ? 'Mi cuenta' : 'Ya tengo cuenta'}</span>
               </Link>
               <p className="text-xs text-indigo-200 mt-4 max-w-sm">
                 Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
@@ -368,7 +171,7 @@ export default function Home() {
               href="/consumer"
               className="block bg-indigo-600 text-white text-center text-base py-4 rounded-2xl font-semibold hover:bg-indigo-700 transition-colors"
             >
-              Ya tengo cuenta
+              {hasSession ? 'Mi cuenta' : 'Ya tengo cuenta'}
             </Link>
             <p className="text-xs text-slate-400 text-center mt-3">
               Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
@@ -389,24 +192,6 @@ export default function Home() {
 
           {/* Footer links */}
           <footer className="mt-10 pt-6 border-t border-slate-200 text-center text-sm font-medium text-slate-500 space-x-6">
-            <Link
-              href="/merchant/login"
-              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-            >
-              Acceso comercio
-            </Link>
-            <Link
-              href="/merchant/signup"
-              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-            >
-              Registrar comercio
-            </Link>
-            <Link
-              href="/admin/login"
-              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
-            >
-              Admin
-            </Link>
             <Link
               href="/privacy"
               className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"

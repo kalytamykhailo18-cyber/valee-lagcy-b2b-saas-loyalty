@@ -286,11 +286,15 @@ export async function parseMerchantIdentifier(messageText: string): Promise<{
   branchId: string | null;
   tenantName: string;
 } | null> {
-  // Match MERCHANT:slug (optionally inside square brackets, anywhere in the text)
-  const match = messageText.match(/MERCHANT:([a-z0-9\-]+)(?::BRANCH:([a-f0-9\-]+))?/i);
+  // Match either the friendly "Ref: slug" / "Ref: slug/branchId" format
+  // (current QR output) or the legacy "MERCHANT:slug" / "MERCHANT:slug:BRANCH:id"
+  // format (still printed on old QRs out in the wild).
+  const refMatch = messageText.match(/Ref:\s*([a-z0-9][a-z0-9-]{0,48}[a-z0-9])(?:\/([a-f0-9-]+))?/i);
+  const legacyMatch = messageText.match(/MERCHANT:([a-z0-9\-]+)(?::BRANCH:([a-f0-9\-]+))?/i);
+  const match = refMatch || legacyMatch;
   if (!match) return null;
 
-  const slug = match[1];
+  const slug = match[1].toLowerCase();
   const branchId = match[2] || null;
 
   const tenant = await prisma.tenant.findUnique({ where: { slug } });

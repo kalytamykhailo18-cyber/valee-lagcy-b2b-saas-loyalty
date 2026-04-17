@@ -123,13 +123,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {mounted && (
+      {mounted && authorized && (
         <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 bg-slate-800 border-r border-slate-700 z-40">
           {sidebarContent}
         </aside>
       )}
 
-      {mounted && (
+      {mounted && authorized && (
         <>
           <div
             onClick={() => setDrawerOpen(false)}
@@ -141,7 +141,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {mounted && !drawerOpen && (
+      {mounted && authorized && !drawerOpen && (
         <button
           onClick={() => setDrawerOpen(true)}
           className="lg:hidden fixed bottom-6 left-6 z-30 w-14 h-14 rounded-full bg-indigo-600 text-white shadow-xl flex items-center justify-center hover:bg-indigo-700 active:scale-95 transition"

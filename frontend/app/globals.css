@@ -256,6 +256,15 @@ body {
 .aa-sheet    { animation: aa-modal-sheet  360ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .aa-drawer   { animation: aa-modal-drawer-right 320ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 
+/* Hide scrollbars on horizontal product carousels */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Respect user motion preferences */
 @media (prefers-reduced-motion: reduce) {
   .aa-rise, .aa-rise-sm, .aa-pop, .aa-count, .aa-row-in,
