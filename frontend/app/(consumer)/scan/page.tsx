@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { formatPoints } from '@/lib/format'
+import { consumerHomeUrl } from '@/lib/consumer-nav'
 
 /**
  * Merchant-entry QR codes encode a wa.me deep link that carries a hidden
@@ -265,12 +266,12 @@ export default function ScanPage() {
             >
               <span className="relative z-10">Escanear otra</span>
             </button>
-            <Link
-              href="/consumer"
+            <a
+              href={consumerHomeUrl()}
               className="aa-btn bg-white text-slate-900 px-6 py-3 rounded-xl font-semibold hover:bg-slate-100"
             >
               <span className="relative z-10">Volver al inicio</span>
-            </Link>
+            </a>
           </div>
         </div>
       </div>
@@ -284,7 +285,7 @@ export default function ScanPage() {
   return (
     <div className="fixed inset-0 bg-slate-900 text-white flex flex-col" style={{ height: '100dvh' }}>
       <header className="px-4 py-3 flex items-center gap-3 flex-shrink-0 absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 via-black/30 to-transparent">
-        <Link href="/consumer" className="text-2xl hover:-translate-x-0.5 transition-transform">&larr;</Link>
+        <a href={consumerHomeUrl()} className="text-2xl hover:-translate-x-0.5 transition-transform">&larr;</a>
         <h1 className="text-lg font-bold tracking-tight">Escanear</h1>
       </header>
 

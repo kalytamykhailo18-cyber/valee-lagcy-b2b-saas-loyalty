@@ -5,6 +5,7 @@ import { MdCheckCircle, MdCancel } from 'react-icons/md'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { formatPoints } from '@/lib/format'
+import { consumerHomeUrl } from '@/lib/consumer-nav'
 
 type State = 'scanning' | 'processing' | 'success' | 'error'
 
@@ -92,7 +93,7 @@ export default function ConsumerDualScanPage() {
   return (
     <div className="min-h-screen bg-slate-900 text-white">
       <div className="bg-slate-800 p-4 flex items-center gap-3 aa-rise-sm">
-        <Link href="/consumer" className="text-white text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <a href={consumerHomeUrl()} className="text-white text-2xl transition-transform hover:-translate-x-0.5">&larr;</a>
         <h1 className="text-lg font-bold tracking-tight">Escanear QR del comercio</h1>
       </div>
 

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { consumerHomeUrl } from '@/lib/consumer-nav'
 
 export default function ConsumerDisputesPage() {
   const [description, setDescription] = useState('')
@@ -65,7 +66,7 @@ export default function ConsumerDisputesPage() {
     <div className="min-h-screen pb-20">
       {/* Header */}
       <div className="bg-white shadow-sm p-4 flex items-center gap-3 aa-rise-sm">
-        <Link href="/consumer" className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <a href={consumerHomeUrl()} className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</a>
         <h1 className="text-lg font-bold text-slate-800 tracking-tight">Enviar reclamo</h1>
       </div>
 

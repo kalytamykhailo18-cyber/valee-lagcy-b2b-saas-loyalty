@@ -102,6 +102,16 @@ function ConsumerApp() {
     const token = localStorage.getItem('accessToken')
     logEvent('page_mount', `hasToken=${!!token} slug=${merchantSlugFromUrl || '(none)'}`)
 
+    // Remember the current tenant context so inner pages (scan, catalog,
+    // my-codes, dual-scan, disputes) can send the user BACK to the same
+    // merchant view instead of the multicommerce hub. Clear when the user
+    // explicitly navigates to the hub (no ?tenant=).
+    if (merchantSlugFromUrl) {
+      localStorage.setItem('tenantSlug', merchantSlugFromUrl)
+    } else {
+      localStorage.removeItem('tenantSlug')
+    }
+
     if (token) {
       if (merchantSlugFromUrl) {
         logEvent('selectMerchant_start', merchantSlugFromUrl)

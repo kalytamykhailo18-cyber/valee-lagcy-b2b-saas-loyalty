@@ -15,6 +15,7 @@ import {
 } from '@/lib/offline-queue'
 import { formatPoints, formatCash } from '@/lib/format'
 import { useOnlineStatus } from '@/lib/use-online-status'
+import { consumerHomeUrl } from '@/lib/consumer-nav'
 
 interface Product {
   id: string
@@ -241,7 +242,7 @@ export default function Catalog() {
   return (
     <div className="min-h-screen p-4">
       <div className="flex items-center gap-3 mb-4 aa-rise-sm">
-        <Link href="/consumer" className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
+        <a href={consumerHomeUrl()} className="text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">&larr;</a>
         <h1 className="text-xl font-bold tracking-tight">Catalogo</h1>
       </div>
 
@@ -362,12 +363,12 @@ function QrRedemptionView({ redeemResult, onClear }: { redeemResult: any; onClea
           <div className="text-7xl">✓</div>
           <h2 className="text-3xl font-bold tracking-tight">Canje verificado con exito</h2>
           <p className="text-emerald-100">Tu codigo fue escaneado por el comercio. Disfruta tu premio!</p>
-          <Link
-            href="/consumer"
+          <a
+            href={consumerHomeUrl()}
             className="aa-btn aa-btn-primary inline-block mt-4 bg-white text-emerald-700 px-8 py-3 rounded-xl font-semibold"
           >
             <span className="relative z-10">Volver al inicio</span>
-          </Link>
+          </a>
         </div>
       </div>
     )
@@ -400,7 +401,7 @@ function QrRedemptionView({ redeemResult, onClear }: { redeemResult: any; onClea
         {redeemResult.expiresAt && (
           <CountdownTimer expiresAt={redeemResult.expiresAt} onExpired={onClear} />
         )}
-        <Link href="/consumer" className="block mt-6 text-indigo-600 font-medium">Volver al inicio</Link>
+        <a href={consumerHomeUrl()} className="block mt-6 text-indigo-600 font-medium">Volver al inicio</a>
       </div>
     </div>
   )
