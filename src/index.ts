@@ -1,6 +1,19 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// Sentry must be initialized BEFORE any route/service imports so error handlers
+// pick it up. No-op when SENTRY_DSN is unset — install the SDK now, set the DSN
+// in .env once the Sentry account exists.
+import * as Sentry from '@sentry/node';
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || 'development',
+    tracesSampleRate: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE || '0.1'),
+    release: process.env.SENTRY_RELEASE,
+  });
+}
+
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
@@ -11,6 +24,20 @@ import adminRoutes from './api/routes/admin.js';
 import webhookRoutes from './api/routes/webhook.js';
 
 const app = Fastify({ logger: true });
+
+// Forward any unhandled Fastify error to Sentry. Safe no-op when DSN absent.
+app.setErrorHandler((err: any, request, reply) => {
+  if (process.env.SENTRY_DSN) {
+    Sentry.withScope(scope => {
+      scope.setExtra('url', request.url);
+      scope.setExtra('method', request.method);
+      scope.setExtra('ip', request.ip);
+      Sentry.captureException(err);
+    });
+  }
+  request.log.error(err);
+  reply.status(err?.statusCode || 500).send({ error: err?.message || 'Internal error' });
+});
 
 async function start() {
   await app.register(cors, { origin: true, credentials: true });
