@@ -79,6 +79,57 @@ export async function generateMerchantQR(tenantId: string): Promise<{
 }
 
 /**
+ * Generate / refresh the personal attribution QR for a staff member.
+ * The QR encodes a WhatsApp deep link carrying both the merchant slug AND a
+ * `Cjr:<slug>` marker. When a consumer scans it, the webhook parser attaches
+ * the staff's ID to the conversation so any invoice submitted in that session
+ * is credited to that staff for performance tracking.
+ */
+export async function generateStaffQR(staffId: string): Promise<{
+  deepLink: string;
+  qrCodeUrl: string | null;
+  qrSlug: string;
+}> {
+  const staff = await prisma.staff.findUnique({
+    where: { id: staffId },
+    include: { tenant: { select: { slug: true, name: true } } },
+  });
+  if (!staff) throw new Error('Staff not found');
+
+  // Short, random, URL-safe slug (8 chars of base36). Uniqueness enforced at DB level.
+  // If a slug already exists for this staff we reuse it so the printed QR can be reprinted
+  // without invalidating posters already in the wild.
+  let qrSlug = staff.qrSlug;
+  if (!qrSlug) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = Math.random().toString(36).slice(2, 10);
+      const collision = await prisma.staff.findFirst({ where: { qrSlug: candidate }, select: { id: true } });
+      if (!collision) { qrSlug = candidate; break; }
+    }
+    if (!qrSlug) throw new Error('Could not generate unique qr_slug');
+  }
+
+  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  const text = encodeURIComponent(
+    `Hola! Quiero ganar puntos en ${staff.tenant.name} con ${staff.name} ✨ Ref: ${staff.tenant.slug} Cjr: ${qrSlug}`
+  );
+  const deepLink = `https://wa.me/${botPhone}?text=${text}`;
+
+  const qrBuffer = await generateQRImage(deepLink);
+  let qrCodeUrl = await uploadImage(qrBuffer, `staff-qr/${staff.tenant.slug}/${qrSlug}`);
+  if (!qrCodeUrl) {
+    qrCodeUrl = `data:image/png;base64,${qrBuffer.toString('base64')}`;
+  }
+
+  await prisma.staff.update({
+    where: { id: staffId },
+    data: { qrSlug, qrCodeUrl, qrGeneratedAt: new Date() },
+  });
+
+  return { deepLink, qrCodeUrl, qrSlug };
+}
+
+/**
  * Generate QR for a specific branch.
  */
 export async function generateBranchQR(branchId: string): Promise<{

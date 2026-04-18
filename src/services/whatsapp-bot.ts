@@ -281,6 +281,23 @@ export function resetOcrRetry(tenantId: string, phoneNumber: string): void {
  * the tag in brackets at the end: "Hola, quiero registrar... [MERCHANT:{slug}]".
  * Returns { tenantId, branchId } or null if not a QR message.
  */
+/**
+ * Parse optional `Cjr: <slug>` marker embedded in the QR message. Returns the
+ * staffId if the slug resolves to an active staff member of `tenantId`.
+ * Keeps merchant resolution independent so a stale/invalid staff slug never
+ * blocks the primary merchant lookup.
+ */
+export async function parseStaffAttribution(messageText: string, tenantId: string): Promise<string | null> {
+  const m = messageText.match(/Cjr:\s*([a-z0-9]{4,16})/i);
+  if (!m) return null;
+  const slug = m[1].toLowerCase();
+  const staff = await prisma.staff.findFirst({
+    where: { qrSlug: slug, tenantId, active: true },
+    select: { id: true },
+  });
+  return staff?.id || null;
+}
+
 export async function parseMerchantIdentifier(messageText: string): Promise<{
   tenantId: string;
   branchId: string | null;

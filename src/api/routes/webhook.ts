@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { parseMerchantIdentifier, handleIncomingMessage } from '../../services/whatsapp-bot.js';
+import { parseMerchantIdentifier, parseStaffAttribution, handleIncomingMessage } from '../../services/whatsapp-bot.js';
 import { sendWhatsAppMessage, downloadWhatsAppMedia } from '../../services/whatsapp.js';
 
 /**
@@ -117,6 +117,22 @@ export default async function webhookRoutes(app: FastifyInstance) {
       if (merchantInfo) {
         tenantId = merchantInfo.tenantId;
         branchId = merchantInfo.branchId;
+
+        // If the QR message carries a Cjr: marker, stamp a scan-session so the
+        // next invoice this consumer submits (within the attribution window)
+        // gets credited to that staff member.
+        const staffId = await parseStaffAttribution(messageText, tenantId);
+        if (staffId) {
+          const { PrismaClient } = await import('@prisma/client');
+          const p = new PrismaClient();
+          try {
+            await p.staffScanSession.create({
+              data: { tenantId, staffId, consumerPhone: formattedPhone },
+            });
+          } finally {
+            await p.$disconnect();
+          }
+        }
       }
     }
 

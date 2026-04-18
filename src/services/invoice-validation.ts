@@ -692,6 +692,21 @@ export async function validateInvoice(params: {
     console.log(`[Attribution] Invoice attributed to Valee outreach (${attribution.notificationType}, sent ${attribution.sentAt?.toISOString()})`);
   }
 
+  // Staff attribution: if this consumer scanned a cashier/promoter QR within
+  // the attribution window, credit the invoice to that staff for performance
+  // reporting. Reads the most recent StaffScanSession for this phone+tenant.
+  const staffAttrWindowMin = parseInt(process.env.STAFF_ATTRIBUTION_WINDOW_MIN || '60');
+  const staffCutoff = new Date(Date.now() - staffAttrWindowMin * 60 * 1000);
+  const lastStaffScan = await prisma.staffScanSession.findFirst({
+    where: { tenantId, consumerPhone: senderPhone, scannedAt: { gte: staffCutoff } },
+    orderBy: { scannedAt: 'desc' },
+  });
+  if (lastStaffScan) {
+    ledgerMetadata.staffId = lastStaffScan.staffId;
+    ledgerMetadata.staffAttributionScanAt = lastStaffScan.scannedAt.toISOString();
+    console.log(`[StaffAttribution] Invoice credited to staff ${lastStaffScan.staffId} (scan at ${lastStaffScan.scannedAt.toISOString()})`);
+  }
+
   const ledgerResult = await writeDoubleEntry({
     tenantId,
     eventType: 'INVOICE_CLAIMED',

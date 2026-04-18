@@ -502,24 +502,44 @@ model Product {
 // ============================================================
 
 model Staff {
-  id           String    @id @default(uuid()) @db.Uuid
-  tenantId     String    @map("tenant_id") @db.Uuid
-  branchId     String?   @map("branch_id") @db.Uuid
-  name         String    @db.VarChar(255)
-  email        String    @db.VarChar(255)
-  passwordHash String    @map("password_hash") @db.VarChar(255)
-  role         StaffRole
-  active       Boolean   @default(true)
-  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  branchId       String?   @map("branch_id") @db.Uuid
+  name           String    @db.VarChar(255)
+  email          String    @db.VarChar(255)
+  passwordHash   String    @map("password_hash") @db.VarChar(255)
+  role           StaffRole
+  active         Boolean   @default(true)
+  qrSlug         String?   @unique @map("qr_slug") @db.VarChar(16)
+  qrCodeUrl      String?   @map("qr_code_url") @db.Text
+  qrGeneratedAt  DateTime? @map("qr_generated_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
-  tenant        Tenant            @relation(fields: [tenantId], references: [id])
-  branch        Branch?           @relation(fields: [branchId], references: [id])
-  uploadBatches UploadBatch[]
-  redemptions   RedemptionToken[] @relation("RedemptionUsedBy")
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  branch         Branch?             @relation(fields: [branchId], references: [id])
+  uploadBatches  UploadBatch[]
+  redemptions    RedemptionToken[]   @relation("RedemptionUsedBy")
+  scanSessions   StaffScanSession[]
 
   @@unique([tenantId, email])
   @@map("staff")
+}
+
+// Tracks which staff a consumer's last QR scan attributed to. Used by the
+// invoice validation pipeline to credit the correct cashier/promoter for
+// a transaction that lands within the attribution window.
+model StaffScanSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  staffId      String   @map("staff_id") @db.Uuid
+  consumerPhone String  @map("consumer_phone") @db.VarChar(32)
+  scannedAt    DateTime @default(now()) @map("scanned_at") @db.Timestamptz
+
+  staff  Staff  @relation(fields: [staffId], references: [id])
+
+  @@index([tenantId, consumerPhone, scannedAt])
+  @@map("staff_scan_sessions")
 }
 
 // ============================================================

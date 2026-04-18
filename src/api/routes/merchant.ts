@@ -880,9 +880,80 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const staffList = await prisma.staff.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, name: true, email: true, role: true, active: true, branchId: true, createdAt: true },
+      select: {
+        id: true, name: true, email: true, role: true, active: true, branchId: true, createdAt: true,
+        qrSlug: true, qrCodeUrl: true, qrGeneratedAt: true,
+      },
     });
     return { staff: staffList };
+  });
+
+  // ---- GENERATE STAFF QR (Owner only) ----
+  app.post('/api/merchant/staff/:id/qr', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId: actorId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const target = await prisma.staff.findFirst({ where: { id, tenantId } });
+    if (!target) return reply.status(404).send({ error: 'Staff member not found' });
+
+    const { generateStaffQR } = await import('../../services/merchant-qr.js');
+    const result = await generateStaffQR(id);
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_QR_GENERATED', 'success',
+        ${JSON.stringify({ staffId: id, staffName: target.name, qrSlug: result.qrSlug })}::jsonb, now())
+    `;
+
+    return result;
+  });
+
+  // ---- STAFF PERFORMANCE (Owner only) ----
+  // Aggregates INVOICE_CLAIMED and PRESENCE_VALIDATED credits whose ledger
+  // metadata carries the staffId, grouped per staff. Returns counters for
+  // the last 30 days by default.
+  app.get('/api/merchant/staff-performance', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { days = '30' } = request.query as { days?: string };
+    const since = new Date(Date.now() - Math.max(1, parseInt(days)) * 24 * 60 * 60 * 1000);
+
+    const rows = await prisma.$queryRaw<Array<{
+      staff_id: string;
+      staff_name: string;
+      staff_role: string;
+      transactions: bigint;
+      unique_consumers: bigint;
+      value_issued: string;
+    }>>`
+      SELECT
+        s.id::text AS staff_id,
+        s.name AS staff_name,
+        s.role::text AS staff_role,
+        COUNT(*)::bigint AS transactions,
+        COUNT(DISTINCT le.account_id)::bigint AS unique_consumers,
+        COALESCE(SUM(le.amount), 0)::text AS value_issued
+      FROM ledger_entries le
+      JOIN staff s ON s.id = (le.metadata->>'staffId')::uuid
+      WHERE le.tenant_id = ${tenantId}::uuid
+        AND le.entry_type = 'CREDIT'
+        AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
+        AND le.created_at >= ${since}::timestamptz
+        AND le.metadata->>'staffId' IS NOT NULL
+      GROUP BY s.id, s.name, s.role
+      ORDER BY transactions DESC
+    `;
+
+    return {
+      sinceDays: parseInt(days),
+      staff: rows.map(r => ({
+        staffId: r.staff_id,
+        staffName: r.staff_name,
+        staffRole: r.staff_role,
+        transactions: Number(r.transactions),
+        uniqueConsumers: Number(r.unique_consumers),
+        valueIssued: r.value_issued,
+      })),
+    };
   });
 
   // ---- DEACTIVATE STAFF (Owner only) ----
