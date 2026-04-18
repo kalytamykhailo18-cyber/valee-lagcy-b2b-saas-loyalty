@@ -124,6 +124,7 @@ enum AuditActionType {
   BRANCH_CREATED
   BRANCH_TOGGLED
   BRANCH_QR_GENERATED
+  STAFF_QR_GENERATED
 }
 
 enum AuditOutcome {

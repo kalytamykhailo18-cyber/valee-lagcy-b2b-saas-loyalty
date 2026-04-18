@@ -6,7 +6,7 @@ import Link from 'next/link'
 import {
   MdDashboard, MdQrCodeScanner, MdAccessTime, MdInventory2,
   MdLocalOffer, MdUploadFile, MdPeople, MdStorefront, MdAutorenew,
-  MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups, MdArrowBack,
+  MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups, MdArrowBack, MdBadge,
 } from 'react-icons/md'
 
 interface NavItem {
@@ -27,6 +27,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/merchant/customers', label: 'Clientes', Icon: MdPeople },
   { href: '/merchant/segments', label: 'Segmentos', Icon: MdGroups, ownerOnly: true, preview: true },
   { href: '/merchant/branches', label: 'Sucursales', Icon: MdStorefront, ownerOnly: true },
+  { href: '/merchant/staff', label: 'Cajeros y QR', Icon: MdBadge, ownerOnly: true },
   { href: '/merchant/recurrence', label: 'Recurrencia', Icon: MdAutorenew, ownerOnly: true },
   { href: '/merchant/disputes', label: 'Disputas', Icon: MdFeedback, ownerOnly: true },
   { href: '/merchant/settings', label: 'Configuracion', Icon: MdSettings, ownerOnly: true },

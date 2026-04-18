@@ -294,6 +294,13 @@ export const api = {
     request('/api/merchant/multiplier', { method: 'PUT', body: JSON.stringify({ multiplier, assetTypeId }) }),
   createStaff: (data: any) =>
     request('/api/merchant/staff', { method: 'POST', body: JSON.stringify(data) }),
+  listStaff: () => request('/api/merchant/staff'),
+  deactivateStaff: (id: string) =>
+    request(`/api/merchant/staff/${id}/deactivate`, { method: 'PATCH' }),
+  generateStaffQr: (id: string) =>
+    request(`/api/merchant/staff/${id}/qr`, { method: 'POST' }),
+  getStaffPerformance: (days = 30) =>
+    request(`/api/merchant/staff-performance?days=${days}`),
 
   // Branches
   getBranches: () => request('/api/merchant/branches'),
