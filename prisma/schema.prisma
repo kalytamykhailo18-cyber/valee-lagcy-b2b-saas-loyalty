@@ -188,6 +188,7 @@ model Tenant {
   description      String?      @db.VarChar(1000)
   instagramHandle  String?      @map("instagram_handle") @db.VarChar(100)
   welcomeBonusAmount Int        @default(50) @map("welcome_bonus_amount")
+  referralBonusAmount Int       @default(100) @map("referral_bonus_amount")
   rif              String?      @db.VarChar(50)
   preferredExchangeSource ExchangeSource? @map("preferred_exchange_source")
   referenceCurrency       ReferenceCurrency @default(usd) @map("reference_currency")
@@ -302,6 +303,7 @@ model Account {
   systemAccountType    SystemAccountType? @map("system_account_type")
   level                Int                @default(1)
   welcomeBonusGranted  Boolean            @default(false) @map("welcome_bonus_granted")
+  referralSlug         String?            @unique @map("referral_slug") @db.VarChar(16)
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -312,12 +314,44 @@ model Account {
   auditLogs               AuditLog[]
   disputes                Dispute[]
   recurrenceNotifications RecurrenceNotification[]
+  referralsGiven          Referral[]    @relation("Referrer")
+  referralsReceived       Referral[]    @relation("Referee")
 
   @@unique([tenantId, phoneNumber])
   @@unique([tenantId, cedula])
   @@unique([tenantId, systemAccountType])
   @@index([tenantId, accountType])
   @@map("accounts")
+}
+
+// Consumer-to-consumer referrals. A referrer's personal QR links to a
+// merchant with a `Ref2U:<slug>` marker. When a new consumer scans it and
+// completes their first validated transaction at that merchant, the referrer
+// earns the tenant-configured bonus (or a platform default).
+enum ReferralStatus {
+  pending
+  credited
+  rejected
+}
+
+model Referral {
+  id                String          @id @default(uuid()) @db.Uuid
+  tenantId          String          @map("tenant_id") @db.Uuid
+  referrerAccountId String          @map("referrer_account_id") @db.Uuid
+  refereeAccountId  String          @map("referee_account_id") @db.Uuid
+  status            ReferralStatus  @default(pending)
+  bonusAmount       Decimal?        @map("bonus_amount") @db.Decimal(18, 8)
+  bonusLedgerId     String?         @map("bonus_ledger_id") @db.Uuid
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz
+  creditedAt        DateTime?       @map("credited_at") @db.Timestamptz
+
+  referrer Account @relation("Referrer", fields: [referrerAccountId], references: [id])
+  referee  Account @relation("Referee",  fields: [refereeAccountId],  references: [id])
+
+  @@unique([tenantId, refereeAccountId]) // one referral slot per referee per tenant
+  @@index([tenantId, referrerAccountId])
+  @@index([status, createdAt])
+  @@map("referrals")
 }
 
 // ============================================================

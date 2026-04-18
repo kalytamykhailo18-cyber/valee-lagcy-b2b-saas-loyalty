@@ -1009,6 +1009,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       : await prisma.assetType.findFirst();
     return {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
+      referralBonusAmount: tenant?.referralBonusAmount ?? 100,
       rif: tenant?.rif || null,
       name: tenant?.name || '',
       logoUrl: tenant?.logoUrl || null,
@@ -1030,10 +1031,11 @@ export default async function merchantRoutes(app: FastifyInstance) {
   app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
     const {
-      welcomeBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
+      welcomeBonusAmount, referralBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
       name, address, contactPhone, contactEmail, website, description, instagramHandle,
     } = request.body as {
       welcomeBonusAmount?: number;
+      referralBonusAmount?: number;
       rif?: string;
       preferredExchangeSource?: string | null;
       referenceCurrency?: string;
@@ -1058,6 +1060,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'welcomeBonusAmount must be a non-negative number' });
       }
       data.welcomeBonusAmount = welcomeBonusAmount;
+    }
+    if (referralBonusAmount !== undefined) {
+      if (typeof referralBonusAmount !== 'number' || referralBonusAmount < 0) {
+        return reply.status(400).send({ error: 'referralBonusAmount must be a non-negative number' });
+      }
+      data.referralBonusAmount = referralBonusAmount;
     }
     if (rif !== undefined) {
       if (!rif || (typeof rif === 'string' && !rif.trim())) {

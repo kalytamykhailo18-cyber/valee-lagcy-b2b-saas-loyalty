@@ -130,6 +130,25 @@ export async function generateStaffQR(staffId: string): Promise<{
 }
 
 /**
+ * Generate a consumer's referral QR for a specific merchant. Encodes a
+ * WhatsApp deep link with both the merchant slug AND a `Ref2U:<slug>` marker.
+ * A NEW consumer who scans and interacts will register as a pending referral.
+ */
+export async function generateReferralQR(params: {
+  merchantSlug: string;
+  merchantName: string;
+  referralSlug: string;
+}): Promise<{ deepLink: string; qrPngBase64: string }> {
+  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  const text = encodeURIComponent(
+    `Hola! Me invitaron a ${params.merchantName} en Valee ✨ Ref: ${params.merchantSlug} Ref2U: ${params.referralSlug}`
+  );
+  const deepLink = `https://wa.me/${botPhone}?text=${text}`;
+  const qrBuffer = await generateQRImage(deepLink);
+  return { deepLink, qrPngBase64: qrBuffer.toString('base64') };
+}
+
+/**
  * Generate QR for a specific branch.
  */
 export async function generateBranchQR(branchId: string): Promise<{

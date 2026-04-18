@@ -744,6 +744,20 @@ export async function validateInvoice(params: {
     });
   }
 
+  // Referral credit: if this consumer has a pending referral row, the
+  // referrer earns the tenant's configured bonus now. Idempotent — the
+  // referral row flips to 'credited' and subsequent calls no-op.
+  try {
+    const { tryCreditReferral } = await import('./referrals.js');
+    await tryCreditReferral({
+      tenantId,
+      refereeAccountId: consumerAccount.id,
+      assetTypeId,
+    });
+  } catch (err) {
+    console.error('[Referral] credit failed', err);
+  }
+
   // Generate output token — immediately after INVOICE_CLAIMED, attached to the ledger entry
   const outputToken = generateOutputToken(
     ledgerResult.credit.id,

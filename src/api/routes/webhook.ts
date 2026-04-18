@@ -133,6 +133,22 @@ export default async function webhookRoutes(app: FastifyInstance) {
             await p.$disconnect();
           }
         }
+
+        // If the QR message carries a Ref2U: marker, this is a referral scan.
+        // Record a pending referral row so the referrer gets credited on the
+        // referee's first validated transaction. Silently no-ops if the
+        // referee already has activity or is the referrer themself.
+        const { parseReferralSlug, recordPendingReferral } = await import('../../services/referrals.js');
+        const referrerAccountId = await parseReferralSlug(messageText);
+        if (referrerAccountId) {
+          const { findOrCreateConsumerAccount } = await import('../../services/accounts.js');
+          const { account: referee } = await findOrCreateConsumerAccount(tenantId, formattedPhone);
+          await recordPendingReferral({
+            tenantId,
+            referrerAccountId,
+            refereeAccountId: referee.id,
+          });
+        }
       }
     }
 
