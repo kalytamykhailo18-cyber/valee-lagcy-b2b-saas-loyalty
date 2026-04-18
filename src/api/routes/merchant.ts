@@ -621,7 +621,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       // Invoices can be linked to the account directly (consumer_account_id)
       // OR only carry customer_phone (older CSV rows, before the auto-credit
       // link was added). Match both so older data still shows up.
-      const tail = phoneTail(acc.phoneNumber);
+      const tail = phoneTail(acc.phoneNumber || '');
       const invoiceWhere: any = {
         tenantId,
         OR: [
@@ -680,7 +680,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
     // Get invoice submission history — match by linked account OR by phone
     // tail so CSV rows without consumer_account_id still surface.
-    const tail = phoneTail(account.phoneNumber);
+    const tail = phoneTail(account.phoneNumber || '');
     const invoices = await prisma.invoice.findMany({
       where: {
         tenantId,

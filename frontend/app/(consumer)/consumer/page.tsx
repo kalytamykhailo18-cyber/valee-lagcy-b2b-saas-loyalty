@@ -439,8 +439,8 @@ function ConsumerApp() {
   // on file we deliberately skip the phone fallback — showing the number feels
   // robotic and clutters the hero.
   const greeting = account?.displayName
-    ? `Hola ${account.displayName}`
-    : 'Hola'
+    ? `Hola ${account.displayName.split(/\s+/)[0]}!`
+    : 'Hola!'
   const regularProducts = products.filter((p: any) => !p.cashPrice || Number(p.cashPrice) === 0)
   const hybridProducts = products.filter((p: any) => p.cashPrice && Number(p.cashPrice) > 0)
   const userBalance = parseFloat(balance) - getLocalPendingBalance()
@@ -480,9 +480,24 @@ function ConsumerApp() {
         <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition whitespace-nowrap">Salir</button>
       </div>
 
-      {/* Greeting */}
-      <div className="px-4 pt-5 aa-rise-sm">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-tight">{greeting}</h1>
+      {/* Greeting + logo pair (Valee + merchant logo) */}
+      <div className="px-4 pt-5 aa-rise-sm flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-slate-800 tracking-tight truncate">{greeting}</h1>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Valee badge — small lightning bolt on an indigo chip */}
+          <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-sm" aria-label="Valee" title="Valee">
+            <span className="-mt-0.5">⚡</span>
+          </div>
+          {/* Merchant logo — shown if the merchant configured one */}
+          {account?.merchantLogo && (
+            <img
+              src={account.merchantLogo}
+              alt={account?.merchantName || 'Comercio'}
+              title={account?.merchantName || 'Comercio'}
+              className="w-9 h-9 rounded-full object-cover border border-slate-200 bg-white"
+            />
+          )}
+        </div>
       </div>
 
       {/* Offline indicators */}
@@ -523,23 +538,6 @@ function ConsumerApp() {
             </div>
           )}
 
-          {account?.nextLevelName && account?.pointsToNextLevel > 0 && (
-            <div className="mt-6">
-              <div className="flex items-center justify-between text-[11px] mb-2 text-indigo-100">
-                <span className="font-semibold">{account.levelName}</span>
-                <span className="tabular-nums">{formatPoints(account.pointsToNextLevel)} para {account.nextLevelName}</span>
-              </div>
-              <div className="w-full bg-white/15 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="bg-gradient-to-r from-amber-300 to-white h-1.5 rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
           <button
             onClick={() => setShowHistory(!showHistory)}
             className="mt-5 text-xs font-semibold text-indigo-100 hover:text-white inline-flex items-center gap-1 transition-colors"
@@ -549,6 +547,32 @@ function ConsumerApp() {
           </button>
         </div>
       </section>
+
+      {/* Level progress — slim bar BELOW the balance card (not inside it) */}
+      {account?.nextLevelName && account?.pointsToNextLevel > 0 ? (
+        <div className="mx-4 mt-3 bg-white rounded-xl border border-slate-100 px-4 py-3 shadow-sm">
+          <div className="flex items-center justify-between text-[11px] mb-1.5">
+            <span className="font-semibold text-slate-700">{account.levelName}</span>
+            <span className="tabular-nums text-slate-500">{formatPoints(account.pointsToNextLevel)} para {account.nextLevelName}</span>
+          </div>
+          <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-1.5 rounded-full transition-all"
+              style={{
+                width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`
+              }}
+            />
+          </div>
+        </div>
+      ) : account?.levelName ? (
+        <div className="mx-4 mt-3 bg-white rounded-xl border border-slate-100 px-4 py-2.5 shadow-sm flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Nivel</span>
+          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700">
+            <MdStarRate className="w-4 h-4 text-amber-500" />
+            {account.levelName} · Maximo
+          </span>
+        </div>
+      ) : null}
 
       {/* Transaction History (expandable) */}
       {showHistory && (
@@ -709,6 +733,7 @@ interface MerchantAccount {
   tenantId: string
   tenantName: string
   tenantSlug: string
+  tenantLogoUrl?: string | null
   balance: string
   unitLabel: string
   hasAccount?: boolean
@@ -769,7 +794,7 @@ function MultiMerchantHub() {
 
       <main className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6 lg:py-10">
         <div className="mb-3 sm:mb-4 lg:mb-6 aa-rise-sm">
-          <h1 className="text-xl sm:text-3xl font-bold text-slate-800 tracking-tight">Hola{displayName ? `, ${displayName}` : ''}</h1>
+          <h1 className="text-xl sm:text-3xl font-bold text-slate-800 tracking-tight">{displayName ? `Hola ${displayName.split(/\s+/)[0]}!` : 'Hola!'}</h1>
         </div>
 
         <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 text-white shadow-xl aa-rise overflow-hidden">
@@ -816,11 +841,21 @@ function MultiMerchantHub() {
                         <div className="px-6 pt-6 pb-5 sm:px-7 sm:pt-7 sm:pb-6">
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2 mb-2">
+                                {m.tenantLogoUrl ? (
+                                  <img src={m.tenantLogoUrl} alt={m.tenantName} className="w-8 h-8 rounded-full object-cover border border-slate-200 bg-white flex-shrink-0" />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
+                                    {m.tenantName.charAt(0)}
+                                  </div>
+                                )}
+                                <p className="text-sm font-semibold text-slate-900 truncate">{m.tenantName}</p>
+                              </div>
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 font-semibold mb-1">Saldo</p>
                               <p className="text-[42px] sm:text-5xl font-bold text-slate-900 tracking-tight tabular-nums leading-none break-all">
                                 {formatPoints(m.balance)}
                               </p>
-                              <p className="text-sm text-slate-500 mt-1.5">{m.unitLabel} en <span className="text-slate-900 font-semibold">{m.tenantName}</span></p>
+                              <p className="text-sm text-slate-500 mt-1.5">{m.unitLabel}</p>
                             </div>
                             <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
                           </div>
@@ -870,9 +905,18 @@ function MultiMerchantHub() {
                       >
                         <div className="px-6 pt-6 pb-5 sm:px-7 sm:pt-7 sm:pb-6">
                           <div className="flex items-start justify-between gap-4">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-2xl sm:text-3xl font-bold text-slate-900 tracking-tight truncate">{m.tenantName}</p>
-                              <p className="text-sm text-slate-500 mt-1.5">Gana tus primeros puntos aqui</p>
+                            <div className="min-w-0 flex-1 flex items-center gap-3">
+                              {m.tenantLogoUrl ? (
+                                <img src={m.tenantLogoUrl} alt={m.tenantName} className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white flex-shrink-0" />
+                              ) : (
+                                <div className="w-12 h-12 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
+                                  {m.tenantName.charAt(0)}
+                                </div>
+                              )}
+                              <div className="min-w-0">
+                                <p className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight truncate">{m.tenantName}</p>
+                                <p className="text-sm text-slate-500 mt-0.5">Gana tus primeros puntos aqui</p>
+                              </div>
                             </div>
                             <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
                           </div>

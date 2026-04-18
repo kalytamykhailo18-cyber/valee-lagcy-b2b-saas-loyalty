@@ -380,8 +380,20 @@ export default async function consumerRoutes(app: FastifyInstance) {
   });
 
   // ---- ACCOUNT INFO ----
-  app.get('/api/consumer/account', { preHandler: [requireConsumerAuth] }, async (request) => {
+  app.get('/api/consumer/account', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;
+
+    // Global tokens (issued by tenantless OTP) carry accountId='' and
+    // tenantId=''. findUnique with id='' throws P2023/validation. Fail fast
+    // with a clean 409 so the client can call select-merchant instead of
+    // crashing on 500.
+    if (!accountId || !tenantId) {
+      return reply.status(409).send({
+        error: 'merchant selection required',
+        requiresMerchantSelection: true,
+      });
+    }
+
     const account = await prisma.account.findUnique({ where: { id: accountId } });
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
 
@@ -430,7 +442,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       nextLevelMin: nextLevelInfo?.min || null,
       merchantName: tenant?.name,
       merchantSlug: tenant?.slug,
-      merchantLogo: tenant?.qrCodeUrl || null,
+      merchantLogo: tenant?.logoUrl || null,
     };
   });
 
@@ -523,11 +535,17 @@ export default async function consumerRoutes(app: FastifyInstance) {
         select: { id: true, name: true, photoUrl: true, redemptionCost: true, stock: true },
       });
 
+      const fullTenant = await prisma.tenant.findUnique({
+        where: { id: tenant.id },
+        select: { logoUrl: true },
+      });
+
       return {
         accountId: acc?.id || null,
         tenantId: tenant.id,
         tenantName: tenant.name,
         tenantSlug: tenant.slug,
+        tenantLogoUrl: fullTenant?.logoUrl || null,
         accountType: acc?.accountType || null,
         hasAccount: !!acc,
         balance,

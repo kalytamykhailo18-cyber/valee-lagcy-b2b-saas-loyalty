@@ -311,7 +311,7 @@ export default async function adminRoutes(app: FastifyInstance) {
     const { action, reason } = request.body as { action: 'approve' | 'reject'; reason: string };
     if (!action || !reason) return reply.status(400).send({ error: 'action and reason required' });
 
-    const { resolveManualReview } = await import('../services/reconciliation.js');
+    const { resolveManualReview } = await import('../../services/reconciliation.js');
     const result = await resolveManualReview({
       invoiceId: id, action, reason,
       resolverType: 'admin', resolverId: (request as any).admin.adminId,

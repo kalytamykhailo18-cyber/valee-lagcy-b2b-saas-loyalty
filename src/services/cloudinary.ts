@@ -29,7 +29,7 @@ export async function uploadImage(
   const signature = createHash('sha1').update(paramsToSign).digest('hex');
 
   const formData = new FormData();
-  formData.append('file', new Blob([imageBuffer]));
+  formData.append('file', new Blob([new Uint8Array(imageBuffer)]));
   formData.append('folder', folder);
   formData.append('timestamp', timestamp);
   formData.append('api_key', config.apiKey);

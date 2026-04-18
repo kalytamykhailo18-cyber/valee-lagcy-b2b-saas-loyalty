@@ -9,7 +9,7 @@ import type { LedgerEntry } from '@prisma/client';
 
 export interface LedgerWriteParams {
   tenantId: string;
-  eventType: 'INVOICE_CLAIMED' | 'REDEMPTION_PENDING' | 'REDEMPTION_CONFIRMED' | 'REDEMPTION_EXPIRED' | 'REVERSAL' | 'ADJUSTMENT_MANUAL' | 'TRANSFER_P2P';
+  eventType: 'INVOICE_CLAIMED' | 'REDEMPTION_PENDING' | 'REDEMPTION_CONFIRMED' | 'REDEMPTION_EXPIRED' | 'REVERSAL' | 'ADJUSTMENT_MANUAL' | 'TRANSFER_P2P' | 'PRESENCE_VALIDATED';
   debitAccountId: string;
   creditAccountId: string;
   amount: string;

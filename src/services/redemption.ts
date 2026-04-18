@@ -231,6 +231,7 @@ export async function processRedemption(params: {
   message: string;
   productName?: string;
   amount?: string;
+  cashAmount?: string;
 }> {
   const hmacSecret = process.env.HMAC_SECRET;
   if (!hmacSecret) throw new Error('HMAC_SECRET not configured');

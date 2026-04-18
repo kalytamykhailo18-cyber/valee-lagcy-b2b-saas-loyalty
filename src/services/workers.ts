@@ -4,7 +4,7 @@
  */
 
 import { Queue, Worker } from 'bullmq';
-import IORedis from 'ioredis';
+import { Redis as IORedis } from 'ioredis';
 import { processCSV } from './csv-upload.js';
 import { runReconciliation } from './reconciliation.js';
 import { expireRedemption } from './redemption.js';
