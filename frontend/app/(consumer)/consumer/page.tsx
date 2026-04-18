@@ -688,7 +688,7 @@ function ConsumerApp() {
       {activeCodesCount > 0 && (
         <Link
           href="/my-codes"
-          className="block mx-4 mb-24 bg-amber-50 border border-amber-300 rounded-xl p-4 hover:bg-amber-100 transition"
+          className="block mx-4 mt-4 bg-amber-50 border border-amber-300 rounded-xl p-4 hover:bg-amber-100 transition"
         >
           <div className="flex items-center justify-between">
             <div>
@@ -699,6 +699,20 @@ function ConsumerApp() {
           </div>
         </Link>
       )}
+
+      {/* Invite friends — viral growth entry point */}
+      <Link
+        href="/invite"
+        className="block mx-4 mt-3 mb-24 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-2xl p-4 hover:from-indigo-700 hover:to-indigo-900 transition shadow-sm"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex-1">
+            <p className="font-bold text-sm">Invita amigos, gana puntos</p>
+            <p className="text-indigo-200 text-xs mt-0.5">Comparte tu QR personal y ganas cuando hagan su primera compra.</p>
+          </div>
+          <MdChevronRight className="w-6 h-6 text-indigo-200 flex-shrink-0" />
+        </div>
+      </Link>
 
       {/* Bottom Fixed Actions */}
       <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg z-10 aa-rise-sm">

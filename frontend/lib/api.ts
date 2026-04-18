@@ -154,6 +154,10 @@ export const api = {
     request('/api/consumer/redeem', { method: 'POST', body: JSON.stringify({ productId, assetTypeId }) }),
   getActiveRedemptions: () => request('/api/consumer/active-redemptions'),
 
+  // Referrals — consumer invites friends, earns tenant-configured bonus on friend's first claim
+  getReferralQr: () => request('/api/consumer/referral-qr'),
+  getReferrals: () => request('/api/consumer/referrals'),
+
   // Consumer image upload (for dispute screenshots)
   uploadConsumerImage: async (file: File): Promise<{ success: boolean; url: string }> => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
