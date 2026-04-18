@@ -289,6 +289,167 @@ export default async function adminRoutes(app: FastifyInstance) {
     };
   });
 
+  // ---- EXEC DASHBOARD (Admin) ----
+  // Aggregates everything Eric needs to eyeball the business health at a glance:
+  // platform-wide counters, weekly transaction trend, top merchants by volume,
+  // top consumers by LTV (cross-tenant), and a churn list (active merchants with
+  // no transactions in the last N days).
+  app.get('/api/admin/exec-dashboard', { preHandler: [requireAdminAuth] }, async (request) => {
+    const { idleDays = '14', weeks = '8' } = request.query as { idleDays?: string; weeks?: string };
+    const idleCutoff = new Date(Date.now() - Math.max(1, parseInt(idleDays)) * 24 * 60 * 60 * 1000);
+    const weeksBack = Math.min(52, Math.max(1, parseInt(weeks)));
+    const since = new Date(Date.now() - weeksBack * 7 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgoExec = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+
+    // Platform-wide scalars (duplicated here so this endpoint is self-contained
+    // and doesn't depend on the older /metrics endpoint's scope).
+    const activeTenants = await prisma.tenant.count({ where: { status: 'active' } });
+    const [shadowCount] = await prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*)::bigint AS count FROM accounts WHERE account_type = 'shadow'
+    `;
+    const [verifiedCount] = await prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*)::bigint AS count FROM accounts WHERE account_type = 'verified'
+    `;
+    const [totalCirculation] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(
+        SUM(CASE WHEN entry_type = 'CREDIT' AND status != 'reversed' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN entry_type = 'DEBIT' AND status != 'reversed' THEN amount ELSE 0 END),
+        0
+      )::text AS total
+      FROM ledger_entries
+      WHERE account_id IN (SELECT id FROM accounts WHERE account_type IN ('shadow', 'verified'))
+    `;
+    const validationsLast30 = await prisma.ledgerEntry.count({
+      where: {
+        eventType: 'INVOICE_CLAIMED',
+        entryType: 'CREDIT',
+        createdAt: { gte: thirtyDaysAgoExec },
+      },
+    });
+
+    const [valueIssued] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(amount), 0)::text AS total
+      FROM ledger_entries
+      WHERE event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' AND status != 'reversed'
+    `;
+    const [valueRedeemed] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(amount), 0)::text AS total
+      FROM ledger_entries
+      WHERE event_type IN ('REDEMPTION_PENDING', 'REDEMPTION_CONFIRMED')
+        AND entry_type = 'DEBIT' AND status != 'reversed'
+    `;
+
+    // Weekly transactions (last N weeks) — credits on invoice or presence
+    const weeklyTx = await prisma.$queryRaw<Array<{ week: Date; count: bigint; value: string }>>`
+      SELECT DATE_TRUNC('week', created_at) AS week,
+             COUNT(*)::bigint AS count,
+             COALESCE(SUM(amount), 0)::text AS value
+      FROM ledger_entries
+      WHERE created_at >= ${since}::timestamptz
+        AND entry_type = 'CREDIT'
+        AND event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
+        AND status != 'reversed'
+      GROUP BY week
+      ORDER BY week ASC
+    `;
+
+    // Top merchants by 30-day volume
+    const topMerchants = await prisma.$queryRaw<Array<{
+      tenant_id: string; tenant_name: string; tenant_slug: string;
+      tx: bigint; value_issued: string; unique_consumers: bigint;
+    }>>`
+      SELECT t.id::text AS tenant_id, t.name AS tenant_name, t.slug AS tenant_slug,
+             COUNT(le.*)::bigint AS tx,
+             COALESCE(SUM(le.amount), 0)::text AS value_issued,
+             COUNT(DISTINCT le.account_id)::bigint AS unique_consumers
+      FROM tenants t
+      LEFT JOIN ledger_entries le ON le.tenant_id = t.id
+        AND le.entry_type = 'CREDIT'
+        AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
+        AND le.status != 'reversed'
+        AND le.created_at >= ${thirtyDaysAgoExec}::timestamptz
+      WHERE t.status = 'active'
+      GROUP BY t.id, t.name, t.slug
+      ORDER BY tx DESC NULLS LAST
+      LIMIT 10
+    `;
+
+    // Top consumers cross-tenant by lifetime points issued (credits)
+    const topConsumers = await prisma.$queryRaw<Array<{
+      phone_number: string; display_name: string | null;
+      tenants_count: bigint; lifetime_earned: string;
+    }>>`
+      SELECT a.phone_number, MAX(a.display_name) AS display_name,
+             COUNT(DISTINCT a.tenant_id)::bigint AS tenants_count,
+             COALESCE(SUM(le.amount), 0)::text AS lifetime_earned
+      FROM accounts a
+      JOIN ledger_entries le ON le.account_id = a.id
+      WHERE a.account_type IN ('shadow', 'verified')
+        AND le.entry_type = 'CREDIT'
+        AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED', 'ADJUSTMENT_MANUAL')
+        AND le.status != 'reversed'
+      GROUP BY a.phone_number
+      ORDER BY SUM(le.amount) DESC
+      LIMIT 10
+    `;
+
+    // Churn watch: active tenants whose most recent credit is older than idleCutoff
+    const churn = await prisma.$queryRaw<Array<{
+      tenant_id: string; tenant_name: string; tenant_slug: string;
+      last_tx_at: Date | null; days_idle: number;
+    }>>`
+      SELECT t.id::text AS tenant_id, t.name AS tenant_name, t.slug AS tenant_slug,
+             MAX(le.created_at) AS last_tx_at,
+             COALESCE(EXTRACT(EPOCH FROM (NOW() - MAX(le.created_at))) / 86400, 9999)::int AS days_idle
+      FROM tenants t
+      LEFT JOIN ledger_entries le ON le.tenant_id = t.id
+        AND le.entry_type = 'CREDIT'
+        AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
+        AND le.status != 'reversed'
+      WHERE t.status = 'active'
+      GROUP BY t.id, t.name, t.slug
+      HAVING MAX(le.created_at) IS NULL OR MAX(le.created_at) < ${idleCutoff}::timestamptz
+      ORDER BY days_idle DESC
+    `;
+
+    return {
+      activeTenants,
+      totalConsumers: Number(shadowCount.count) + Number(verifiedCount.count),
+      verifiedConsumers: Number(verifiedCount.count),
+      valueIssued: valueIssued.total,
+      valueRedeemed: valueRedeemed.total,
+      valueInCirculation: totalCirculation.total,
+      validationsLast30Days: validationsLast30,
+      weeklyTx: weeklyTx.map(r => ({
+        week: r.week,
+        count: Number(r.count),
+        value: r.value,
+      })),
+      topMerchants: topMerchants.map(r => ({
+        tenantId: r.tenant_id,
+        tenantName: r.tenant_name,
+        tenantSlug: r.tenant_slug,
+        transactions: Number(r.tx),
+        valueIssued: r.value_issued,
+        uniqueConsumers: Number(r.unique_consumers),
+      })),
+      topConsumers: topConsumers.map(r => ({
+        phoneNumber: r.phone_number,
+        displayName: r.display_name,
+        tenantsCount: Number(r.tenants_count),
+        lifetimeEarned: r.lifetime_earned,
+      })),
+      churn: churn.map(r => ({
+        tenantId: r.tenant_id,
+        tenantName: r.tenant_name,
+        tenantSlug: r.tenant_slug,
+        lastTxAt: r.last_tx_at,
+        daysIdle: Number(r.days_idle),
+      })),
+      idleThresholdDays: parseInt(idleDays),
+    };
+  });
+
   // ---- MANUAL REVIEW QUEUE (Admin — cross-tenant) ----
   app.get('/api/admin/manual-review', { preHandler: [requireAdminAuth] }, async (request) => {
     const { tenantId } = request.query as any;

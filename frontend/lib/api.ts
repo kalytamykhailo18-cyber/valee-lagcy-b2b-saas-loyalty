@@ -347,4 +347,6 @@ export const api = {
   manualAdjustment: (data: any) =>
     request('/api/admin/manual-adjustment', { method: 'POST', body: JSON.stringify(data) }),
   getMetrics: () => request('/api/admin/metrics'),
+  getExecDashboard: (idleDays = 14, weeks = 8) =>
+    request(`/api/admin/exec-dashboard?idleDays=${idleDays}&weeks=${weeks}`),
 };
