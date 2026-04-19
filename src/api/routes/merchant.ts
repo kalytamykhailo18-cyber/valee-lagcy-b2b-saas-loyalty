@@ -711,6 +711,42 @@ export default async function merchantRoutes(app: FastifyInstance) {
       take: 20,
     });
 
+    // Currency display: tenant invoices are stored in Bs but the merchant
+    // reads dollars or euros depending on their preferred exchange source.
+    // Compute one representative rate per invoice using the transactionDate
+    // (or upload date) so the display matches the value at the time of sale.
+    const tenantForCurrency = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { preferredExchangeSource: true, referenceCurrency: true },
+    });
+    const refCurrency = tenantForCurrency?.referenceCurrency || 'usd';
+    const currencySymbol = refCurrency === 'eur' ? '€' : '$';
+    const exchangeSource = tenantForCurrency?.preferredExchangeSource || null;
+    const { getRateAtDate } = await import('../../services/exchange-rates.js');
+
+    const invoicesOut = await Promise.all(invoices.map(async (i) => {
+      let normalizedAmount: string | null = null;
+      if (exchangeSource && refCurrency) {
+        const date = i.transactionDate || i.createdAt;
+        const rate = await getRateAtDate(exchangeSource as any, refCurrency as any, date);
+        if (rate && rate.rateBs > 0) {
+          normalizedAmount = (Number(i.amount) / rate.rateBs).toFixed(2);
+        }
+      }
+      return {
+        id: i.id,
+        invoiceNumber: i.invoiceNumber,
+        amount: i.amount.toString(),                        // raw Bs
+        amountInReference: normalizedAmount,                 // converted (may be null if no rate)
+        currencySymbol,                                      // $ or €
+        status: i.status,
+        transactionDate: i.transactionDate,
+        uploadedAt: i.createdAt,
+        createdAt: i.createdAt,
+        branch: i.branch ? { id: i.branch.id, name: i.branch.name } : null,
+      };
+    }));
+
     return {
       account: {
         id: account.id,
@@ -722,6 +758,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
         createdAt: account.createdAt,
       },
       balance,
+      currencySymbol,
       history: history.map(e => ({
         id: e.id,
         eventType: e.eventType,
@@ -730,16 +767,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
         status: e.status,
         createdAt: e.createdAt,
       })),
-      invoices: invoices.map(i => ({
-        id: i.id,
-        invoiceNumber: i.invoiceNumber,
-        amount: i.amount.toString(),
-        status: i.status,
-        transactionDate: i.transactionDate,
-        uploadedAt: i.createdAt,
-        createdAt: i.createdAt,
-        branch: i.branch ? { id: i.branch.id, name: i.branch.name } : null,
-      })),
+      invoices: invoicesOut,
     };
   });
 

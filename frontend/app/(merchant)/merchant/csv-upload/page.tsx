@@ -296,7 +296,7 @@ export default function CsvUploadPage() {
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
                     <span className="font-bold text-slate-800 tabular-nums">
-                      ${formatCash(inv.amount)}
+                      Bs {formatCash(inv.amount)}
                     </span>
                     <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS_STYLE[inv.status] || 'bg-slate-100 text-slate-600'}`}>
                       {STATUS_LABEL[inv.status] || inv.status}

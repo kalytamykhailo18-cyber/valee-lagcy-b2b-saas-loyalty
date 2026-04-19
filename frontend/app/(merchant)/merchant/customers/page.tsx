@@ -346,7 +346,11 @@ export default function CustomersPage() {
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">
-                            <p className="text-sm font-semibold">${formatCash(inv.amount)}</p>
+                            <p className="text-sm font-semibold">
+                              {inv.amountInReference
+                                ? `${inv.currencySymbol || '$'}${formatCash(inv.amountInReference)}`
+                                : `Bs ${formatCash(inv.amount)}`}
+                            </p>
                             <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{inv.status}</span>
                           </div>
                         </div>
