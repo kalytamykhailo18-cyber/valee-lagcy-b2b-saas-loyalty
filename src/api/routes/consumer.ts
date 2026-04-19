@@ -218,6 +218,19 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
   });
 
+  // ---- AUTH: Logout ----
+  // Clears the httpOnly access + refresh cookies the server set on OTP verify.
+  // Without this, the frontend's logout() only purged localStorage while the
+  // server-side cookie stayed alive — next request would still authenticate
+  // via the stale cookie, leaving the user apparently "logged in" under a
+  // prior identity. Also unauthenticated calls succeed (the caller may have
+  // already lost their token client-side).
+  app.post('/api/consumer/auth/logout', async (_request, reply) => {
+    reply.clearCookie('accessToken', { path: '/' });
+    reply.clearCookie('refreshToken', { path: '/api/consumer/auth/refresh' });
+    return { success: true };
+  });
+
   // ---- BALANCE ----
   app.get('/api/consumer/balance', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;

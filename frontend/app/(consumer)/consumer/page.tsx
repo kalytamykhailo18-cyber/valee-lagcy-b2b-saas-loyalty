@@ -273,7 +273,12 @@ function ConsumerApp() {
     localStorage.setItem('welcomeDismissed', 'true')
   }
 
-  function logout() {
+  async function logout() {
+    // Hit the server logout BEFORE clearing localStorage so the httpOnly
+    // cookies get cleared. Without this the cookie stays alive and the
+    // server authenticates the next request as the prior user, so the UI
+    // looks logged out but API calls still hit the old session.
+    try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
     window.location.href = '/'
@@ -780,7 +785,8 @@ function MultiMerchantHub() {
     })()
   }, [])
 
-  function logout() {
+  async function logout() {
+    try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
     window.location.href = '/'
