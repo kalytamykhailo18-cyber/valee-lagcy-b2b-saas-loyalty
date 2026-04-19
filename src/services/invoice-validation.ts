@@ -275,16 +275,14 @@ export async function validateInvoice(params: {
     const dateKey = (extracted.transaction_date || new Date().toISOString().split('T')[0]).replace(/-/g, '');
     const timeKey = (extracted.transaction_time || '').replace(/:/g, '');
 
-    if (!timeKey || timeKey.length < 4) {
-      // No time visible on the voucher — cannot build a safe synthetic reference.
-      // Route to manual review so a human decides.
-      return {
-        success: false,
-        stage: 'extraction',
-        message: 'El voucher no muestra hora. Por favor envia una foto mas clara o espera que un cajero lo valide.',
-        status: 'manual_review',
-      };
-    }
+    // The time was an extra safety layer for deduping two different purchases
+    // made the same day for the same amount. The image-content hash and OCR
+    // hash already make collisions astronomically unlikely (different photos
+    // produce different fingerprints even if they're of the same receipt).
+    // If no time is extractable (bank vouchers like Banco Venezuela print it
+    // in non-standard formats Claude can't always parse), we still accept
+    // the voucher — just use a zero placeholder in the reference.
+    const safeTimeKey = timeKey && timeKey.length >= 4 ? timeKey : '000000';
 
     const amountCents = Math.round(extracted.total_amount * 100);
     const ocrFingerprint = ocrRawText
@@ -295,7 +293,7 @@ export async function validateInvoice(params: {
       : '000000000000';
 
     extracted.invoice_number =
-      `VOUCHER-${dateKey}-${timeKey}-${amountCents}-${ocrFingerprint}-${imageFingerprint}`;
+      `VOUCHER-${dateKey}-${safeTimeKey}-${amountCents}-${ocrFingerprint}-${imageFingerprint}`;
 
     console.log('[Validation] Generated synthetic voucher reference:', extracted.invoice_number);
   }
@@ -423,9 +421,19 @@ export async function validateInvoice(params: {
     };
 
     const senderDigits = senderPhone.replace(/\D/g, '').slice(-10);
-    const invoicePhoneDigits = extracted.customer_phone
-      ? extracted.customer_phone.replace(/\D/g, '').slice(-10)
+
+    // Only treat the extracted "phone" as a phone if it actually looks like a
+    // Venezuelan mobile — 10 digits starting with 412/414/416/424/426 (with or
+    // without leading 0), or the +58 form. Bank vouchers print RIFs, AFILs,
+    // card numbers, and transaction refs that Claude sometimes returns in the
+    // customer_phone slot; identity-matching those against the sender rejects
+    // legitimate receipts.
+    const VE_MOBILE_RE = /^(58)?0?4(12|14|16|24|26)\d{7}$/;
+    const rawPhone = extracted.customer_phone ? extracted.customer_phone.replace(/\D/g, '') : null;
+    const invoicePhoneDigits = rawPhone && VE_MOBILE_RE.test(rawPhone)
+      ? rawPhone.slice(-10)
       : null;
+
     const invoiceCedula = extracted.customer_cedula
       ? extracted.customer_cedula.replace(/\D/g, '')
       : null;
