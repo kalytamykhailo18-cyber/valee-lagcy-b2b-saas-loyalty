@@ -414,6 +414,23 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const product = await prisma.product.findFirst({ where: { id, tenantId } });
     if (!product) return reply.status(404).send({ error: 'Product not found' });
 
+    const newStock = data.stock != null ? parseInt(data.stock) : product.stock;
+
+    // Stock auto-toggles active:
+    //   stock → 0  : auto-deactivate (product vanishes from consumer catalog)
+    //   stock 0→>0 : auto-reactivate IF the merchant didn't pass an explicit
+    //                active=false in this request. Otherwise merchant intent wins.
+    let nextActive: boolean;
+    if (data.active !== undefined) {
+      nextActive = !!data.active;
+    } else if (newStock <= 0) {
+      nextActive = false;
+    } else if (product.stock <= 0 && newStock > 0) {
+      nextActive = true;
+    } else {
+      nextActive = product.active;
+    }
+
     const updated = await prisma.product.update({
       where: { id },
       data: {
@@ -422,9 +439,9 @@ export default async function merchantRoutes(app: FastifyInstance) {
         photoUrl: data.photoUrl ?? product.photoUrl,
         redemptionCost: data.redemptionCost ?? product.redemptionCost,
         cashPrice: data.cashPrice !== undefined ? (data.cashPrice || null) : product.cashPrice,
-        stock: data.stock != null ? parseInt(data.stock) : product.stock,
+        stock: newStock,
         minLevel: data.minLevel != null ? parseInt(data.minLevel) : product.minLevel,
-        active: data.active ?? product.active,
+        active: nextActive,
       },
     });
 
