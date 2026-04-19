@@ -20,7 +20,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { href: '/merchant', label: 'Panel', Icon: MdDashboard },
   { href: '/merchant/scanner', label: 'Escaner de canje', Icon: MdQrCodeScanner },
-  { href: '/merchant/dual-scan', label: 'Sin factura', Icon: MdAccessTime },
+  { href: '/merchant/dual-scan', label: 'Pago en efectivo', Icon: MdAccessTime },
   { href: '/merchant/products', label: 'Productos', Icon: MdInventory2, ownerOnly: true },
   { href: '/merchant/hybrid-deals', label: 'Promociones hibridas', Icon: MdLocalOffer, ownerOnly: true },
   { href: '/merchant/csv-upload', label: 'Cargar CSV', Icon: MdUploadFile, ownerOnly: true },

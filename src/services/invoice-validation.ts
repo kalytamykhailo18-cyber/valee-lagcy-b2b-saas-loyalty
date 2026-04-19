@@ -480,6 +480,22 @@ export async function validateInvoice(params: {
     }
   }
 
+  // Pre-Stage-C: resolve staff + branch attribution from recent scan sessions
+  // so both the matched-invoice path and the provisional path can carry them.
+  const stageCStaffWindowMin = parseInt(process.env.STAFF_ATTRIBUTION_WINDOW_MIN || '60');
+  const stageCStaffCutoff = new Date(Date.now() - stageCStaffWindowMin * 60 * 1000);
+  const preStageStaffScan = await prisma.staffScanSession.findFirst({
+    where: { tenantId, consumerPhone: senderPhone, scannedAt: { gte: stageCStaffCutoff } },
+    orderBy: { scannedAt: 'desc' },
+  });
+  let preStageStaffId: string | null = preStageStaffScan?.staffId || null;
+  let preStageStaffBranchId: string | null = null;
+  if (preStageStaffId) {
+    const sRow = await prisma.staff.findUnique({ where: { id: preStageStaffId }, select: { branchId: true } });
+    if (sRow?.branchId) preStageStaffBranchId = sRow.branchId;
+  }
+  const effectiveBranchForPending = params.branchId || preStageStaffBranchId || null;
+
   // STAGE C: Merchant data cross-reference
   // The invoice number is THE uniqueness key. Once an invoice number has been
   // processed (in any state) it cannot be re-used, ever. Amount is NEVER used
@@ -502,7 +518,8 @@ export async function validateInvoice(params: {
       latitude: params.latitude,
       longitude: params.longitude,
       imageHash: imageHash || undefined,
-      branchId: params.branchId || null,
+      branchId: effectiveBranchForPending,
+      staffId: preStageStaffId,
     });
     return provisional;
   }
@@ -705,16 +722,26 @@ export async function validateInvoice(params: {
   // Staff attribution: if this consumer scanned a cashier/promoter QR within
   // the attribution window, credit the invoice to that staff for performance
   // reporting. Reads the most recent StaffScanSession for this phone+tenant.
+  // We also inherit the staff's assigned branchId when the invoice has no
+  // branch of its own — this covers the common case of a user scanning the
+  // cashier's QR (which carries only Cjr:, no /branchId) and then sending
+  // their invoice.
   const staffAttrWindowMin = parseInt(process.env.STAFF_ATTRIBUTION_WINDOW_MIN || '60');
   const staffCutoff = new Date(Date.now() - staffAttrWindowMin * 60 * 1000);
   const lastStaffScan = await prisma.staffScanSession.findFirst({
     where: { tenantId, consumerPhone: senderPhone, scannedAt: { gte: staffCutoff } },
     orderBy: { scannedAt: 'desc' },
   });
+  let staffInheritedBranchId: string | null = null;
   if (lastStaffScan) {
     ledgerMetadata.staffId = lastStaffScan.staffId;
     ledgerMetadata.staffAttributionScanAt = lastStaffScan.scannedAt.toISOString();
     console.log(`[StaffAttribution] Invoice credited to staff ${lastStaffScan.staffId} (scan at ${lastStaffScan.scannedAt.toISOString()})`);
+    const staffRow = await prisma.staff.findUnique({
+      where: { id: lastStaffScan.staffId },
+      select: { branchId: true },
+    });
+    if (staffRow?.branchId) staffInheritedBranchId = staffRow.branchId;
   }
 
   const ledgerResult = await writeDoubleEntry({
@@ -726,13 +753,14 @@ export async function validateInvoice(params: {
     assetTypeId,
     referenceId: extracted.invoice_number,
     referenceType: 'invoice',
-    branchId: invoice.branchId || params.branchId || null,
+    branchId: invoice.branchId || params.branchId || staffInheritedBranchId || null,
     latitude: params.latitude || null,
     longitude: params.longitude || null,
     deviceId: params.deviceId || null,
     metadata: Object.keys(ledgerMetadata).length > 0 ? ledgerMetadata : undefined,
   });
 
+  const resolvedBranchId = invoice.branchId || params.branchId || staffInheritedBranchId || null;
   await prisma.invoice.update({
     where: { id: invoice.id },
     data: {
@@ -740,6 +768,10 @@ export async function validateInvoice(params: {
       consumerAccountId: consumerAccount.id,
       ledgerEntryId: ledgerResult.credit.id,
       ocrRawText: ocrRawText || undefined,
+      // Only set branchId if the invoice row didn't already have one and
+      // we resolved one from the scan context — don't overwrite explicit
+      // CSV-uploaded branches.
+      ...(invoice.branchId ? {} : resolvedBranchId ? { branchId: resolvedBranchId } : {}),
     },
   });
 
@@ -851,6 +883,7 @@ export async function createPendingValidation(params: {
   longitude?: string | null;
   imageHash?: string;
   branchId?: string | null;
+  staffId?: string | null;
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, invoiceNumber, totalAmount, assetTypeId } = params;
 
@@ -945,6 +978,9 @@ export async function createPendingValidation(params: {
 
   let ledgerResult;
   try {
+    const pendingMetadata: Record<string, unknown> = {};
+    if (params.imageHash) pendingMetadata.imageHash = params.imageHash;
+    if (params.staffId) pendingMetadata.staffId = params.staffId;
     ledgerResult = await writeDoubleEntry({
       tenantId,
       eventType: 'INVOICE_CLAIMED',
@@ -958,7 +994,7 @@ export async function createPendingValidation(params: {
       branchId: params.branchId || null,
       latitude: params.latitude || null,
       longitude: params.longitude || null,
-      metadata: params.imageHash ? { imageHash: params.imageHash } : undefined,
+      metadata: Object.keys(pendingMetadata).length > 0 ? pendingMetadata : undefined,
     });
   } catch (err: any) {
     // Unique constraint violation (P2002): another request committed the same

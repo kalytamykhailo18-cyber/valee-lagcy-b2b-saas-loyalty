@@ -124,7 +124,7 @@ export default function DualScanPage() {
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
       <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
-        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Transaccion sin factura</h1>
+        <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Pago en efectivo</h1>
         <p className="text-sm text-slate-500 mt-1">Genera un codigo QR temporal para clientes que pagan sin recibo (efectivo, Pago Movil, Zelle)</p>
       </div>
 
