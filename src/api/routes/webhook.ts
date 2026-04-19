@@ -253,6 +253,7 @@ export default async function webhookRoutes(app: FastifyInstance) {
     const responses = await handleIncomingMessage({
       phoneNumber: formattedPhone,
       tenantId,
+      branchId,
       messageType,
       messageText: messageType === 'text' ? messageText : undefined,
       imageBuffer,

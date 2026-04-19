@@ -67,6 +67,7 @@ export async function validateInvoice(params: {
   longitude?: string | null;
   deviceId?: string | null;
   assetTypeId: string;
+  branchId?: string | null;
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, assetTypeId } = params;
 
@@ -493,6 +494,7 @@ export async function validateInvoice(params: {
       latitude: params.latitude,
       longitude: params.longitude,
       imageHash: imageHash || undefined,
+      branchId: params.branchId || null,
     });
     return provisional;
   }
@@ -716,7 +718,7 @@ export async function validateInvoice(params: {
     assetTypeId,
     referenceId: extracted.invoice_number,
     referenceType: 'invoice',
-    branchId: invoice.branchId || null,
+    branchId: invoice.branchId || params.branchId || null,
     latitude: params.latitude || null,
     longitude: params.longitude || null,
     deviceId: params.deviceId || null,
@@ -840,6 +842,7 @@ export async function createPendingValidation(params: {
   latitude?: string | null;
   longitude?: string | null;
   imageHash?: string;
+  branchId?: string | null;
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, invoiceNumber, totalAmount, assetTypeId } = params;
 
@@ -944,6 +947,7 @@ export async function createPendingValidation(params: {
       referenceId: `PENDING-${invoiceNumber}`,
       referenceType: 'invoice',
       status: 'provisional',
+      branchId: params.branchId || null,
       latitude: params.latitude || null,
       longitude: params.longitude || null,
       metadata: params.imageHash ? { imageHash: params.imageHash } : undefined,
@@ -974,9 +978,9 @@ export async function createPendingValidation(params: {
   await prisma.$executeRawUnsafe(
     `INSERT INTO invoices (id, tenant_id, invoice_number, amount, customer_phone, status, source,
       consumer_account_id, ledger_entry_id, ocr_raw_text, extracted_data,
-      submitted_latitude, submitted_longitude, created_at, updated_at)
+      submitted_latitude, submitted_longitude, branch_id, created_at, updated_at)
     VALUES (gen_random_uuid(), $1::uuid, $2, $3, $4, 'pending_validation', $5::"InvoiceSource",
-      $6::uuid, $7::uuid, $8, $9::jsonb, $10::decimal, $11::decimal, now(), now())
+      $6::uuid, $7::uuid, $8, $9::jsonb, $10::decimal, $11::decimal, $12::uuid, now(), now())
     ON CONFLICT (tenant_id, invoice_number) DO NOTHING`,
     tenantId,
     invoiceNumber,
@@ -989,6 +993,7 @@ export async function createPendingValidation(params: {
     params.extractedData ? JSON.stringify(params.extractedData) : null,
     params.latitude || null,
     params.longitude || null,
+    params.branchId || null,
   );
 
   const newBalance = await getAccountBalance(consumerAccount.id, assetTypeId, tenantId);

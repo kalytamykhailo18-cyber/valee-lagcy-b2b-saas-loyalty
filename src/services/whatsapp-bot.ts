@@ -327,6 +327,7 @@ export async function parseMerchantIdentifier(messageText: string): Promise<{
 export async function handleIncomingMessage(params: {
   phoneNumber: string;
   tenantId: string;
+  branchId?: string | null;
   messageType: 'text' | 'image';
   messageText?: string;
   imageBuffer?: Buffer;
@@ -424,6 +425,7 @@ export async function handleIncomingMessage(params: {
       extractedData,
       ocrRawText: ocrRawText || undefined,
       imageBuffer: params.imageBuffer,
+      branchId: params.branchId || null,
     });
 
     if (result.success) {
