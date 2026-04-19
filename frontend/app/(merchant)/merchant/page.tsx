@@ -236,7 +236,15 @@ export default function MerchantDashboard() {
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
               <select
                 value={selectedBranch}
-                onChange={e => setSelectedBranch(e.target.value)}
+                onChange={e => {
+                  const v = e.target.value
+                  setSelectedBranch(v)
+                  // Keep the transactions list in sync with the top selector.
+                  // '_unassigned' in the top selector maps to "sin sucursal"
+                  // for metrics but the transactions query only accepts real
+                  // branch ids or empty (= todas), so we clear in that case.
+                  setTxFilters(f => ({ ...f, branchId: v === '_unassigned' ? '' : v }))
+                }}
                 className="aa-field aa-field-emerald w-full mt-2 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               >
                 <option value="">Todas las sucursales (total comercio)</option>
