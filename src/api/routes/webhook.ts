@@ -160,12 +160,32 @@ export default async function webhookRoutes(app: FastifyInstance) {
         const referrerAccountId = await parseReferralSlug(messageText);
         if (referrerAccountId) {
           const { findOrCreateConsumerAccount } = await import('../../services/accounts.js');
-          const { account: referee } = await findOrCreateConsumerAccount(tenantId, formattedPhone);
+          const { account: referee, created } = await findOrCreateConsumerAccount(tenantId, formattedPhone);
           await recordPendingReferral({
             tenantId,
             referrerAccountId,
             refereeAccountId: referee.id,
           });
+          // Grant the welcome bonus here — otherwise handleIncomingMessage
+          // later sees created=false (the row already exists) and skips the
+          // bonus branch entirely. Users arriving via a referral link were
+          // silently missing their welcome points.
+          if (created) {
+            const { grantWelcomeBonus } = await import('../../services/welcome-bonus.js');
+            const { PrismaClient } = await import('@prisma/client');
+            const p = new PrismaClient();
+            try {
+              const cfg = await p.tenantAssetConfig.findFirst({ where: { tenantId } });
+              const assetType = cfg
+                ? await p.assetType.findUnique({ where: { id: cfg.assetTypeId } })
+                : await p.assetType.findFirst();
+              if (assetType) {
+                await grantWelcomeBonus(referee.id, tenantId, assetType.id);
+              }
+            } finally {
+              await p.$disconnect();
+            }
+          }
         }
       }
     }
