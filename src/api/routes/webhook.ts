@@ -118,6 +118,24 @@ export default async function webhookRoutes(app: FastifyInstance) {
         tenantId = merchantInfo.tenantId;
         branchId = merchantInfo.branchId;
 
+        // Stamp a merchant-scan session so the NEXT message (usually an invoice
+        // image with no text) gets routed to the tenant the user actually
+        // scanned, not the tenant of their most recent ledger activity.
+        // Before this, Eric would scan valee-demo's QR, then send a photo, and
+        // points landed on recon-store because that's where his last activity
+        // was.
+        {
+          const { PrismaClient } = await import('@prisma/client');
+          const p = new PrismaClient();
+          try {
+            await p.merchantScanSession.create({
+              data: { tenantId, branchId, consumerPhone: formattedPhone },
+            });
+          } finally {
+            await p.$disconnect();
+          }
+        }
+
         // If the QR message carries a Cjr: marker, stamp a scan-session so the
         // next invoice this consumer submits (within the attribution window)
         // gets credited to that staff member.
@@ -152,11 +170,29 @@ export default async function webhookRoutes(app: FastifyInstance) {
       }
     }
 
-    // If no tenant identified, figure out the active merchant context for this
-    // phone. Falling back to "most recently created account" was wrong — if a
-    // user has accounts in two merchants, new messages always routed to the
-    // older one. Instead, use the tenant of the user's most recent ledger
-    // activity: that's the merchant they're currently interacting with.
+    // No tenant identified from message text — use the most recent merchant
+    // scan session (within the attribution window). Only fall back to "most
+    // recent ledger activity" as a last resort, because that fallback can
+    // pick the WRONG tenant if the consumer has activity across multiple.
+    const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '30');
+    if (!tenantId) {
+      const { PrismaClient } = await import('@prisma/client');
+      const prisma = new PrismaClient();
+      try {
+        const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+        const recentScan = await prisma.merchantScanSession.findFirst({
+          where: { consumerPhone: formattedPhone, scannedAt: { gte: cutoff } },
+          orderBy: { scannedAt: 'desc' },
+        });
+        if (recentScan) {
+          tenantId = recentScan.tenantId;
+          branchId = recentScan.branchId;
+        }
+      } finally {
+        await prisma.$disconnect();
+      }
+    }
+
     if (!tenantId) {
       const { PrismaClient } = await import('@prisma/client');
       const prisma = new PrismaClient();

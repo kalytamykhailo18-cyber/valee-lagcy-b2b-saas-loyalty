@@ -577,6 +577,21 @@ model StaffScanSession {
   @@map("staff_scan_sessions")
 }
 
+// Tracks the last merchant QR a consumer scanned. The webhook consults this
+// when an image-only message arrives so the invoice gets attributed to the
+// tenant the consumer actually intended, not whichever tenant their phone had
+// recent ledger activity in.
+model MerchantScanSession {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  branchId      String?  @map("branch_id") @db.Uuid
+  consumerPhone String   @map("consumer_phone") @db.VarChar(32)
+  scannedAt     DateTime @default(now()) @map("scanned_at") @db.Timestamptz
+
+  @@index([consumerPhone, scannedAt])
+  @@map("merchant_scan_sessions")
+}
+
 // ============================================================
 // 12. ADMIN_USERS
 // ============================================================
