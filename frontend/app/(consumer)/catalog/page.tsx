@@ -98,18 +98,35 @@ export default function Catalog() {
     setLoadingMore(true)
     try {
       const data = await api.getCatalog(20, products.length)
-      setProducts(prev => [...prev, ...data.products])
-      setHasMore(products.length + data.products.length < data.total)
+      // Dedup by id — defensive in case the scroll handler fires twice and we
+      // refetch offsets that overlap with what we already have. Previously this
+      // caused products to appear two or three times in the grid.
+      setProducts(prev => {
+        const seen = new Set(prev.map((p: Product) => p.id))
+        const fresh = (data.products as Product[]).filter(p => !seen.has(p.id))
+        return [...prev, ...fresh]
+      })
+      const totalKnown = data.total ?? products.length + data.products.length
+      setHasMore(products.length + data.products.length < totalKnown)
     } catch {} finally { setLoadingMore(false) }
   }
 
   async function loadCatalog() {
     try {
       const data = await api.getCatalog(20, 0)
-      setProducts(data.products)
+      // Dedup on initial load too for the (rare) case where the endpoint
+      // returns duplicates under load.
+      const seen = new Set<string>()
+      const unique = (data.products as Product[]).filter(p => {
+        if (seen.has(p.id)) return false
+        seen.add(p.id)
+        return true
+      })
+      setProducts(unique)
       setBalance(data.balance)
-      setTotal(data.total || data.products.length)
-      setHasMore(data.products.length < (data.total || data.products.length))
+      const totalKnown = data.total ?? unique.length
+      setTotal(totalKnown)
+      setHasMore(unique.length < totalKnown)
     } catch {
       setMessage('Error loading catalog')
     } finally {
