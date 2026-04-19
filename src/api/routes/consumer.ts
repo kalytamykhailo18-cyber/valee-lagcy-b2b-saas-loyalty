@@ -606,6 +606,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       let longitude: string | null = null;
       let deviceId: string | null = null;
       let assetTypeId: string | null = null;
+      let branchId: string | null = null;
 
       const parts = request.parts();
       for await (const part of parts) {
@@ -617,6 +618,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
           else if (part.fieldname === 'longitude') longitude = val || null;
           else if (part.fieldname === 'deviceId') deviceId = val || null;
           else if (part.fieldname === 'assetTypeId') assetTypeId = val || null;
+          else if (part.fieldname === 'branchId') branchId = val || null;
         }
       }
 
@@ -627,6 +629,26 @@ export default async function consumerRoutes(app: FastifyInstance) {
         return reply.status(400).send({ error: 'assetTypeId is required' });
       }
 
+      // Validate branchId belongs to this tenant — ignore spoofed values instead
+      // of trusting raw user input.
+      if (branchId) {
+        const b = await prisma.branch.findFirst({ where: { id: branchId, tenantId, active: true }, select: { id: true } });
+        if (!b) branchId = null;
+      }
+
+      // Fallback: if the client didn't send a branchId but the user scanned a
+      // merchant QR recently, use that branch.
+      if (!branchId && phoneNumber) {
+        const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
+        const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+        const recent = await prisma.merchantScanSession.findFirst({
+          where: { tenantId, consumerPhone: phoneNumber, scannedAt: { gte: cutoff }, branchId: { not: null } },
+          orderBy: { scannedAt: 'desc' },
+          select: { branchId: true },
+        });
+        if (recent?.branchId) branchId = recent.branchId;
+      }
+
       const result = await validateInvoice({
         tenantId,
         senderPhone: phoneNumber,
@@ -635,6 +657,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
         latitude,
         longitude,
         deviceId,
+        branchId,
       });
 
       // Store idempotency after successful validation (per-user)
@@ -647,10 +670,26 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
 
     // --- JSON path (pre-extracted data, used by tests or WhatsApp pipeline) ---
-    const { extractedData, latitude, longitude, deviceId, assetTypeId, ocrRawText } = request.body as any;
+    const { extractedData, latitude, longitude, deviceId, assetTypeId, ocrRawText, branchId: bodyBranchId } = request.body as any;
 
     if (!extractedData || !assetTypeId) {
       return reply.status(400).send({ error: 'extractedData and assetTypeId are required' });
+    }
+
+    let jsonBranchId: string | null = bodyBranchId || null;
+    if (jsonBranchId) {
+      const b = await prisma.branch.findFirst({ where: { id: jsonBranchId, tenantId, active: true }, select: { id: true } });
+      if (!b) jsonBranchId = null;
+    }
+    if (!jsonBranchId && phoneNumber) {
+      const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
+      const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+      const recent = await prisma.merchantScanSession.findFirst({
+        where: { tenantId, consumerPhone: phoneNumber, scannedAt: { gte: cutoff }, branchId: { not: null } },
+        orderBy: { scannedAt: 'desc' },
+        select: { branchId: true },
+      });
+      if (recent?.branchId) jsonBranchId = recent.branchId;
     }
 
     // Idempotency check: per-user. The key includes the phone number so that
@@ -675,6 +714,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       latitude,
       longitude,
       deviceId,
+      branchId: jsonBranchId,
     });
 
     // Store idempotency after successful validation (per-user)
@@ -688,6 +728,43 @@ export default async function consumerRoutes(app: FastifyInstance) {
   });
 
   // ---- PRODUCT CATALOG ----
+  // Active branches for the consumer's current tenant — powers the "in which
+  // branch are you?" picker on /scan. Includes the branch most recently
+  // scanned by this consumer (if any within the attribution window) so the
+  // PWA can auto-preselect it.
+  app.get('/api/consumer/branches', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { tenantId, phoneNumber } = request.consumer!;
+    if (!tenantId) {
+      return reply.status(409).send({ error: 'merchant selection required', requiresMerchantSelection: true });
+    }
+    const branches = await prisma.branch.findMany({
+      where: { tenantId, active: true },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true, address: true, latitude: true, longitude: true },
+    });
+
+    const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
+    const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+    const recentScan = phoneNumber
+      ? await prisma.merchantScanSession.findFirst({
+          where: { tenantId, consumerPhone: phoneNumber, scannedAt: { gte: cutoff } },
+          orderBy: { scannedAt: 'desc' },
+          select: { branchId: true },
+        })
+      : null;
+
+    return {
+      branches: branches.map(b => ({
+        id: b.id,
+        name: b.name,
+        address: b.address,
+        latitude: b.latitude ? Number(b.latitude) : null,
+        longitude: b.longitude ? Number(b.longitude) : null,
+      })),
+      recentBranchId: recentScan?.branchId || null,
+    };
+  });
+
   app.get('/api/consumer/catalog', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { accountId, tenantId } = request.consumer!;
     const { limit = '20', offset = '0' } = request.query as { limit?: string; offset?: string };

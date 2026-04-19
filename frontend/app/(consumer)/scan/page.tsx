@@ -42,9 +42,56 @@ export default function ScanPage() {
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
   const [cameraError, setCameraError] = useState<string | null>(null)
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; latitude: number | null; longitude: number | null }>>([])
+  const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const scannerRef = useRef<any>(null)
   const isProcessingRef = useRef(false)
+
+  // Load branches for this tenant. If there's only 1 branch we don't ask.
+  // If the user recently scanned a QR (recentBranchId), pre-select it.
+  // Otherwise try geolocation and pick the nearest.
+  useEffect(() => {
+    (async () => {
+      try {
+        const data: any = await api.getConsumerBranches()
+        const bs = data?.branches || []
+        setBranches(bs)
+        if (bs.length <= 1) return
+        if (data?.recentBranchId) {
+          setSelectedBranchId(data.recentBranchId)
+          return
+        }
+        // Geolocation fallback — if user grants permission, pick nearest branch
+        if (typeof navigator !== 'undefined' && navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            pos => {
+              const { latitude: lat, longitude: lon } = pos.coords
+              let nearest: { id: string; d: number } | null = null
+              for (const b of bs) {
+                if (b.latitude == null || b.longitude == null) continue
+                const d = haversine(lat, lon, b.latitude, b.longitude)
+                if (!nearest || d < nearest.d) nearest = { id: b.id, d }
+              }
+              // Only auto-pick if within 300m of a branch
+              if (nearest && nearest.d < 0.3) setSelectedBranchId(nearest.id)
+            },
+            () => {},
+            { enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 },
+          )
+        }
+      } catch {}
+    })()
+  }, [])
+
+  function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const R = 6371
+    const toRad = (x: number) => (x * Math.PI) / 180
+    const dLat = toRad(lat2 - lat1)
+    const dLon = toRad(lon2 - lon1)
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  }
 
   // ----------------------------------------------------------------
   // QR scanner — runs continuously while idle. If a QR is detected
@@ -78,7 +125,7 @@ export default function ScanPage() {
     })
 
     const assetTypeId = localStorage.getItem('assetTypeId') || ''
-    const apiPromise = api.uploadInvoiceImage(file, assetTypeId)
+    const apiPromise = api.uploadInvoiceImage(file, assetTypeId, { branchId: selectedBranchId || undefined })
       .catch(err => ({ success: false, message: err.error || 'Error procesando la factura' }))
 
     const [, apiResult] = await Promise.all([animPromise, apiPromise])
@@ -313,6 +360,22 @@ export default function ScanPage() {
         className="flex-shrink-0 bg-gradient-to-t from-slate-900 via-slate-900 to-slate-900/95 px-4 pt-2 space-y-2"
         style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 16px)' }}
       >
+        {branches.length > 1 && (
+          <div className="space-y-1">
+            <label className="text-[11px] uppercase tracking-wide text-slate-400 font-semibold">En que sucursal estas?</label>
+            <select
+              value={selectedBranchId || ''}
+              onChange={e => setSelectedBranchId(e.target.value || null)}
+              className="w-full bg-slate-800 text-white border border-slate-700 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            >
+              <option value="">Seleccionar sucursal…</option>
+              {branches.map(b => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <p className="text-center text-xs text-slate-400">Apunta al QR del cajero o toma foto de tu factura</p>
 
         <input

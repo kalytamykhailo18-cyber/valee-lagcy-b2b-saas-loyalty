@@ -130,7 +130,7 @@ export const api = {
     request('/api/consumer/validate-invoice', { method: 'POST', body: JSON.stringify(data) }),
 
   /** Upload an actual invoice image for OCR + validation (multipart/form-data) */
-  uploadInvoiceImage: async (file: File, assetTypeId: string, opts?: { latitude?: string; longitude?: string; deviceId?: string }) => {
+  uploadInvoiceImage: async (file: File, assetTypeId: string, opts?: { latitude?: string; longitude?: string; deviceId?: string; branchId?: string }) => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
     const form = new FormData();
     form.append('invoice', file);
@@ -138,6 +138,7 @@ export const api = {
     if (opts?.latitude) form.append('latitude', opts.latitude);
     if (opts?.longitude) form.append('longitude', opts.longitude);
     if (opts?.deviceId) form.append('deviceId', opts.deviceId);
+    if (opts?.branchId) form.append('branchId', opts.branchId);
 
     const res = await fetch(`${API_BASE}/api/consumer/validate-invoice`, {
       method: 'POST',
@@ -157,6 +158,7 @@ export const api = {
   // Referrals — consumer invites friends, earns tenant-configured bonus on friend's first claim
   getReferralQr: () => request('/api/consumer/referral-qr'),
   getReferrals: () => request('/api/consumer/referrals'),
+  getConsumerBranches: () => request('/api/consumer/branches'),
 
   // Consumer image upload (for dispute screenshots)
   uploadConsumerImage: async (file: File): Promise<{ success: boolean; url: string }> => {
