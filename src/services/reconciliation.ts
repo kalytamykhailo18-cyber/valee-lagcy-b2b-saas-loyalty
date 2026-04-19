@@ -68,6 +68,28 @@ export async function runReconciliation(): Promise<{
           });
         }
 
+        // Credit the referrer now that the referee's first transaction is
+        // confirmed. Missing this call was why referrals stayed pending after
+        // CSV reconciliation.
+        if (pending.consumerAccountId && pending.ledgerEntryId) {
+          const originalEntry = await prisma.ledgerEntry.findUnique({
+            where: { id: pending.ledgerEntryId },
+            select: { assetTypeId: true },
+          });
+          if (originalEntry) {
+            try {
+              const { tryCreditReferral } = await import('./referrals.js');
+              await tryCreditReferral({
+                tenantId: pending.tenantId,
+                refereeAccountId: pending.consumerAccountId,
+                assetTypeId: originalEntry.assetTypeId,
+              });
+            } catch (err) {
+              console.error('[Referral] credit failed on reconciliation', err);
+            }
+          }
+        }
+
         confirmed++;
       } else {
         // Amount mismatch — flag for manual review
@@ -141,6 +163,25 @@ export async function resolveManualReview(params: {
       where: { id: params.invoiceId },
       data: { status: 'claimed' },
     });
+    // Credit the referrer if this was the referee's first confirmed transaction.
+    if (invoice.consumerAccountId && invoice.ledgerEntryId) {
+      const originalEntry = await prisma.ledgerEntry.findUnique({
+        where: { id: invoice.ledgerEntryId },
+        select: { assetTypeId: true },
+      });
+      if (originalEntry) {
+        try {
+          const { tryCreditReferral } = await import('./referrals.js');
+          await tryCreditReferral({
+            tenantId: invoice.tenantId,
+            refereeAccountId: invoice.consumerAccountId,
+            assetTypeId: originalEntry.assetTypeId,
+          });
+        } catch (err) {
+          console.error('[Referral] credit failed on manual approve', err);
+        }
+      }
+    }
     return { success: true, message: 'Invoice approved and confirmed' };
   } else {
     // Reject: reverse any provisional credit

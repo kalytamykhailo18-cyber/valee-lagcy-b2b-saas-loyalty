@@ -146,6 +146,29 @@ export async function processCSV(
             where: { id: existingPending.id },
             data: { status: 'claimed' },
           });
+          // Referral bonus: the referee's first confirmed transaction is the
+          // trigger to credit the referrer. Stage D handles this for direct
+          // INVOICE_CLAIMED; the pending → CSV reconciliation path was missing
+          // it, so referrals stayed pending forever when the factura was
+          // submitted before the CSV.
+          if (existingPending.consumerAccountId && existingPending.ledgerEntryId) {
+            const originalEntry = await prisma.ledgerEntry.findUnique({
+              where: { id: existingPending.ledgerEntryId },
+              select: { assetTypeId: true },
+            });
+            if (originalEntry) {
+              try {
+                const { tryCreditReferral } = await import('./referrals.js');
+                await tryCreditReferral({
+                  tenantId: existingPending.tenantId,
+                  refereeAccountId: existingPending.consumerAccountId,
+                  assetTypeId: originalEntry.assetTypeId,
+                });
+              } catch (err) {
+                console.error('[Referral] credit failed on CSV reconcile', err);
+              }
+            }
+          }
         }
         rowsSkipped++; // Still count as skipped (no new record created)
         continue;
