@@ -48,8 +48,10 @@ async function fetchJson(path: string, token: string, opts: RequestInit = {}) {
 }
 
 async function flow_consumer_token_and_balance() {
-  const tenant = await prisma.tenant.findFirst({ where: { slug: 'valee-demo' } });
-  if (!tenant) throw new Error('valee-demo missing');
+  // Use a dedicated smoke-test tenant so test runs don't pollute real merchant
+  // data (Eric was seeing test invoices in his valee-demo history).
+  const tenant = await prisma.tenant.findFirst({ where: { slug: 'smoke-test' } });
+  if (!tenant) throw new Error('smoke-test tenant missing — run setup-smoke-tenant first');
   const phone = `+19900${String(Date.now()).slice(-7)}`;
   const { account } = await findOrCreateConsumerAccount(tenant.id, phone);
 
