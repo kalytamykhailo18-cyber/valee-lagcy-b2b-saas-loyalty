@@ -277,10 +277,24 @@ export default function CashierScanner() {
   // SCANNING screen
   return (
     <div className="min-h-screen bg-emerald-50 p-4">
-      <div className="flex items-center gap-3 mb-6 aa-rise-sm">
+      <div className="flex items-center gap-3 mb-4 aa-rise-sm">
         <Link href="/merchant" className="text-emerald-700 text-2xl transition-transform hover:-translate-x-0.5">&larr;</Link>
         <h1 className="text-xl font-bold text-emerald-800 tracking-tight">Escaner de canjes</h1>
       </div>
+
+      {/* Cashier cross-link: scanner ↔ pago en efectivo. Scanner is a bare
+          route (no sidebar), so without this button a cashier logged into
+          kiosk mode has no way to reach the dual-scan flow. */}
+      <Link
+        href="/merchant/dual-scan"
+        className="aa-rise-sm flex items-center justify-between bg-white border border-emerald-200 rounded-xl px-4 py-3 mb-4 shadow-sm hover:bg-emerald-50 transition"
+      >
+        <div>
+          <p className="text-sm font-semibold text-emerald-800">Pago en efectivo</p>
+          <p className="text-xs text-slate-500">Generar QR para clientes que pagan sin factura</p>
+        </div>
+        <span className="text-emerald-700 text-xl">&rarr;</span>
+      </Link>
 
       {/* Offline / Sync indicators */}
       {!isOnline && (

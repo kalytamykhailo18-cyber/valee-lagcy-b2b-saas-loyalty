@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 import { api } from '@/lib/api'
 import { formatCash } from '@/lib/format'
 
@@ -126,6 +127,14 @@ export default function DualScanPage() {
       <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Pago en efectivo</h1>
         <p className="text-sm text-slate-500 mt-1">Genera un codigo QR temporal para clientes que pagan sin recibo (efectivo, Pago Movil, Zelle)</p>
+        {/* Cross-link back to scanner — cashier kiosk flow toggles between
+            the two without needing the sidebar. */}
+        <Link
+          href="/merchant/scanner"
+          className="inline-flex items-center gap-2 mt-3 text-sm text-emerald-700 hover:text-emerald-800 font-medium"
+        >
+          &larr; Ir al escaner de canjes
+        </Link>
       </div>
 
       {/* Content */}
