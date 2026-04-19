@@ -174,7 +174,7 @@ export default async function webhookRoutes(app: FastifyInstance) {
     // scan session (within the attribution window). Only fall back to "most
     // recent ledger activity" as a last resort, because that fallback can
     // pick the WRONG tenant if the consumer has activity across multiple.
-    const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '30');
+    const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
     if (!tenantId) {
       const { PrismaClient } = await import('@prisma/client');
       const prisma = new PrismaClient();
