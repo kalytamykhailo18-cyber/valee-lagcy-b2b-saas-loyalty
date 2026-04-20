@@ -371,6 +371,126 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { success: true, subject: 'staff', id, invalidatedAt: new Date() };
   });
 
+  // ---- PLATFORM HEALTH (admin observability) ----
+  // Failure-focused aggregate so the platform operator can answer "is the
+  // factura pipeline working for my merchants?" without jumping into logs.
+  // Per-tenant breakdown, time-windowed, ordered so the merchants most at
+  // risk float to the top.
+  app.get('/api/admin/platform-health', { preHandler: [requireAdminAuth] }, async (request) => {
+    const { windowHours = '24' } = request.query as { windowHours?: string };
+    const hours = Math.min(720, Math.max(1, parseInt(windowHours) || 24));
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+    // Per-tenant invoice outcomes in the window. We only count rows whose
+    // final state is interesting for ops (claimed / rejected / pending /
+    // manual_review); 'available' means the CSV row was never consumed,
+    // which is not a failure.
+    const perTenant = await prisma.$queryRaw<Array<{
+      tenant_id: string; tenant_name: string;
+      claimed: bigint; rejected: bigint; pending: bigint; manual_review: bigint;
+    }>>`
+      SELECT
+        t.id::text AS tenant_id,
+        t.name AS tenant_name,
+        COUNT(*) FILTER (WHERE i.status = 'claimed')           AS claimed,
+        COUNT(*) FILTER (WHERE i.status = 'rejected')          AS rejected,
+        COUNT(*) FILTER (WHERE i.status = 'pending_validation') AS pending,
+        COUNT(*) FILTER (WHERE i.status = 'manual_review')     AS manual_review
+      FROM tenants t
+      LEFT JOIN invoices i ON i.tenant_id = t.id AND i.created_at >= ${since}
+      WHERE t.status = 'active'
+      GROUP BY t.id, t.name
+      ORDER BY t.name ASC
+    `;
+
+    const tenants = perTenant.map(r => {
+      const total = Number(r.claimed) + Number(r.rejected) + Number(r.pending) + Number(r.manual_review);
+      const rejectionRate = total === 0 ? 0 : Number(r.rejected) / total;
+      return {
+        tenantId: r.tenant_id,
+        tenantName: r.tenant_name,
+        total,
+        claimed: Number(r.claimed),
+        rejected: Number(r.rejected),
+        pending: Number(r.pending),
+        manualReview: Number(r.manual_review),
+        rejectionRate: Number(rejectionRate.toFixed(4)),
+      };
+    });
+
+    // Platform totals + top rejection reasons. Truncate at 160 chars so a
+    // runaway OCR string doesn't blow up the payload.
+    const topRejections = await prisma.$queryRaw<Array<{ reason: string; count: bigint }>>`
+      SELECT
+        COALESCE(NULLIF(SUBSTRING(rejection_reason FROM 1 FOR 160), ''), '(unspecified)') AS reason,
+        COUNT(*)::bigint AS count
+      FROM invoices
+      WHERE created_at >= ${since} AND status = 'rejected'
+      GROUP BY reason
+      ORDER BY count DESC
+      LIMIT 10
+    `;
+
+    // Redemption token expiry vs confirmation in the window.
+    const [redemptionStats] = await prisma.$queryRaw<[{
+      confirmed: bigint; expired: bigint; pending: bigint;
+    }]>`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'used')    AS confirmed,
+        COUNT(*) FILTER (WHERE status = 'expired') AS expired,
+        COUNT(*) FILTER (WHERE status = 'pending') AS pending
+      FROM redemption_tokens
+      WHERE created_at >= ${since}
+    `;
+
+    // Backlog: invoices sitting in pending_validation or manual_review
+    // regardless of window (what's currently stuck, not what landed in the
+    // window).
+    const [backlog] = await prisma.$queryRaw<[{ pending: bigint; manual_review: bigint }]>`
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'pending_validation') AS pending,
+        COUNT(*) FILTER (WHERE status = 'manual_review')     AS manual_review
+      FROM invoices
+    `;
+
+    // Hash-chain audit snapshot (cheap — no per-tenant scan here, just a
+    // pointer for the operator to run /verify-hash-chain if needed).
+    const tenantCount = tenants.length;
+    const atRiskTenants = tenants.filter(t => t.total >= 5 && t.rejectionRate >= 0.5);
+
+    const totals = tenants.reduce((acc, t) => {
+      acc.total += t.total; acc.claimed += t.claimed; acc.rejected += t.rejected;
+      acc.pending += t.pending; acc.manualReview += t.manualReview;
+      return acc;
+    }, { total: 0, claimed: 0, rejected: 0, pending: 0, manualReview: 0 });
+    const platformRejectionRate = totals.total === 0 ? 0 : totals.rejected / totals.total;
+
+    return {
+      windowHours: hours,
+      since: since.toISOString(),
+      activeTenants: tenantCount,
+      platform: {
+        ...totals,
+        rejectionRate: Number(platformRejectionRate.toFixed(4)),
+      },
+      backlog: {
+        pendingValidation: Number(backlog.pending),
+        manualReview: Number(backlog.manual_review),
+      },
+      redemption: {
+        confirmed: Number(redemptionStats.confirmed),
+        expired: Number(redemptionStats.expired),
+        pending: Number(redemptionStats.pending),
+      },
+      topRejectionReasons: topRejections.map(r => ({ reason: r.reason, count: Number(r.count) })),
+      tenants: tenants.sort((a, b) => b.rejectionRate - a.rejectionRate),
+      atRiskTenants: atRiskTenants.map(t => ({
+        tenantId: t.tenantId, tenantName: t.tenantName,
+        rejectionRate: t.rejectionRate, rejected: t.rejected, total: t.total,
+      })),
+    };
+  });
+
   // ---- PLATFORM METRICS ----
   app.get('/api/admin/metrics', { preHandler: [requireAdminAuth] }, async () => {
     const activeTenants = await prisma.tenant.count({ where: { status: 'active' } });
