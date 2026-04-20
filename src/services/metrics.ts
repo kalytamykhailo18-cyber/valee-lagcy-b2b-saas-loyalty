@@ -21,11 +21,17 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
 
   // Sentinel for "entries without any branch_id assigned"
   if (branchId === '_unassigned') {
+    // valueIssued = INVOICE_CLAIMED credits minus REVERSAL debits. Immutable
+    // ledger: reversing a provisional invoice writes a separate REVERSAL
+    // event instead of updating the original's status, so summing
+    // status!='reversed' INVOICE_CLAIMED credits alone over-counts.
     const [vi] = await prisma.$queryRaw<[{ total: string }]>`
-      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
-      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED'
-        AND entry_type = 'CREDIT' AND status != 'reversed'
-        AND branch_id IS NULL
+      SELECT COALESCE(SUM(CASE
+        WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
+        WHEN event_type = 'REVERSAL'        AND entry_type = 'DEBIT'  THEN -amount
+        ELSE 0
+      END), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed' AND branch_id IS NULL
     `;
     const [vr] = await prisma.$queryRaw<[{ total: string }]>`
       SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
@@ -60,9 +66,12 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
   // branch_id is nullable — entries without a branch are excluded when filtering.
   if (branchId) {
     const [valueIssued] = await prisma.$queryRaw<[{ total: string }]>`
-      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
-      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED'
-        AND entry_type = 'CREDIT' AND status != 'reversed'
+      SELECT COALESCE(SUM(CASE
+        WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
+        WHEN event_type = 'REVERSAL'        AND entry_type = 'DEBIT'  THEN -amount
+        ELSE 0
+      END), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
         AND branch_id = ${branchId}::uuid
     `;
 
@@ -101,8 +110,12 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
 
   // No branch filter — aggregate all branches
   const [valueIssued] = await prisma.$queryRaw<[{ total: string }]>`
-    SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
-    WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' AND status != 'reversed'
+    SELECT COALESCE(SUM(CASE
+      WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
+      WHEN event_type = 'REVERSAL'        AND entry_type = 'DEBIT'  THEN -amount
+      ELSE 0
+    END), 0)::text AS total FROM ledger_entries
+    WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
   `;
 
   const [valueRedeemed] = await prisma.$queryRaw<[{ total: string }]>`
@@ -128,9 +141,12 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
   // Also compute the unassigned slice so the dashboard can render it as its
   // own chip. valueIssuedUnassigned + sum(branch.valueIssued) === valueIssued.
   const [valueIssuedUnassigned] = await prisma.$queryRaw<[{ total: string }]>`
-    SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
-    WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED'
-      AND entry_type = 'CREDIT' AND status != 'reversed' AND branch_id IS NULL
+    SELECT COALESCE(SUM(CASE
+      WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
+      WHEN event_type = 'REVERSAL'        AND entry_type = 'DEBIT'  THEN -amount
+      ELSE 0
+    END), 0)::text AS total FROM ledger_entries
+    WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed' AND branch_id IS NULL
   `;
   const [valueRedeemedUnassigned] = await prisma.$queryRaw<[{ total: string }]>`
     SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries

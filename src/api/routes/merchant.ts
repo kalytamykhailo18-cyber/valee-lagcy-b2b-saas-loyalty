@@ -1611,9 +1611,17 @@ export default async function merchantRoutes(app: FastifyInstance) {
   app.get('/api/merchant/analytics', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
 
+    // valueIssued = INVOICE_CLAIMED credits − REVERSAL debits so Eric's
+    // 'Emitido' metric doesn't double-count a factura that was later
+    // reversed (the ledger is immutable, so status stays 'provisional'
+    // on the original credit even after reversal).
     const [valueIssued] = await prisma.$queryRaw<[{ total: string }]>`
-      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
-      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' AND status != 'reversed'
+      SELECT COALESCE(SUM(CASE
+        WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
+        WHEN event_type = 'REVERSAL'        AND entry_type = 'DEBIT'  THEN -amount
+        ELSE 0
+      END), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
     `;
 
     const [valueRedeemed] = await prisma.$queryRaw<[{ total: string }]>`
