@@ -277,8 +277,17 @@ export default function BranchesPage() {
                 latitude={form.latitude ? parseFloat(form.latitude) : null}
                 longitude={form.longitude ? parseFloat(form.longitude) : null}
                 onChange={(lat, lng) => {
-                  setForm({ ...form, latitude: lat != null ? String(lat) : '', longitude: lng != null ? String(lng) : '' })
-                  if (errors.latitude || errors.longitude) setErrors({ ...errors, latitude: undefined, longitude: undefined })
+                  // Functional update — LocationPicker wires the map click
+                  // handler in a useEffect([]) so it captures the ORIGINAL
+                  // onChange closure. A plain `setForm({ ...form, ... })`
+                  // would spread the stale (empty) form snapshot, wiping
+                  // the name + direccion the user just typed (Genesis L5).
+                  setForm(prev => ({
+                    ...prev,
+                    latitude: lat != null ? String(lat) : '',
+                    longitude: lng != null ? String(lng) : '',
+                  }))
+                  setErrors(prev => ({ ...prev, latitude: undefined, longitude: undefined }))
                 }}
                 address={form.address}
               />
@@ -452,7 +461,11 @@ export default function BranchesPage() {
                   <LocationPicker
                     latitude={editForm.latitude ? parseFloat(editForm.latitude) : null}
                     longitude={editForm.longitude ? parseFloat(editForm.longitude) : null}
-                    onChange={(lat, lng) => setEditForm({ ...editForm, latitude: lat != null ? String(lat) : '', longitude: lng != null ? String(lng) : '' })}
+                    onChange={(lat, lng) => setEditForm(prev => ({
+                      ...prev,
+                      latitude: lat != null ? String(lat) : '',
+                      longitude: lng != null ? String(lng) : '',
+                    }))}
                     address={editForm.address}
                   />
                 </div>
