@@ -141,8 +141,24 @@ export default function SettingsPage() {
       }
     }
 
-    // RIF removed from the UI to reduce friction. Backend keeps the column
-    // for any pre-existing values; we just don't update it from here.
+    // RIF: assemble the three parts into the canonical J-XXXXXXXX-X shape
+    // or send empty string to clear. Partial entries (one or two fields filled
+    // in) are rejected here so we never send a malformed value to the server.
+    let rifValue: string | undefined = undefined;
+    const anyRifFilled = rifBody.trim() || rifCheck.trim();
+    if (anyRifFilled) {
+      if (!/^\d{7,9}$/.test(rifBody) || !/^\d$/.test(rifCheck)) {
+        setRifError('RIF incompleto. Formato: J-XXXXXXXX-X')
+        setMessage('Error: revisa el RIF')
+        return
+      }
+      rifValue = `${rifPrefix}-${rifBody}-${rifCheck}`
+    } else if (settings?.rif) {
+      // User cleared all three inputs — treat that as explicit removal so the
+      // server clears the field. Empty string is the documented signal.
+      rifValue = ''
+    }
+
     setSaving(true)
     try {
       const updated = await api.updateMerchantSettings({
@@ -157,6 +173,7 @@ export default function SettingsPage() {
         website: website.trim() || null,
         description: description.trim() || null,
         instagramHandle: instagramHandle.trim().replace(/^@/, '') || null,
+        ...(rifValue !== undefined ? { rif: rifValue } : {}),
       })
       setSettings(updated)
       setMessage('Guardado')
@@ -320,6 +337,43 @@ export default function SettingsPage() {
                   <input type="number" value={welcomeBonus} onChange={e => setWelcomeBonus(e.target.value)}
                     className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" min="0" />
                   <p className="text-xs text-slate-400 mt-1">Cuantos puntos recibe cada cliente nuevo. 0 desactiva.</p>
+                </div>
+
+                {/* RIF — the backend already rejects facturas whose RIF doesn't
+                    match tenant.rif when a fiscal_invoice is submitted. Input
+                    stays split into prefix/body/check so typos in the separator
+                    don't turn into false mismatches later. */}
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio</label>
+                  <div className="mt-1 flex items-center gap-2">
+                    <select
+                      value={rifPrefix}
+                      onChange={e => { setRifPrefix(e.target.value as any); setRifError('') }}
+                      className="aa-field px-2 py-2.5 rounded-lg border border-slate-200 text-sm bg-white"
+                    >
+                      {['J','V','E','G','P'].map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="text" inputMode="numeric"
+                      value={rifBody}
+                      onChange={e => { setRifBody(e.target.value.replace(/\D/g, '').slice(0, 9)); setRifError('') }}
+                      placeholder="12345678"
+                      className="aa-field aa-field-emerald flex-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm tabular-nums"
+                    />
+                    <span className="text-slate-400">-</span>
+                    <input
+                      type="text" inputMode="numeric"
+                      value={rifCheck}
+                      onChange={e => { setRifCheck(e.target.value.replace(/\D/g, '').slice(0, 1)); setRifError('') }}
+                      placeholder="9"
+                      className="aa-field aa-field-emerald w-14 px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-center tabular-nums"
+                    />
+                  </div>
+                  {rifError && <p className="text-xs text-red-600 mt-1">{rifError}</p>}
+                  <p className="text-xs text-slate-400 mt-1">
+                    Cuando el RIF esta configurado, solo aceptamos facturas fiscales donde aparezca este mismo RIF. Facturas de otros comercios se rechazan automaticamente.
+                  </p>
                 </div>
               </div>
             </section>
