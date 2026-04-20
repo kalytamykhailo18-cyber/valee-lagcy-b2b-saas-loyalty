@@ -116,6 +116,22 @@ async function main() {
   await assert('productCount increments to 1', final.productCount === 1,
     `productCount=${final.productCount}`);
 
+  // Step 6: wizard page JS chunk exposes the Download + Copy-link actions
+  // so the QR step isn't just a dead-end open-in-new-tab.
+  const FRONTEND = process.env.SMOKE_FRONTEND_BASE || 'http://localhost:3001';
+  const pageHtml = await (await fetch(`${FRONTEND}/merchant/onboarding`)).text();
+  const chunkUrls = Array.from(pageHtml.matchAll(/\/_next\/static\/chunks\/[^"']+\.js/g)).map(m => m[0]);
+  const chunkBodies = await Promise.all(chunkUrls.map(u => fetch(`${FRONTEND}${u}`).then(r => r.text())));
+  await assert('onboarding chunk exposes "Descargar PNG"',
+    chunkBodies.some(js => js.includes('Descargar PNG')),
+    `scanned=${chunkUrls.length}`);
+  await assert('onboarding chunk exposes "Copiar enlace"',
+    chunkBodies.some(js => js.includes('Copiar enlace')),
+    `scanned=${chunkUrls.length}`);
+  await assert('onboarding chunk uses valee-qr-* download filename',
+    chunkBodies.some(js => js.includes('valee-qr-')),
+    `scanned=${chunkUrls.length}`);
+
   console.log('\n=== ALL ASSERTIONS PASSED ===');
   process.exit(0);
 }

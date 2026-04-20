@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { MdQrCode2, MdStars, MdInventory2, MdCheckCircle, MdArrowForward, MdArrowBack, MdDownload } from 'react-icons/md'
+import { MdQrCode2, MdStars, MdInventory2, MdCheckCircle, MdArrowForward, MdArrowBack, MdDownload, MdContentCopy } from 'react-icons/md'
 import { api } from '@/lib/api'
 
 interface Settings {
@@ -107,10 +107,41 @@ export default function OnboardingWizard() {
     }
   }
 
-  function downloadQR() {
+  async function downloadQR() {
     if (!settings?.qrCodeUrl) return
-    // Open in a new tab so the user can long-press to save on mobile.
-    window.open(settings.qrCodeUrl, '_blank', 'noopener')
+    // Proper file download: fetch the Cloudinary PNG as a blob and trigger
+    // an anchor click with `download` so the browser saves it to disk with
+    // the merchant's slug as the filename, instead of just opening the
+    // image inline in a new tab (which was what the button did before).
+    try {
+      const res = await fetch(settings.qrCodeUrl)
+      if (!res.ok) throw new Error(`fetch failed: ${res.status}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `valee-qr-${settings.slug || 'comercio'}.png`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      // Revoke on the next tick so the browser has time to start the download.
+      setTimeout(() => URL.revokeObjectURL(url), 500)
+    } catch {
+      // If CORS blocks the blob fetch (Cloudinary usually allows it, but
+      // being defensive), fall back to opening the URL so the user can
+      // right-click → Save As.
+      window.open(settings.qrCodeUrl, '_blank', 'noopener')
+    }
+  }
+
+  async function copyQRLink() {
+    if (!settings?.qrCodeUrl) return
+    try {
+      await navigator.clipboard.writeText(settings.qrCodeUrl)
+      alert('Enlace copiado. Pegalo donde quieras compartirlo.')
+    } catch {
+      window.prompt('Copia este enlace:', settings.qrCodeUrl)
+    }
   }
 
   if (loading) {
@@ -192,12 +223,24 @@ export default function OnboardingWizard() {
             {settings.qrCodeUrl ? (
               <div className="flex flex-col items-center gap-3">
                 <img src={settings.qrCodeUrl} alt="QR del comercio" className="w-56 h-56 rounded-xl border border-slate-200" />
-                <button
-                  onClick={downloadQR}
-                  className="aa-btn aa-btn-emerald flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-emerald-700"
-                >
-                  <MdDownload className="w-4 h-4" /><span className="relative z-10">Abrir para guardar</span>
-                </button>
+                <div className="flex gap-2 flex-wrap justify-center">
+                  <button
+                    onClick={downloadQR}
+                    className="aa-btn aa-btn-emerald flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-xl text-sm font-medium hover:bg-emerald-700"
+                  >
+                    <MdDownload className="w-4 h-4" /><span className="relative z-10">Descargar PNG</span>
+                  </button>
+                  <button
+                    onClick={copyQRLink}
+                    className="aa-btn flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-xl text-sm font-medium hover:bg-slate-50"
+                  >
+                    <MdContentCopy className="w-4 h-4" /><span className="relative z-10">Copiar enlace</span>
+                  </button>
+                </div>
+                <p className="text-xs text-slate-400 text-center">
+                  En el telefono, tocas Descargar PNG y queda en tu galeria.
+                  En la computadora, se guarda en tu carpeta de descargas listo para imprimir.
+                </p>
               </div>
             ) : (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-sm text-amber-800">
