@@ -71,7 +71,8 @@ export function getStateGreeting(
   balance: string,
   phoneNumber: string,
   welcomeBonusAmount?: string,
-  merchantSlug?: string
+  merchantSlug?: string,
+  branchName?: string | null,
 ): string[] {
   // Prefer the real tenant slug when available; the old fallback slugified
   // merchantName with spaces→dashes, which usually worked for "Valee Demo" but
@@ -80,12 +81,18 @@ export function getStateGreeting(
   const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
   const slug = (merchantSlug || merchantName.toLowerCase().replace(/\s+/g, '-')).toLowerCase();
   const pwaLink = `${base}/consumer?tenant=${encodeURIComponent(slug)}`;
+  // Combine the merchant name with the branch the user just scanned so the
+  // bot reply reflects where they actually are (Genesis L4: 'Acabas de
+  // visitar Luxor Fitness' should say 'Luxor Fitness - Luxor Valencia').
+  const merchantLabel = branchName
+    ? `${merchantName} - ${branchName}`
+    : merchantName;
 
   switch (state) {
     case 'first_time': {
       const bonusAmount = welcomeBonusAmount || process.env.WELCOME_BONUS_AMOUNT || '50';
       return [
-        `¡Hola! 👋 Bienvenido a ${merchantName}.`,
+        `¡Hola! 👋 Bienvenido a ${merchantLabel}.`,
         `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida!`,
         `Ahora puedes ganar más recompensas. Es muy fácil:`,
         `📸 Envíanos una foto de tu factura y te cargaremos tus puntos automáticamente. ¡Así de simple!`,
@@ -102,7 +109,7 @@ export function getStateGreeting(
 
     case 'active_purchase':
       return [
-        `¡Acabas de visitar ${merchantName}! No olvides enviar tu factura para ganar tus puntos. 📸`,
+        `¡Acabas de visitar ${merchantLabel}! No olvides enviar tu factura para ganar tus puntos. 📸`,
         `Tu saldo actual: ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
         `📱 Ver tu cuenta: ${pwaLink}`,
       ];
@@ -110,7 +117,7 @@ export function getStateGreeting(
     case 'registered_never_scanned':
       return [
         `¡Hola! Te registraste hace un tiempo pero aún no has ganado puntos.`,
-        `Es muy fácil: la próxima vez que compres en ${merchantName}, envíanos una foto de tu factura aquí. 📸`,
+        `Es muy fácil: la próxima vez que compres en ${merchantLabel}, envíanos una foto de tu factura aquí. 📸`,
         `¡Así empezarás a acumular puntos para canjear por productos!`,
         `📱 Tu cuenta aquí: ${pwaLink}`,
       ];
@@ -362,15 +369,25 @@ export async function handleIncomingMessage(params: {
   }
 
   // Get merchant name + slug (slug is needed so the PWA link in the greeting
-  // deep-links to the right tenant instead of a slugified name guess)
+  // deep-links to the right tenant instead of a slugified name guess). Also
+  // resolve the branch name from params.branchId so the greeting can say
+  // 'Luxor Fitness - Luxor Valencia' (Genesis L4).
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   const merchantName = tenant?.name || 'el comercio';
   const merchantSlug = tenant?.slug;
+  let branchName: string | null = null;
+  if (params.branchId) {
+    const branch = await prisma.branch.findFirst({
+      where: { id: params.branchId, tenantId, active: true },
+      select: { name: true },
+    });
+    branchName = branch?.name || null;
+  }
 
   // If account was just created (first contact via QR), always send welcome greeting
   if (created || state === 'first_time') {
     const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
-    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug);
+    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName);
   }
 
   // If it's the first message or a greeting, send state-based greeting
@@ -379,12 +396,12 @@ export async function handleIncomingMessage(params: {
 
     // Check if it's a merchant QR message (already handled by webhook for tenant routing)
     if (/merchant:[a-z0-9\-]+/i.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
+      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
     }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
+      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
     }
 
     // Check support intents
@@ -476,5 +493,5 @@ export async function handleIncomingMessage(params: {
   }
 
   // Default: state greeting
-  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
+  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
 }
