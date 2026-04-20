@@ -2010,46 +2010,77 @@ export default async function merchantRoutes(app: FastifyInstance) {
       WHERE ${whereClause}
     `, ...params);
 
+    // Collapse REDEMPTION_PENDING + REDEMPTION_CONFIRMED into a single row
+    // per token so the merchant doesn't see "Canje pendiente -125" AND "Canje
+    // confirmado +125" for the same redemption (Genesis M8). Reference IDs
+    // are REDEEM-<tokenId> for the pending side and CONFIRMED-<tokenId> for
+    // the confirmed side — same tokenId ties them. Keep the PENDING row
+    // (it still holds the consumer account so phone/name render correctly)
+    // but relabel it as REDEMPTION_CONFIRMED when a CONFIRMED exists in this
+    // result window for the same token. Hide the system-side CONFIRMED row.
+    const tokenIdByRef = new Map<string, string>();
+    const confirmedTokenIds = new Set<string>();
+    for (const e of entries) {
+      const ref = String(e.reference_id || '');
+      const m = ref.match(/^(REDEEM|CONFIRMED|EXPIRED)-([0-9a-f-]{36})$/i);
+      if (!m) continue;
+      tokenIdByRef.set(ref, m[2]);
+      if (m[1].toUpperCase() === 'CONFIRMED') confirmedTokenIds.add(m[2]);
+    }
+
     return {
-      entries: entries.map(e => {
-        const meta: any = e.metadata || {};
-        // Welcome bonus is written as ADJUSTMENT_MANUAL with a WELCOME-
-        // prefixed referenceId. The consumer history endpoint already
-        // emits WELCOME_BONUS as a virtual event type for the same rows;
-        // do the same here so the merchant dashboard labels them
-        // 'Puntos de Bienvenida' instead of the generic 'Ajuste manual'
-        // (Genesis L3).
-        const effectiveEventType =
-          e.event_type === 'ADJUSTMENT_MANUAL'
-          && (String(e.reference_id || '').startsWith('WELCOME-')
-              || meta?.type === 'welcome_bonus')
-            ? 'WELCOME_BONUS'
-            : e.event_type;
-        return {
-          id: e.id,
-          eventType: effectiveEventType,
-          entryType: e.entry_type,
-          amount: e.amount,
-          status: e.status,
-          referenceId: e.reference_id,
-          branchId: e.branch_id,
-          branchName: e.branch_name,
-          accountPhone: e.account_phone,
-          accountName: e.account_name || null,
-          // Product info stamped at write time survives token cleanup; also
-          // pull invoice number when the event is an invoice claim so the
-          // merchant row shows "which invoice" without clicking in. Fallback
-          // to referenceId for INVOICE_CLAIMED rows that predate the metadata
-          // stamping (referenceId on those is the invoice number itself).
-          productName: meta.productName || null,
-          productPhotoUrl: meta.productPhotoUrl || null,
-          invoiceNumber: meta.invoiceNumber
-            || (e.event_type === 'INVOICE_CLAIMED'
-                ? String(e.reference_id || '').replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '')
-                : null),
-          createdAt: e.created_at,
-        };
-      }),
+      entries: entries
+        .filter(e => {
+          const tid = tokenIdByRef.get(String(e.reference_id || ''));
+          if (!tid) return true;
+          if (e.event_type === 'REDEMPTION_CONFIRMED' && confirmedTokenIds.has(tid)) return false;
+          if (e.event_type === 'REDEMPTION_EXPIRED'   && e.entry_type === 'CREDIT')  return false;
+          return true;
+        })
+        .map(e => {
+          const meta: any = e.metadata || {};
+          const tid = tokenIdByRef.get(String(e.reference_id || ''));
+          // Welcome bonus is written as ADJUSTMENT_MANUAL with a WELCOME-
+          // prefixed referenceId. The consumer history endpoint already
+          // emits WELCOME_BONUS as a virtual event type for the same rows;
+          // do the same here so the merchant dashboard labels them
+          // 'Puntos de Bienvenida' instead of the generic 'Ajuste manual'
+          // (Genesis L3).
+          let effectiveEventType: string =
+            e.event_type === 'ADJUSTMENT_MANUAL'
+            && (String(e.reference_id || '').startsWith('WELCOME-')
+                || meta?.type === 'welcome_bonus')
+              ? 'WELCOME_BONUS'
+              : e.event_type;
+          // Relabel surviving PENDING to CONFIRMED when confirmation landed.
+          if (tid && e.event_type === 'REDEMPTION_PENDING' && confirmedTokenIds.has(tid)) {
+            effectiveEventType = 'REDEMPTION_CONFIRMED';
+          }
+          return {
+            id: e.id,
+            eventType: effectiveEventType,
+            entryType: e.entry_type,
+            amount: e.amount,
+            status: e.status,
+            referenceId: e.reference_id,
+            branchId: e.branch_id,
+            branchName: e.branch_name,
+            accountPhone: e.account_phone,
+            accountName: e.account_name || null,
+            // Product info stamped at write time survives token cleanup; also
+            // pull invoice number when the event is an invoice claim so the
+            // merchant row shows "which invoice" without clicking in. Fallback
+            // to referenceId for INVOICE_CLAIMED rows that predate the metadata
+            // stamping (referenceId on those is the invoice number itself).
+            productName: meta.productName || null,
+            productPhotoUrl: meta.productPhotoUrl || null,
+            invoiceNumber: meta.invoiceNumber
+              || (e.event_type === 'INVOICE_CLAIMED'
+                  ? String(e.reference_id || '').replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '')
+                  : null),
+            createdAt: e.created_at,
+          };
+        }),
       total: Number(countResult.count),
     };
   });
