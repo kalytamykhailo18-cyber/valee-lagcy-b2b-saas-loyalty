@@ -109,15 +109,36 @@ export async function processCSV(
     : await prisma.assetType.findFirst();
   const poolAccount = assetType ? await getSystemAccount(tenantId, 'issued_value_pool') : null;
 
+  // Per-row caps. AMOUNT_MAX defaults to the equivalent of 10M Bs at a
+  // reasonable exchange rate; anything above is almost certainly a bad row
+  // (missing decimal, extra zero). Can be raised by the tenant via env if a
+  // merchant legitimately sells high-ticket items.
+  const AMOUNT_MAX = parseFloat(process.env.CSV_AMOUNT_MAX || '50000000');
+  const INVOICE_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9._\-/]{2,63}$/;
+
   for (let i = 1; i < lines.length; i++) {
     const fields = parseCSVLine(lines[i]);
     try {
-      const invoiceNumber = fields[invoiceCol];
-      const amountStr = fields[amountCol];
+      const invoiceNumber = (fields[invoiceCol] || '').trim();
+      const amountStr = (fields[amountCol] || '').trim();
 
       if (!invoiceNumber || !amountStr) {
         rowsErrored++;
         errorDetails.push({ row: i + 1, reason: 'Missing invoice number or amount' });
+        continue;
+      }
+
+      // Invoice number: reject garbage like 'XX' or '12' or values with
+      // suspicious characters. Pattern: starts alphanumeric, 3-64 chars
+      // total, only A-Z/0-9/._-/ in body. Genesis showed CSVs with
+      // '123456789' and similar trivially-typeable values that still
+      // passed — at least enforce it's non-trivial.
+      if (!INVOICE_NUMBER_RE.test(invoiceNumber)) {
+        rowsErrored++;
+        errorDetails.push({
+          row: i + 1,
+          reason: `Invoice number invalid: must be 3-64 alphanumeric characters (got '${invoiceNumber.slice(0, 40)}')`,
+        });
         continue;
       }
 
@@ -132,15 +153,48 @@ export async function processCSV(
         errorDetails.push({ row: i + 1, reason: `Amount must be positive (got ${amount})` });
         continue;
       }
+      if (amount > AMOUNT_MAX) {
+        rowsErrored++;
+        errorDetails.push({
+          row: i + 1,
+          reason: `Amount exceeds per-row cap (${amount} > ${AMOUNT_MAX}). Check for misplaced decimal.`,
+        });
+        continue;
+      }
 
-      const transactionDate = dateCol !== -1 && fields[dateCol] ? new Date(fields[dateCol]) : null;
-      const customerPhone = phoneCol !== -1 && fields[phoneCol] ? fields[phoneCol] : null;
+      let transactionDate: Date | null = null;
+      if (dateCol !== -1 && fields[dateCol]) {
+        const raw = fields[dateCol].trim();
+        const parsed = new Date(raw);
+        if (isNaN(parsed.getTime())) {
+          rowsErrored++;
+          errorDetails.push({ row: i + 1, reason: `Unparseable date: '${raw}'` });
+          continue;
+        }
+        transactionDate = parsed;
+      }
+
+      let customerPhone: string | null = null;
+      if (phoneCol !== -1 && fields[phoneCol]) {
+        const raw = fields[phoneCol].trim();
+        const normalized = normalizeVenezuelanPhone(raw);
+        const digits = normalized.replace(/\D/g, '');
+        if (digits.length < 10 || digits.length > 15) {
+          rowsErrored++;
+          errorDetails.push({
+            row: i + 1,
+            reason: `Invalid phone number: '${raw}' (need 10-15 digits)`,
+          });
+          continue;
+        }
+        customerPhone = raw;
+      }
 
       // Guard: a transaction dated in the future is always wrong (bulk CSVs
       // from POS systems can leak bad dates, or a malicious merchant could
       // pre-load "future" facturas to farm points). Allow a 24h grace window
       // so timezone edges don't reject same-day uploads.
-      if (transactionDate && !isNaN(transactionDate.getTime())) {
+      if (transactionDate) {
         const graceMs = 24 * 60 * 60 * 1000;
         if (transactionDate.getTime() > Date.now() + graceMs) {
           rowsErrored++;
