@@ -110,6 +110,21 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
   const [qrUrl, setQrUrl] = useState<string | null>(null)
   const [secondsLeft, setSecondsLeft] = useState(redemption.secondsRemaining)
   const [confirmed, setConfirmed] = useState(false)
+  const [askCancel, setAskCancel] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+
+  async function doCancel() {
+    setCancelling(true)
+    try {
+      await api.cancelRedemption(redemption.id)
+      onBack()
+    } catch (e: any) {
+      alert(e?.error || 'No se pudo cancelar el canje')
+    } finally {
+      setCancelling(false)
+      setAskCancel(false)
+    }
+  }
 
   useEffect(() => {
     import('qrcode').then(QRCode => {
@@ -194,7 +209,39 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
         <p key={secondsLeft} className="text-center text-lg font-bold text-indigo-600 mt-2 aa-count tabular-nums">
           Expira en {formatTime(secondsLeft)}
         </p>
+        <button
+          onClick={() => setAskCancel(true)}
+          className="w-full mt-6 py-3 rounded-xl border border-rose-200 text-rose-600 text-sm font-semibold hover:bg-rose-50 transition"
+        >
+          Cancelar canje y recuperar puntos
+        </button>
       </div>
+      {askCancel && (
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4">
+            <h3 className="text-lg font-bold text-slate-800">Cancelar canje</h3>
+            <p className="text-sm text-slate-600">
+              Tus <span className="font-semibold">{formatPoints(redemption.amount)} pts</span> vuelven a tu saldo al instante. Esta accion no se puede deshacer.
+            </p>
+            <div className="flex gap-2">
+              <button
+                disabled={cancelling}
+                onClick={() => setAskCancel(false)}
+                className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-semibold disabled:opacity-50"
+              >
+                No, volver
+              </button>
+              <button
+                disabled={cancelling}
+                onClick={doCancel}
+                className="flex-1 py-3 rounded-xl bg-rose-600 text-white font-semibold disabled:opacity-50"
+              >
+                {cancelling ? 'Cancelando...' : 'Si, cancelar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

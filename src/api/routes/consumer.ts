@@ -947,6 +947,62 @@ export default async function consumerRoutes(app: FastifyInstance) {
     };
   });
 
+  // Consumer-initiated cancel on a pending redemption. Same reversal
+  // mechanics as the TTL expiry (REDEMPTION_EXPIRED double-entry that
+  // refunds the consumer and empties the holding account), just triggered
+  // early and stamped with metadata.cancelledByConsumer so the history
+  // view can tell the two apart. Token status lands at 'expired' — same
+  // terminal state as a TTL burn, no schema migration needed (Genesis L2).
+  app.post('/api/consumer/redemption/:tokenId/cancel', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { accountId, tenantId } = request.consumer!;
+    const { tokenId } = request.params as { tokenId: string };
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(tokenId)) return reply.status(400).send({ error: 'Invalid tokenId' });
+
+    const token = await prisma.redemptionToken.findFirst({
+      where: { id: tokenId, tenantId, consumerAccountId: accountId },
+      include: { product: { select: { name: true, photoUrl: true } } },
+    });
+    if (!token) return reply.status(404).send({ error: 'Token not found' });
+    if (token.status !== 'pending') {
+      return reply.status(409).send({ error: `Cannot cancel a ${token.status} redemption` });
+    }
+
+    const { getSystemAccount } = await import('../../services/accounts.js');
+    const { writeDoubleEntry } = await import('../../services/ledger.js');
+    const holding = await getSystemAccount(tenantId, 'redemption_holding');
+    if (!holding) return reply.status(500).send({ error: 'redemption_holding not configured' });
+
+    // Skip the ledger reversal for 0-amount (full-cash) redemptions — the
+    // PENDING side only had a nominal 0.00000001 placeholder and refunding
+    // it would violate the CHECK constraint on positive amounts.
+    if (Number(token.amount) > 0) {
+      await writeDoubleEntry({
+        tenantId,
+        eventType: 'REDEMPTION_EXPIRED',
+        debitAccountId: holding.id,
+        creditAccountId: accountId,
+        amount: token.amount.toString(),
+        assetTypeId: token.assetTypeId,
+        referenceId: `EXPIRED-${tokenId}`,
+        referenceType: 'redemption_token',
+        metadata: {
+          productId: token.productId,
+          productName: token.product?.name || null,
+          productPhotoUrl: token.product?.photoUrl || null,
+          cancelledByConsumer: true,
+        },
+      });
+    }
+
+    await prisma.redemptionToken.update({
+      where: { id: tokenId },
+      data: { status: 'expired' },
+    });
+
+    return { cancelled: true, tokenId };
+  });
+
   app.get('/api/consumer/active-redemptions', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { accountId, tenantId } = request.consumer!;
     const now = new Date();

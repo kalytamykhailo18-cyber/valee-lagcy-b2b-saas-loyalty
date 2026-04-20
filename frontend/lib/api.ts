@@ -280,6 +280,8 @@ export const api = {
   },
   getRedemptionStatus: (tokenId: string) =>
     request(`/api/consumer/redemption-status/${tokenId}`),
+  cancelRedemption: (tokenId: string) =>
+    request(`/api/consumer/redemption/${tokenId}/cancel`, { method: 'POST' }),
   getRecurrenceRules: () => request('/api/merchant/recurrence-rules'),
   createRecurrenceRule: (data: any) =>
     request('/api/merchant/recurrence-rules', { method: 'POST', body: JSON.stringify(data) }),
