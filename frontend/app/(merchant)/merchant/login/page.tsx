@@ -13,11 +13,13 @@ export default function MerchantLogin() {
   const [tenantSlug, setTenantSlug] = useState('')
   const [tenantOptions, setTenantOptions] = useState<{ slug: string; name: string }[] | null>(null)
   const [error, setError] = useState('')
+  const [suspendedInfo, setSuspendedInfo] = useState<{ tenantName: string; message: string } | null>(null)
   const [loading, setLoading] = useState(false)
   const router = useRouter()
 
   async function handleLogin() {
     setError('')
+    setSuspendedInfo(null)
     setLoading(true)
     try {
       const data = await api.merchantLogin(email, password, tenantSlug || undefined)
@@ -37,6 +39,11 @@ export default function MerchantLogin() {
       if (e?.requiresTenantSlug && Array.isArray(e.tenantOptions)) {
         setTenantOptions(e.tenantOptions)
         setError('Este email esta vinculado a varios comercios. Elige uno.')
+      } else if (e?.tenantSuspended) {
+        // Server confirmed correct password + suspended tenant. Show a
+        // dedicated panel instead of the generic credentials error so the
+        // owner knows it's not a wrong-password problem.
+        setSuspendedInfo({ tenantName: e.tenantName || 'tu comercio', message: e.error })
       } else {
         setError(e.error || 'Credenciales invalidas')
       }
@@ -104,7 +111,21 @@ export default function MerchantLogin() {
               </div>
             )}
 
-            {error && (
+            {suspendedInfo && (
+              <div className="aa-pop bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900 space-y-2">
+                <p className="font-semibold">Cuenta suspendida</p>
+                <p>
+                  Tu cuenta del comercio <span className="font-semibold">{suspendedInfo.tenantName}</span> esta suspendida en este momento, por eso no podes entrar.
+                </p>
+                <p>
+                  Para reactivarla, escribinos a{' '}
+                  <a href="mailto:soporte@valee.app" className="font-semibold underline hover:text-amber-950">soporte@valee.app</a>
+                  {' '}o contactanos por WhatsApp y te ayudamos a regularizar la cuenta.
+                </p>
+              </div>
+            )}
+
+            {error && !suspendedInfo && (
               <div className="aa-pop bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{error}</div>
             )}
             <button

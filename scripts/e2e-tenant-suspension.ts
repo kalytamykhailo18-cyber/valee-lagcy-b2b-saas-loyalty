@@ -111,12 +111,31 @@ async function main() {
   await assert('existing owner token rejected post-deactivate', post.status === 401,
     `status=${post.status}`);
 
-  // Re-login with correct password should ALSO fail because tenant is inactive
+  // Re-login with correct password should return 403 tenantSuspended + a
+  // human-readable message (NOT a generic 401 that says "invalid").
   const reLogin = await http('/api/merchant/auth/login', null, {
     method: 'POST', body: JSON.stringify({ email, password }),
   });
-  await assert('owner cannot log back in while tenant is inactive',
-    reLogin.status === 401, `status=${reLogin.status}`);
+  await assert('correct-password login on suspended tenant → 403',
+    reLogin.status === 403, `status=${reLogin.status}`);
+  await assert('suspended response flags tenantSuspended=true',
+    reLogin.body?.tenantSuspended === true, `flag=${reLogin.body?.tenantSuspended}`);
+  await assert('suspended response carries tenantName',
+    typeof reLogin.body?.tenantName === 'string' && reLogin.body.tenantName.length > 0,
+    `tenantName=${reLogin.body?.tenantName}`);
+  await assert('suspended error mentions support contact',
+    /soporte@valee|Valee/i.test(reLogin.body?.error || ''),
+    `error="${reLogin.body?.error?.slice(0, 80)}"`);
+
+  // WRONG password on suspended tenant still returns generic 401 so
+  // attackers can't enumerate which emails correspond to real (suspended)
+  // merchants.
+  const wrongPwdSuspended = await http('/api/merchant/auth/login', null, {
+    method: 'POST', body: JSON.stringify({ email, password: 'definitely-wrong' }),
+  });
+  await assert('wrong password on suspended tenant stays generic 401',
+    wrongPwdSuspended.status === 401 && !wrongPwdSuspended.body?.tenantSuspended,
+    `status=${wrongPwdSuspended.status} flag=${wrongPwdSuspended.body?.tenantSuspended}`);
 
   // Audit log has TENANT_DEACTIVATED row with the reason
   const deactAudit = await prisma.auditLog.findFirst({

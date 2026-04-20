@@ -225,6 +225,27 @@ export default async function merchantRoutes(app: FastifyInstance) {
       tenant = matches[0].tenant;
     }
 
+    // If the tenant is suspended we want the UI to show a clear message
+    // instead of a generic "invalid credentials" — otherwise the owner tries
+    // his password three times and ends up rate-limited. We only surface the
+    // suspension state after verifying the password, so a stranger probing
+    // emails can't distinguish "wrong password" from "active/suspended".
+    if (tenant.status !== 'active') {
+      const staff = await prisma.staff.findFirst({
+        where: { tenantId: tenant.id, email, active: true },
+      });
+      if (staff && await bcrypt.compare(password, staff.passwordHash)) {
+        return reply.status(403).send({
+          error: `Tu cuenta del comercio ${tenant.name} esta suspendida. Comunicate con Valee (soporte@valee.app) para reactivarla.`,
+          tenantSuspended: true,
+          tenantName: tenant.name,
+        });
+      }
+      // Wrong password + suspended tenant: keep the generic message so an
+      // attacker can't enumerate tenants.
+      return reply.status(401).send({ error: 'Invalid credentials' });
+    }
+
     const staff = await authenticateStaff(email, password, tenant.id);
     if (!staff) return reply.status(401).send({ error: 'Invalid credentials' });
 
