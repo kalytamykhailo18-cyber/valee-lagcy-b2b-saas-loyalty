@@ -1,35 +1,61 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
-let isRefreshing = false;
+// Shared promise across parallel 401s in the same tab. Without this, every
+// in-flight request that got 401 tried to start its own refresh — the first
+// one won the isRefreshing guard and the rest bailed out returning false,
+// which triggered a cascade of redirectToLogin calls and the console error
+// storm Genesis hit when she opened the same account in two tabs (H1).
+// Now all parallel 401s await the same refresh and retry with the same new
+// access token.
+let refreshPromise: Promise<boolean> | null = null;
 
 async function tryRefreshToken(): Promise<boolean> {
-  if (isRefreshing) return false;
+  if (refreshPromise) return refreshPromise;
   const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
   if (!refreshToken) return false;
 
-  isRefreshing = true;
-  try {
-    // Try consumer refresh first, then merchant refresh
-    for (const endpoint of ['/api/consumer/auth/refresh', '/api/merchant/auth/refresh']) {
-      try {
-        const res = await fetch(`${API_BASE}${endpoint}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ refreshToken }),
-        });
-        if (!res.ok) continue;
-        const data = await res.json();
-        if (data.accessToken) {
-          localStorage.setItem('accessToken', data.accessToken);
-          if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
-          return true;
-        }
-      } catch { continue; }
+  refreshPromise = (async () => {
+    try {
+      // Try consumer refresh first, then merchant refresh
+      for (const endpoint of ['/api/consumer/auth/refresh', '/api/merchant/auth/refresh']) {
+        try {
+          const res = await fetch(`${API_BASE}${endpoint}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refreshToken }),
+          });
+          if (!res.ok) continue;
+          const data = await res.json();
+          if (data.accessToken) {
+            localStorage.setItem('accessToken', data.accessToken);
+            if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+            return true;
+          }
+        } catch { continue; }
+      }
+      return false;
+    } finally {
+      refreshPromise = null;
     }
-    return false;
-  } finally {
-    isRefreshing = false;
-  }
+  })();
+
+  return refreshPromise;
+}
+
+// Cross-tab coordination: when tab A rotates the refresh token, tab B's
+// stored refreshToken becomes stale. Without coordination, tab B's next
+// request 401s → its refresh call fails → it redirects to login and wipes
+// the tokens tab A just wrote (race). Listening to the storage event lets
+// tab B pick up the new accessToken as soon as tab A writes it, before its
+// own API calls 401, silencing the cascade.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'accessToken' && e.newValue) {
+      // Abort any pending refresh in flight — another tab already got a
+      // fresh token, we should use it.
+      refreshPromise = null;
+    }
+  });
 }
 
 function redirectToLogin() {
