@@ -308,9 +308,27 @@ export default function MerchantDashboard() {
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Circulacion</p>
-              <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate tabular-nums">
-                {formatPoints(metrics?.netCirculation || analytics?.netBalance || '0')}
-              </p>
+              {/* Clamp to 0 for display — negative circulacion means
+                  consumers are spending points awarded before the filter
+                  window, which is correct ledger-wise but looks alarming
+                  in a tile. The raw ledger state is still available to
+                  the admin in /admin/ledger. */}
+              {(() => {
+                const raw = Number(metrics?.netCirculation ?? analytics?.netBalance ?? 0)
+                const display = Math.max(0, raw)
+                return (
+                  <>
+                    <p className="text-xl lg:text-2xl font-bold text-indigo-600 mt-1 truncate tabular-nums">
+                      {formatPoints(String(display))}
+                    </p>
+                    {raw < 0 && (
+                      <p className="text-[10px] text-slate-400 mt-0.5">
+                        Se canjearon puntos previos a esta ventana
+                      </p>
+                    )}
+                  </>
+                )
+              })()}
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Activos 30d</p>
