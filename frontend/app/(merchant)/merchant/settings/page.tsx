@@ -56,9 +56,7 @@ export default function SettingsPage() {
   const [message, setMessage] = useState('')
   const [welcomeBonus, setWelcomeBonus] = useState('')
   const [rif, setRif] = useState('')
-  const [rifPrefix, setRifPrefix] = useState<'J' | 'V' | 'E' | 'G' | 'P'>('J')
-  const [rifBody, setRifBody] = useState('')
-  const [rifCheck, setRifCheck] = useState('')
+  const [rifRaw, setRifRaw] = useState('')
   const [rifError, setRifError] = useState('')
   const [exchangeSource, setExchangeSource] = useState('')
   const [refCurrency, setRefCurrency] = useState('usd')
@@ -87,19 +85,9 @@ export default function SettingsPage() {
       setPlanUsage(pu)
       setWelcomeBonus(String(s.welcomeBonusAmount))
       setRif(s.rif || '')
-      // Parse "J-12345678-9" into prefix/body/check
-      if (s.rif) {
-        const m = String(s.rif).toUpperCase().replace(/\s+/g, '').match(/^([JVEGP])-?(\d{7,9})-?(\d)$/)
-        if (m) {
-          setRifPrefix(m[1] as any)
-          setRifBody(m[2])
-          setRifCheck(m[3])
-        }
-      } else {
-        setRifPrefix('J')
-        setRifBody('')
-        setRifCheck('')
-      }
+      // Collapse the stored canonical "J-12345678-9" into the single-input
+      // form the UI now renders — letter + digits, no separators.
+      setRifRaw(s.rif ? String(s.rif).toUpperCase().replace(/[^A-Z0-9]/g, '') : '')
       setExchangeSource(s.preferredExchangeSource || '')
       setRefCurrency(s.referenceCurrency || 'usd')
       setLogoUrl(s.logoUrl || null)
@@ -141,21 +129,19 @@ export default function SettingsPage() {
       }
     }
 
-    // RIF: assemble the three parts into the canonical J-XXXXXXXX-X shape
-    // or send empty string to clear. Partial entries (one or two fields filled
-    // in) are rejected here so we never send a malformed value to the server.
+    // RIF: single input, normalize into canonical J-XXXXXXXX-X before send.
+    // Empty input is treated as explicit removal.
     let rifValue: string | undefined = undefined;
-    const anyRifFilled = rifBody.trim() || rifCheck.trim();
-    if (anyRifFilled) {
-      if (!/^\d{7,9}$/.test(rifBody) || !/^\d$/.test(rifCheck)) {
-        setRifError('RIF incompleto. Formato: J-XXXXXXXX-X')
+    const cleaned = rifRaw.toUpperCase().replace(/[^A-Z0-9]/g, '')
+    if (cleaned.length > 0) {
+      const m = cleaned.match(/^([JVEGP])(\d{7,9})(\d)$/)
+      if (!m) {
+        setRifError('RIF invalido. Ejemplo: J123456789')
         setMessage('Error: revisa el RIF')
         return
       }
-      rifValue = `${rifPrefix}-${rifBody}-${rifCheck}`
+      rifValue = `${m[1]}-${m[2]}-${m[3]}`
     } else if (settings?.rif) {
-      // User cleared all three inputs — treat that as explicit removal so the
-      // server clears the field. Empty string is the documented signal.
       rifValue = ''
     }
 
@@ -339,40 +325,24 @@ export default function SettingsPage() {
                   <p className="text-xs text-slate-400 mt-1">Cuantos puntos recibe cada cliente nuevo. 0 desactiva.</p>
                 </div>
 
-                {/* RIF — the backend already rejects facturas whose RIF doesn't
-                    match tenant.rif when a fiscal_invoice is submitted. Input
-                    stays split into prefix/body/check so typos in the separator
-                    don't turn into false mismatches later. */}
+                {/* RIF — single input: letter + digits, no separators.
+                    We normalize into J-XXXXXXXX-X before sending. */}
                 <div>
                   <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio</label>
-                  <div className="mt-1 flex items-center gap-2">
-                    <select
-                      value={rifPrefix}
-                      onChange={e => { setRifPrefix(e.target.value as any); setRifError('') }}
-                      className="aa-field px-2 py-2.5 rounded-lg border border-slate-200 text-sm bg-white"
-                    >
-                      {['J','V','E','G','P'].map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                    <span className="text-slate-400">-</span>
-                    <input
-                      type="text" inputMode="numeric"
-                      value={rifBody}
-                      onChange={e => { setRifBody(e.target.value.replace(/\D/g, '').slice(0, 9)); setRifError('') }}
-                      placeholder="12345678"
-                      className="aa-field aa-field-emerald flex-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm tabular-nums"
-                    />
-                    <span className="text-slate-400">-</span>
-                    <input
-                      type="text" inputMode="numeric"
-                      value={rifCheck}
-                      onChange={e => { setRifCheck(e.target.value.replace(/\D/g, '').slice(0, 1)); setRifError('') }}
-                      placeholder="9"
-                      className="aa-field aa-field-emerald w-14 px-3 py-2.5 rounded-lg border border-slate-200 text-sm text-center tabular-nums"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={rifRaw}
+                    onChange={e => {
+                      const cleaned = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11)
+                      setRifRaw(cleaned)
+                      if (rifError) setRifError('')
+                    }}
+                    placeholder="Ej: J123456789"
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm tabular-nums"
+                  />
                   {rifError && <p className="text-xs text-red-600 mt-1">{rifError}</p>}
                   <p className="text-xs text-slate-400 mt-1">
-                    Cuando el RIF esta configurado, solo aceptamos facturas fiscales donde aparezca este mismo RIF. Facturas de otros comercios se rechazan automaticamente.
+                    Empieza con J, V, E, G o P y luego los numeros. Cuando el RIF esta configurado, solo aceptamos facturas fiscales donde aparezca este mismo RIF.
                   </p>
                 </div>
               </div>
