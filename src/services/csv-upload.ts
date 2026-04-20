@@ -127,9 +127,30 @@ export async function processCSV(
         errorDetails.push({ row: i + 1, reason: `Invalid amount: ${amountStr}` });
         continue;
       }
+      if (amount <= 0) {
+        rowsErrored++;
+        errorDetails.push({ row: i + 1, reason: `Amount must be positive (got ${amount})` });
+        continue;
+      }
 
       const transactionDate = dateCol !== -1 && fields[dateCol] ? new Date(fields[dateCol]) : null;
       const customerPhone = phoneCol !== -1 && fields[phoneCol] ? fields[phoneCol] : null;
+
+      // Guard: a transaction dated in the future is always wrong (bulk CSVs
+      // from POS systems can leak bad dates, or a malicious merchant could
+      // pre-load "future" facturas to farm points). Allow a 24h grace window
+      // so timezone edges don't reject same-day uploads.
+      if (transactionDate && !isNaN(transactionDate.getTime())) {
+        const graceMs = 24 * 60 * 60 * 1000;
+        if (transactionDate.getTime() > Date.now() + graceMs) {
+          rowsErrored++;
+          errorDetails.push({
+            row: i + 1,
+            reason: `Transaction date is in the future: ${transactionDate.toISOString().slice(0, 10)}`,
+          });
+          continue;
+        }
+      }
 
       // Check if a pending_validation invoice already exists for this number
       // (consumer submitted photo before CSV was uploaded — reconciliation case)
