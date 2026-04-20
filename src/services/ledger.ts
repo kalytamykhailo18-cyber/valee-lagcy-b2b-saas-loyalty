@@ -187,16 +187,37 @@ export async function getAccountBalanceBreakdown(
   assetTypeId: string,
   tenantId: string
 ): Promise<{ confirmed: string; provisional: string; total: string }> {
+  // REVERSALs land as status='confirmed' with event_type='REVERSAL'. The
+  // raw status-bucketed formula used to leave their target amount in the
+  // provisional bucket even after they had been reversed, because the
+  // original provisional entry can't be updated in an immutable ledger.
+  // Consumers saw phantom "X en verificacion" points that had already
+  // been reversed (Eric hit this on Kozmo2 after the Bs→EUR fix).
+  //
+  // Treatment: REVERSALs on this account (debits) come out of the
+  // provisional bucket — they're cancelling a previously-provisional
+  // credit — and are excluded from the confirmed bucket. The grand total
+  // is unchanged; only the split changes.
   const result = await prisma.$queryRaw<[{ confirmed: string; provisional: string }]>`
     SELECT
       COALESCE(
-        SUM(CASE WHEN status = 'confirmed' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
-        SUM(CASE WHEN status = 'confirmed' AND entry_type = 'DEBIT' THEN amount ELSE 0 END),
+        SUM(CASE
+          WHEN status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'CREDIT'
+            THEN amount ELSE 0 END) -
+        SUM(CASE
+          WHEN status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'DEBIT'
+            THEN amount ELSE 0 END),
         0
       )::text AS confirmed,
       COALESCE(
         SUM(CASE WHEN status = 'provisional' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
-        SUM(CASE WHEN status = 'provisional' AND entry_type = 'DEBIT' THEN amount ELSE 0 END),
+        SUM(CASE WHEN status = 'provisional' AND entry_type = 'DEBIT' THEN amount ELSE 0 END) -
+        SUM(CASE
+          WHEN status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'DEBIT'
+            THEN amount ELSE 0 END) +
+        SUM(CASE
+          WHEN status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'CREDIT'
+            THEN amount ELSE 0 END),
         0
       )::text AS provisional
     FROM ledger_entries
