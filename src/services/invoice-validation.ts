@@ -667,22 +667,30 @@ export async function validateInvoice(params: {
   let normalizedAmount = invoice.amount.toString();
   let exchangeRateUsed: { source: string; currency: string; rateBs: number } | null = null;
 
-  if (tenantConfig?.preferredExchangeSource) {
-    const { convertBsToReference, getRateAtDate } = await import('./exchange-rates.js');
+  // Pick an exchange source. Prefer the tenant's choice; if none is set, fall
+  // back to the default for the reference currency so a fresh tenant still
+  // gets the Bs→ref normalization done before the points multiplier is
+  // applied. Without this fallback the raw Bs amount flowed straight into
+  // convertToLoyaltyValue and produced absurd point totals.
+  const { convertBsToReference, getRateAtDate, defaultExchangeSource } = await import('./exchange-rates.js');
+  const initialSource = (tenantConfig?.preferredExchangeSource as any)
+    || (tenantConfig?.referenceCurrency ? defaultExchangeSource(tenantConfig.referenceCurrency) : null);
+
+  if (initialSource && tenantConfig?.referenceCurrency) {
     const txDate = invoice.transactionDate || invoice.createdAt;
     let converted = await convertBsToReference(
       Number(invoice.amount),
-      tenantConfig.preferredExchangeSource,
+      initialSource,
       tenantConfig.referenceCurrency,
       txDate
     );
-    let sourceUsed: string = tenantConfig.preferredExchangeSource;
+    let sourceUsed: string = initialSource;
     if (converted === null) {
-      // Fallback to BCV if the preferred source has no rate available
+      // Fallback to BCV if the chosen source has no rate available
       converted = await convertBsToReference(Number(invoice.amount), 'bcv', tenantConfig.referenceCurrency, txDate);
       if (converted !== null) {
         sourceUsed = 'bcv';
-        console.log(`[Validation] Using BCV fallback (preferred source "${tenantConfig.preferredExchangeSource}" had no rate)`);
+        console.log(`[Validation] Using BCV fallback (source "${initialSource}" had no rate)`);
       }
     }
     if (converted !== null) {
@@ -695,7 +703,7 @@ export async function validateInvoice(params: {
           rateBs: rateInfo.rateBs,
         };
       }
-      console.log(`[Validation] BS→${tenantConfig.referenceCurrency.toUpperCase()} normalization: Bs ${invoice.amount} ÷ ${exchangeRateUsed?.rateBs} = ${normalizedAmount}`);
+      console.log(`[Validation] BS→${tenantConfig.referenceCurrency.toUpperCase()} normalization: Bs ${invoice.amount} ÷ ${exchangeRateUsed?.rateBs} = ${normalizedAmount} (source=${sourceUsed}${tenantConfig.preferredExchangeSource ? '' : ' default'})`);
     } else {
       console.error(`[Validation] No exchange rate available — using raw Bs amount (likely wrong)`);
     }
@@ -955,31 +963,36 @@ export async function createPendingValidation(params: {
   const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
   if (!poolAccount) throw new Error('issued_value_pool not found');
 
-  // BS → reference currency normalization (same logic as Stage D)
+  // BS → reference currency normalization (same logic as Stage D).
+  // Falls back to the default source for the tenant's reference currency
+  // when preferredExchangeSource is null so every tenant gets the Bs→ref
+  // step before the points multiplier is applied.
   let normalizedAmount = totalAmount.toString();
   const tenantConfig = await prisma.tenant.findUnique({ where: { id: tenantId } });
-  if (tenantConfig?.preferredExchangeSource) {
-    const { convertBsToReference } = await import('./exchange-rates.js');
+  const { convertBsToReference, defaultExchangeSource } = await import('./exchange-rates.js');
+  const initialSource = (tenantConfig?.preferredExchangeSource as any)
+    || (tenantConfig?.referenceCurrency ? defaultExchangeSource(tenantConfig.referenceCurrency) : null);
+
+  if (initialSource && tenantConfig?.referenceCurrency) {
     const converted = await convertBsToReference(
       totalAmount,
-      tenantConfig.preferredExchangeSource,
+      initialSource,
       tenantConfig.referenceCurrency,
       new Date()
     );
     if (converted !== null) {
       normalizedAmount = converted.toFixed(8);
-      console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()}: Bs ${totalAmount} → ${normalizedAmount}`);
+      console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()}: Bs ${totalAmount} → ${normalizedAmount} (source=${initialSource}${tenantConfig.preferredExchangeSource ? '' : ' default'})`);
     } else {
-      // Fallback: the preferred source has no rate available. Try BCV as a safe
-      // default (it's always fetched) instead of silently using the raw Bs
-      // amount, which would multiply by the tenant's conversion_rate and
-      // produce absurd point values.
+      // The chosen source has no rate available. Try BCV as a last-resort
+      // default instead of silently using the raw Bs amount, which would
+      // multiply by the tenant's conversion_rate and blow up point totals.
       const fallback = await convertBsToReference(totalAmount, 'bcv', tenantConfig.referenceCurrency, new Date());
       if (fallback !== null) {
         normalizedAmount = fallback.toFixed(8);
-        console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()} via BCV fallback: Bs ${totalAmount} → ${normalizedAmount} (preferred source "${tenantConfig.preferredExchangeSource}" had no rate)`);
+        console.log(`[PendingValidation] BS→${tenantConfig.referenceCurrency.toUpperCase()} via BCV fallback: Bs ${totalAmount} → ${normalizedAmount} (source "${initialSource}" had no rate)`);
       } else {
-        console.error(`[PendingValidation] No exchange rate available for preferred source "${tenantConfig.preferredExchangeSource}" or fallback bcv — using raw Bs amount (likely wrong)`);
+        console.error(`[PendingValidation] No exchange rate available for "${initialSource}" or BCV fallback — using raw Bs amount (likely wrong)`);
       }
     }
   }

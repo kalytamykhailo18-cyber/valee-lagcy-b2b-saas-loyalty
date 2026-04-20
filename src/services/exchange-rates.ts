@@ -140,3 +140,18 @@ export async function convertBsToReference(
   if (!rate || rate.rateBs <= 0) return null;
   return bsAmount / rate.rateBs;
 }
+
+/**
+ * Sensible default exchange source for a given reference currency when the
+ * tenant hasn't picked one. Used by the invoice pipeline so a freshly
+ * onboarded tenant can't accidentally end up multiplying raw Bs by the
+ * points rate (Eric hit this on Kozmo2: preferred_exchange_source was null,
+ * so 8,616 Bs × 20 became 172,327 pts instead of ~15 EUR × 20 = 303 pts).
+ */
+export function defaultExchangeSource(currency: ReferenceCurrency | string | null | undefined): ExchangeSource | null {
+  switch (currency) {
+    case 'usd': return 'bcv';
+    case 'eur': return 'euro_bcv';
+    default:    return null;
+  }
+}
