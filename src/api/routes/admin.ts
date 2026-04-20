@@ -99,16 +99,72 @@ export default async function adminRoutes(app: FastifyInstance) {
 
   app.patch('/api/admin/tenants/:id/deactivate', { preHandler: [requireAdminAuth] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const { reason } = (request.body as { reason?: string }) || {};
+    if (!reason || reason.trim().length < 5) {
+      return reply.status(400).send({ error: 'A reason (min 5 chars) is required' });
+    }
+
     const tenant = await prisma.tenant.findUnique({ where: { id } });
     if (!tenant) return reply.status(404).send({ error: 'Tenant not found' });
 
-    const updated = await prisma.tenant.update({ where: { id }, data: { status: 'inactive' } });
+    // Atomic so a partial suspension (staff locked out but tenant status
+    // still 'active') is never observable.
+    const [updated, staffBump] = await prisma.$transaction([
+      prisma.tenant.update({ where: { id }, data: { status: 'inactive' } }),
+      // Kill every existing staff session in this tenant. Consumer sessions
+      // are left alone on purpose — they'll hit the tenant.status='active'
+      // gate on every tenant-scoped endpoint, so the suspension is
+      // effective without mass-logging-out thousands of end users.
+      prisma.staff.updateMany({
+        where: { tenantId: id },
+        data: { tokensInvalidatedAt: new Date() },
+      }),
+    ]);
 
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${id}::uuid, ${(request as any).admin.adminId}::uuid,
         'admin', 'admin', 'TENANT_DEACTIVATED', 'success',
-        ${JSON.stringify({ tenantName: tenant.name })}::jsonb, now())
+        ${JSON.stringify({ tenantName: tenant.name, reason: reason.trim(), staffSessionsKilled: staffBump.count })}::jsonb, now())
+    `;
+
+    return {
+      success: true,
+      tenant: updated,
+      staffSessionsKilled: staffBump.count,
+    };
+  });
+
+  // ---- ADMIN: Reactivate tenant ----
+  // Tenants currently can't be reactivated via the API — only deactivated.
+  // This endpoint flips status back to 'active' with a mandatory reason so
+  // a mistake or lifted suspension doesn't require a DB session.
+  app.patch('/api/admin/tenants/:id/reactivate', { preHandler: [requireAdminAuth] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { reason } = (request.body as { reason?: string }) || {};
+    if (!reason || reason.trim().length < 5) {
+      return reply.status(400).send({ error: 'A reason (min 5 chars) is required' });
+    }
+
+    const tenant = await prisma.tenant.findUnique({ where: { id } });
+    if (!tenant) return reply.status(404).send({ error: 'Tenant not found' });
+
+    const [updated] = await prisma.$transaction([
+      prisma.tenant.update({ where: { id }, data: { status: 'active' } }),
+      // Clear the force-logout marker so staff can log back in and get a
+      // working token. Without this, fresh tokens issued right after
+      // reactivation have iat <= tokens_invalidated_at and silently 401.
+      prisma.staff.updateMany({
+        where: { tenantId: id },
+        data: { tokensInvalidatedAt: null },
+      }),
+    ]);
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${id}::uuid, ${(request as any).admin.adminId}::uuid,
+        'admin', 'admin', 'TENANT_CREATED', 'success',
+        ${JSON.stringify({ tenantName: tenant.name, reason: reason.trim(), event: 'reactivated' })}::jsonb, now())
     `;
 
     return { success: true, tenant: updated };

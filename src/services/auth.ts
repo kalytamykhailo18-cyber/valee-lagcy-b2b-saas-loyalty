@@ -141,9 +141,14 @@ export function issueAdminTokens(payload: AdminTokenPayload) {
 export async function authenticateStaff(email: string, password: string, tenantId: string) {
   const staff = await prisma.staff.findUnique({
     where: { tenantId_email: { tenantId, email } },
+    include: { tenant: { select: { status: true } } },
   });
 
   if (!staff || !staff.active) return null;
+  // A suspended/inactive tenant locks out its staff too — otherwise an
+  // owner could keep operating after the platform deactivated them, which
+  // defeats the whole purpose of suspension.
+  if (staff.tenant.status !== 'active') return null;
 
   const valid = await bcrypt.compare(password, staff.passwordHash);
   if (!valid) return null;
