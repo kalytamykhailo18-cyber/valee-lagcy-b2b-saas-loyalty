@@ -506,6 +506,91 @@ export async function validateInvoice(params: {
   }
   const effectiveBranchForPending = params.branchId || preStageStaffBranchId || null;
 
+  // STAGE B2: payment_reference dedup for vouchers. Bank vouchers (Banco
+  // de Venezuela, etc.) always print a unique reference that's supposed
+  // to be globally unique. Genesis bypassed the invoice_number dedup by
+  // submitting the same voucher where the OCR parsed a slightly different
+  // date, generating a different synthetic VOUCHER-... key. Checking the
+  // bank's own payment_reference catches the duplicate regardless of
+  // what the synthetic key turned out to be.
+  if (extracted.document_type === 'voucher' && extracted.payment_reference) {
+    const refClean = String(extracted.payment_reference).replace(/\s+/g, '').toUpperCase();
+    if (refClean.length >= 4) {
+      const dup = await prisma.ledgerEntry.findFirst({
+        where: {
+          tenantId,
+          eventType: 'INVOICE_CLAIMED',
+          entryType: 'CREDIT',
+          metadata: { path: ['paymentReference'], equals: refClean },
+        },
+        select: { id: true, accountId: true, referenceId: true },
+      });
+      if (dup) {
+        console.log(`[Validation] Voucher payment_reference duplicate: tenant=${tenantId} ref=${refClean} existingEntry=${dup.id.slice(0,8)}`);
+        const senderAccount = await prisma.account.findUnique({
+          where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+          select: { id: true },
+        });
+        const sameUser = senderAccount?.id === dup.accountId;
+        return {
+          success: false,
+          stage: 'cross_reference',
+          message: sameUser
+            ? 'Ya enviaste este voucher antes. La transaccion ya esta registrada en tu cuenta.'
+            : 'Este voucher ya fue enviado por otro cliente. No se puede reclamar dos veces.',
+          invoiceNumber: dup.referenceId,
+        };
+      }
+    }
+  }
+
+  // STAGE B3: same-consumer semantic dedup. Catches the 'resubmit the
+  // same receipt with OCR noise' class of bypass when the image hash
+  // doesn't match (WhatsApp recompresses on re-upload): same tenant +
+  // same consumer + same amount (±tolerance) + transaction_date within
+  // a 48h window = almost certainly a duplicate. Not global (different
+  // customers can legitimately have the same amount).
+  {
+    const senderAccount = await prisma.account.findUnique({
+      where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+      select: { id: true },
+    });
+    if (senderAccount && extracted.transaction_date) {
+      const txTime = new Date(extracted.transaction_date).getTime();
+      if (Number.isFinite(txTime)) {
+        const windowMs = 48 * 60 * 60 * 1000;
+        const tolerance = parseFloat(process.env.INVOICE_AMOUNT_TOLERANCE || '0.05');
+        const amt = Number(extracted.total_amount || 0);
+        const floor = amt * (1 - tolerance);
+        const ceil  = amt * (1 + tolerance);
+        const nearbyInvoice = await prisma.invoice.findFirst({
+          where: {
+            tenantId,
+            consumerAccountId: senderAccount.id,
+            amount: { gte: floor, lte: ceil },
+            transactionDate: {
+              gte: new Date(txTime - windowMs),
+              lte: new Date(txTime + windowMs),
+            },
+            // Different invoice_number — we're looking for SEMANTIC dupes
+            // the invoice_number check below would miss.
+            NOT: { invoiceNumber: extracted.invoice_number },
+          },
+          select: { id: true, invoiceNumber: true, status: true },
+        });
+        if (nearbyInvoice) {
+          console.log(`[Validation] Semantic dedup hit: tenant=${tenantId} amount=${amt} nearExisting=${nearbyInvoice.invoiceNumber} status=${nearbyInvoice.status}`);
+          return {
+            success: false,
+            stage: 'cross_reference',
+            message: 'Detectamos una factura tuya muy parecida (mismo monto, fechas cercanas). Si es otra compra diferente, envia la foto completa mostrando bien el numero de factura.',
+            invoiceNumber: nearbyInvoice.invoiceNumber,
+          };
+        }
+      }
+    }
+  }
+
   // STAGE C: Merchant data cross-reference
   // The invoice number is THE uniqueness key. Once an invoice number has been
   // processed (in any state) it cannot be re-used, ever. Amount is NEVER used
@@ -722,6 +807,15 @@ export async function validateInvoice(params: {
   const ledgerMetadata: Record<string, unknown> = {};
   if (imageHash) {
     ledgerMetadata.imageHash = imageHash;
+  }
+  // Stamp payment_reference on the ledger so Stage B2 can catch a
+  // second submission of the same voucher even if the image hash or
+  // synthetic invoice_number differs (Genesis H8).
+  if (extracted.payment_reference) {
+    const refClean = String(extracted.payment_reference).replace(/\s+/g, '').toUpperCase();
+    if (refClean.length >= 4) {
+      ledgerMetadata.paymentReference = refClean;
+    }
   }
   if (exchangeRateUsed) {
     ledgerMetadata.originalAmount = invoice.amount.toString();
@@ -1004,6 +1098,13 @@ export async function createPendingValidation(params: {
     const pendingMetadata: Record<string, unknown> = {};
     if (params.imageHash) pendingMetadata.imageHash = params.imageHash;
     if (params.staffId) pendingMetadata.staffId = params.staffId;
+    // Stamp payment_reference on the pending row so the voucher dedup
+    // also catches a resubmit while the original is still pending
+    // (Genesis H8).
+    if (params.extractedData?.payment_reference) {
+      const refClean = String(params.extractedData.payment_reference).replace(/\s+/g, '').toUpperCase();
+      if (refClean.length >= 4) pendingMetadata.paymentReference = refClean;
+    }
     ledgerResult = await writeDoubleEntry({
       tenantId,
       eventType: 'INVOICE_CLAIMED',
@@ -1042,16 +1143,27 @@ export async function createPendingValidation(params: {
     docType === 'voucher' ? 'voucher' :
     'photo_submission';
 
+  // Parse the extracted transaction_date into a Date for storage, so the
+  // semantic same-amount / same-day dedup has a field to filter on. The
+  // earlier version inserted without this and the guard saw NULL for
+  // every pending row.
+  let pendingTxDate: Date | null = null;
+  if (params.extractedData?.transaction_date) {
+    const parsed = new Date(params.extractedData.transaction_date);
+    if (!isNaN(parsed.getTime())) pendingTxDate = parsed;
+  }
+
   await prisma.$executeRawUnsafe(
-    `INSERT INTO invoices (id, tenant_id, invoice_number, amount, customer_phone, status, source,
+    `INSERT INTO invoices (id, tenant_id, invoice_number, amount, transaction_date, customer_phone, status, source,
       consumer_account_id, ledger_entry_id, ocr_raw_text, extracted_data,
       submitted_latitude, submitted_longitude, branch_id, created_at, updated_at)
-    VALUES (gen_random_uuid(), $1::uuid, $2, $3, $4, 'pending_validation', $5::"InvoiceSource",
-      $6::uuid, $7::uuid, $8, $9::jsonb, $10::decimal, $11::decimal, $12::uuid, now(), now())
+    VALUES (gen_random_uuid(), $1::uuid, $2, $3, $4::timestamptz, $5, 'pending_validation', $6::"InvoiceSource",
+      $7::uuid, $8::uuid, $9, $10::jsonb, $11::decimal, $12::decimal, $13::uuid, now(), now())
     ON CONFLICT (tenant_id, invoice_number) DO NOTHING`,
     tenantId,
     invoiceNumber,
     totalAmount,
+    pendingTxDate,
     senderPhone,
     sourceLiteral,
     consumerAccount.id,
