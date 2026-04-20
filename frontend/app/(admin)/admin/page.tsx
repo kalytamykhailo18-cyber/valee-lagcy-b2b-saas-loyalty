@@ -68,6 +68,7 @@ export default function AdminDashboard() {
           <Link href="/admin/adjustments" className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Ajustes</Link>
           <Link href="/admin/health"      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Salud de plataforma</Link>
           <Link href="/admin/sessions"    className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Sesiones</Link>
+          <Link href="/admin/audit"       className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Audit log</Link>
         </nav>
       </div>
 

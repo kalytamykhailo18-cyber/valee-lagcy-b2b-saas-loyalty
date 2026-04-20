@@ -138,16 +138,16 @@ async function main() {
       `includes=${js.includes('/admin/sessions')}`);
   }
 
-  const sessChunk = pageHtml.match(/\/_next\/static\/chunks\/app\/\(admin\)\/admin\/sessions\/page-[a-f0-9]+\.js/);
-  if (sessChunk) {
-    const js = await (await fetch(`${FRONTEND}${sessChunk[0]}`)).text();
-    await assert('sessions page chunk references account search',
-      js.includes('/api/admin/accounts/search'),
-      `includes=${js.includes('/api/admin/accounts/search')}`);
-    await assert('sessions page chunk references force-logout',
-      js.includes('force-logout'),
-      `includes=${js.includes('force-logout')}`);
-  }
+  // Literal URLs live in lib/api.ts, which Next.js may ship in a shared
+  // chunk. Scan every chunk linked from the page HTML.
+  const chunkUrls = Array.from(pageHtml.matchAll(/\/_next\/static\/chunks\/[^"']+\.js/g)).map(m => m[0]);
+  const chunkBodies = await Promise.all(chunkUrls.map(u => fetch(`${FRONTEND}${u}`).then(r => r.text())));
+  await assert('some /admin/sessions chunk references account search',
+    chunkBodies.some(js => js.includes('/api/admin/accounts/search')),
+    `scanned=${chunkUrls.length}`);
+  await assert('some /admin/sessions chunk references force-logout',
+    chunkBodies.some(js => js.includes('force-logout')),
+    `scanned=${chunkUrls.length}`);
 
   console.log('\n=== ALL ASSERTIONS PASSED ===');
   process.exit(0);

@@ -914,22 +914,53 @@ export default async function adminRoutes(app: FastifyInstance) {
   });
 
   // ---- AUDIT LOG VIEW ----
-  app.get('/api/admin/audit-log', { preHandler: [requireAdminAuth] }, async (request) => {
+  app.get('/api/admin/audit-log', { preHandler: [requireAdminAuth] }, async (request, reply) => {
     const { tenantId, actionType, limit = '50', offset = '0' } = request.query as any;
+
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (tenantId && !UUID_RE.test(String(tenantId))) {
+      return reply.status(400).send({ error: 'tenantId must be a valid UUID' });
+    }
+    const lim = Math.min(200, Math.max(1, parseInt(limit) || 50));
+    const off = Math.max(0, parseInt(offset) || 0);
 
     const where: any = {};
     if (tenantId) where.tenantId = tenantId;
     if (actionType) where.actionType = actionType;
 
-    const entries = await prisma.$queryRaw<any[]>`
-      SELECT al.*, t.name as tenant_name
-      FROM audit_log al
-      LEFT JOIN tenants t ON t.id = al.tenant_id
-      ${tenantId ? prisma.$queryRaw`WHERE al.tenant_id = ${tenantId}::uuid` : prisma.$queryRaw`WHERE 1=1`}
-      ORDER BY al.created_at DESC
-      LIMIT ${parseInt(limit)} OFFSET ${parseInt(offset)}
-    `;
+    const [rows, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take: lim,
+        skip: off,
+        include: {
+          tenant: { select: { name: true, slug: true } },
+          consumerAccount: { select: { phoneNumber: true } },
+        },
+      }),
+      prisma.auditLog.count({ where }),
+    ]);
 
-    return { entries };
+    return {
+      total,
+      limit: lim,
+      offset: off,
+      entries: rows.map(r => ({
+        id: r.id,
+        tenantId: r.tenantId,
+        tenantName: r.tenant?.name || null,
+        actorType: r.actorType,
+        actorRole: r.actorRole,
+        actorId: r.actorId,
+        actionType: r.actionType,
+        consumerAccountId: r.consumerAccountId,
+        consumerPhone: r.consumerAccount?.phoneNumber || null,
+        outcome: r.outcome,
+        amount: r.amount?.toString() || null,
+        metadata: r.metadata,
+        createdAt: r.createdAt,
+      })),
+    };
   });
 }

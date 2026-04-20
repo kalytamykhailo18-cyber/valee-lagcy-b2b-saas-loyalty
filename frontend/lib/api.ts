@@ -340,8 +340,6 @@ export const api = {
   getTenants: () => request('/api/admin/tenants'),
   createTenant: (data: any) =>
     request('/api/admin/tenants', { method: 'POST', body: JSON.stringify(data) }),
-  deactivateTenant: (id: string) =>
-    request(`/api/admin/tenants/${id}/deactivate`, { method: 'PATCH' }),
   getLedger: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request(`/api/admin/ledger${qs}`);
@@ -363,4 +361,17 @@ export const api = {
     request(`/api/admin/accounts/search?phone=${encodeURIComponent(phone)}`),
   searchStaff: (email: string) =>
     request(`/api/admin/staff/search?email=${encodeURIComponent(email)}`),
+  getAuditLog: (params: { tenantId?: string; actionType?: string; limit?: number; offset?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.tenantId)   qs.set('tenantId', params.tenantId);
+    if (params.actionType) qs.set('actionType', params.actionType);
+    if (params.limit != null)  qs.set('limit',  String(params.limit));
+    if (params.offset != null) qs.set('offset', String(params.offset));
+    const q = qs.toString();
+    return request(`/api/admin/audit-log${q ? `?${q}` : ''}`);
+  },
+  deactivateTenant: (tenantId: string, reason: string) =>
+    request(`/api/admin/tenants/${tenantId}/deactivate`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
+  reactivateTenant: (tenantId: string, reason: string) =>
+    request(`/api/admin/tenants/${tenantId}/reactivate`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
 };

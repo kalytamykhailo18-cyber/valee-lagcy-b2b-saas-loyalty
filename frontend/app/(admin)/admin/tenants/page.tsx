@@ -29,7 +29,19 @@ export default function TenantManagement() {
   }
 
   async function handleDeactivate(id: string) {
-    try { await api.deactivateTenant(id); loadTenants() } catch {}
+    // Suspension now requires a mandatory reason (min 5 chars) for the audit
+    // trail and the force-logout of all staff that happens server-side.
+    const reason = window.prompt('Motivo para desactivar el comercio (minimo 5 caracteres):', '')
+    if (!reason || reason.trim().length < 5) {
+      if (reason !== null) alert('El motivo debe tener al menos 5 caracteres.')
+      return
+    }
+    try {
+      await api.deactivateTenant(id, reason.trim())
+      loadTenants()
+    } catch (e: any) {
+      alert(e?.error || 'No se pudo desactivar el comercio')
+    }
   }
 
   return (

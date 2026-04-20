@@ -44,15 +44,17 @@ async function main() {
   // Same check for the health page itself: the chunk must reference the
   // getPlatformHealth API path.
   const healthHtml = html;
-  const hChunkMatch = healthHtml.match(/\/_next\/static\/chunks\/app\/\(admin\)\/admin\/health\/page-[a-f0-9]+\.js/);
-  await assert('/admin/health page JS chunk URL is present',
-    !!hChunkMatch, `chunk=${hChunkMatch?.[0]?.slice(0, 60)}`);
-  if (hChunkMatch) {
-    const chunk = await (await fetch(`${FRONTEND}${hChunkMatch[0]}`)).text();
-    await assert('health page chunk calls /api/admin/platform-health',
-      chunk.includes('/api/admin/platform-health'),
-      `includes=${chunk.includes('/api/admin/platform-health')}`);
+  // Literal API URL lives in the shared lib/api.ts chunk, which may be a
+  // different chunk than the per-route page chunk. Scan every chunk the
+  // page HTML references.
+  const chunkUrls = Array.from(healthHtml.matchAll(/\/_next\/static\/chunks\/[^"']+\.js/g)).map(m => m[0]);
+  let foundHealth = false;
+  for (const u of chunkUrls) {
+    const js = await (await fetch(`${FRONTEND}${u}`)).text();
+    if (js.includes('/api/admin/platform-health')) { foundHealth = true; break; }
   }
+  await assert('some /admin/health chunk calls /api/admin/platform-health',
+    foundHealth, `scanned=${chunkUrls.length} found=${foundHealth}`);
 
   // 3. Backend endpoint is up (the page will call it on mount).
   // Hit it unauthenticated to confirm the route is registered (expect 401).
