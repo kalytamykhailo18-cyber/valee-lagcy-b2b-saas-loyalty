@@ -229,6 +229,18 @@ export default function MerchantDashboard() {
 
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
+        {metrics?.rifMissing && (
+          <div className="mt-4 bg-amber-50 border border-amber-300 rounded-xl p-4 flex items-start gap-3">
+            <div className="flex-1">
+              <p className="font-semibold text-amber-900">Falta configurar tu RIF</p>
+              <p className="text-sm text-amber-800 mt-1">Las facturas fiscales se rechazan automaticamente hasta que lo agregues. Completalo en Configuracion.</p>
+            </div>
+            <Link href="/merchant/settings" className="text-sm font-semibold text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-2 rounded-lg transition whitespace-nowrap">
+              Configurar RIF
+            </Link>
+          </div>
+        )}
+
         {/* Top row: Branch selector (if exists) + Multiplier card side by side */}
         <div className={`grid gap-4 mt-4 lg:mt-0 ${branches.length > 0 ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
           {branches.length > 0 && (

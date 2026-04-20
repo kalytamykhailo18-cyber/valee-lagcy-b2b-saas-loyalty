@@ -45,6 +45,21 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { tenants };
   });
 
+  // Tenants with missing RIF — for the admin backfill audit (Genesis M1).
+  // Fiscal invoices to these tenants get auto-rejected until the owner
+  // fills it in, so admin needs to see the list and prod owners to finish.
+  app.get('/api/admin/tenants-missing-rif', { preHandler: [requireAdminAuth] }, async () => {
+    const tenants = await prisma.tenant.findMany({
+      where: { OR: [{ rif: null }, { rif: '' }], status: 'active' },
+      select: {
+        id: true, name: true, slug: true, ownerEmail: true,
+        createdAt: true, contactPhone: true,
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    return { tenants, count: tenants.length };
+  });
+
   app.post('/api/admin/tenants', { preHandler: [requireAdminAuth] }, async (request, reply) => {
     const { name, slug, ownerEmail, ownerName, ownerPassword, assetTypeId, conversionRate } = request.body as any;
     if (!name || !slug || !ownerEmail || !ownerName || !ownerPassword) {

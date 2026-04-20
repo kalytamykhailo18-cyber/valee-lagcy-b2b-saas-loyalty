@@ -40,6 +40,9 @@ async function main() {
   await prisma.tenantAssetConfig.create({
     data: { tenantId: tenant.id, assetTypeId: asset.id, conversionRate: 1 },
   });
+  // Seed a RIF so the fiscal-invoice block added in Genesis M1 doesn't
+  // pre-empt the Stage C semantic dedup we're testing here.
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { rif: `J-${String(ts).slice(-8)}-0` } });
 
   const txDate = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
   const paymentRef = `REF-E2E-${ts}`;
@@ -141,7 +144,7 @@ async function main() {
       transaction_date: fiscalTxDate,
       customer_phone: null,
       merchant_name: 'Tienda',
-      merchant_rif: null,
+      merchant_rif: `J-${String(ts).slice(-8)}-0`,
       currency: 'USD',
       document_type: 'fiscal_invoice',
       confidence_score: 0.95,
@@ -162,7 +165,7 @@ async function main() {
       transaction_date: fiscalTxDate,
       customer_phone: null,
       merchant_name: 'Tienda',
-      merchant_rif: null,
+      merchant_rif: `J-${String(ts).slice(-8)}-0`,
       currency: 'USD',
       document_type: 'fiscal_invoice',
       confidence_score: 0.95,
@@ -187,7 +190,7 @@ async function main() {
       transaction_date: fiscalTxDate,
       customer_phone: null,
       merchant_name: 'Tienda',
-      merchant_rif: null,
+      merchant_rif: `J-${String(ts).slice(-8)}-0`,
       currency: 'USD',
       document_type: 'fiscal_invoice',
       confidence_score: 0.95,

@@ -1909,7 +1909,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const { getMerchantMetrics } = await import('../../services/metrics.js');
     const metrics = await getMerchantMetrics(tenantId, branchId || undefined);
 
-    return metrics;
+    // Surface rifMissing so the dashboard can render a banner asking the
+    // owner to finish setting their RIF. Without it, fiscal invoices get
+    // rejected by the validation pipeline (Genesis M1).
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { rif: true } });
+    return {
+      ...metrics,
+      rifMissing: !tenant?.rif,
+    };
   });
 
   // ---- PRODUCT PERFORMANCE (Owner only) ----

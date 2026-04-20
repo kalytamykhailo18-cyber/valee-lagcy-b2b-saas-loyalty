@@ -347,6 +347,21 @@ export async function validateInvoice(params: {
     };
   }
 
+  // If the tenant has NO RIF configured, fiscal invoices cannot be trusted —
+  // there's nothing to cross-check against, so a Burger Bar receipt would be
+  // accepted at a Pizzeria (Genesis M1). Block until the owner sets the RIF.
+  // Non-fiscal documents (mobile_payment, voucher, generic_receipt) still flow
+  // because the voucher dedup + phone+amount checks carry the weight there.
+  if (!tenantForTrust?.rif && extracted.document_type === 'fiscal_invoice') {
+    console.log(`[Validation] Tenant ${tenantId} has no RIF configured — blocking fiscal invoice`);
+    return {
+      success: false,
+      stage: 'merchant_check',
+      message: 'El comercio aun no configuro su RIF. Pidele al comercio que lo complete en su panel antes de enviar facturas fiscales.',
+      invoiceNumber: extracted.invoice_number,
+    };
+  }
+
   // RIF validation: if the tenant has a RIF configured and the document is a fiscal_invoice,
   // the RIF MUST be visible in the image. This prevents submitting receipts from other
   // merchants (e.g. a Burger Bar receipt to a Pizzeria bot).
