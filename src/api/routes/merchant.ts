@@ -2013,9 +2013,21 @@ export default async function merchantRoutes(app: FastifyInstance) {
     return {
       entries: entries.map(e => {
         const meta: any = e.metadata || {};
+        // Welcome bonus is written as ADJUSTMENT_MANUAL with a WELCOME-
+        // prefixed referenceId. The consumer history endpoint already
+        // emits WELCOME_BONUS as a virtual event type for the same rows;
+        // do the same here so the merchant dashboard labels them
+        // 'Puntos de Bienvenida' instead of the generic 'Ajuste manual'
+        // (Genesis L3).
+        const effectiveEventType =
+          e.event_type === 'ADJUSTMENT_MANUAL'
+          && (String(e.reference_id || '').startsWith('WELCOME-')
+              || meta?.type === 'welcome_bonus')
+            ? 'WELCOME_BONUS'
+            : e.event_type;
         return {
           id: e.id,
-          eventType: e.event_type,
+          eventType: effectiveEventType,
           entryType: e.entry_type,
           amount: e.amount,
           status: e.status,

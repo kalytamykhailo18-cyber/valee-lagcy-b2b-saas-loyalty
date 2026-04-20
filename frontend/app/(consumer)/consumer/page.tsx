@@ -47,6 +47,7 @@ const EVENT_LABELS: Record<string, string> = {
   REVERSAL: 'Reverso',
   ADJUSTMENT_MANUAL: 'Ajuste manual',
   TRANSFER_P2P: 'Transferencia',
+  WELCOME_BONUS: 'Puntos de Bienvenida',
 }
 
 function ConsumerApp() {
