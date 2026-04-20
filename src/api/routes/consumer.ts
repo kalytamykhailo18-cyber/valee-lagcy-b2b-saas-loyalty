@@ -219,15 +219,36 @@ export default async function consumerRoutes(app: FastifyInstance) {
   });
 
   // ---- AUTH: Logout ----
-  // Clears the httpOnly access + refresh cookies the server set on OTP verify.
-  // Without this, the frontend's logout() only purged localStorage while the
-  // server-side cookie stayed alive — next request would still authenticate
-  // via the stale cookie, leaving the user apparently "logged in" under a
-  // prior identity. Also unauthenticated calls succeed (the caller may have
-  // already lost their token client-side).
-  app.post('/api/consumer/auth/logout', async (_request, reply) => {
+  // Clears the httpOnly access + refresh cookies AND bumps the account's
+  // tokens_invalidated_at so any token (cookie, localStorage, or copied)
+  // issued before this moment is rejected at auth-check time. Without the
+  // DB-level marker, a JWT that leaks can still be used for its full TTL
+  // since the signature is valid; the marker gives us real revocation.
+  // Unauthenticated calls still return 200 — the client may have already
+  // dropped its token and just wants to clear cookies.
+  app.post('/api/consumer/auth/logout', async (request, reply) => {
     reply.clearCookie('accessToken', { path: '/' });
     reply.clearCookie('refreshToken', { path: '/api/consumer/auth/refresh' });
+
+    // Best-effort subject lookup: prefer Authorization header, fall back to
+    // cookie. If we can resolve an accountId, mark its tokens invalidated.
+    const authHeader = request.headers.authorization;
+    const cookieToken = (request.cookies as any)?.accessToken;
+    const rawToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : cookieToken;
+    if (rawToken) {
+      try {
+        const payload = verifyConsumerToken(rawToken);
+        if (payload.accountId) {
+          await prisma.account.update({
+            where: { id: payload.accountId },
+            data: { tokensInvalidatedAt: new Date() },
+          });
+        }
+      } catch {
+        // Token invalid or expired — still return success so clients can
+        // reliably call logout from any state.
+      }
+    }
     return { success: true };
   });
 

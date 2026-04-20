@@ -127,7 +127,20 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     return <>{children}</>
   }
 
-  function logout() {
+  async function logout() {
+    // Server-side logout bumps staff.tokens_invalidated_at so the JWT can't
+    // be refreshed or reused even if it was copied before the client-side
+    // clear. Done before localStorage wipe so the Authorization header is
+    // still attached to the request.
+    try {
+      const token = localStorage.getItem('accessToken')
+      if (token) {
+        await fetch('/api/merchant/auth/logout', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` },
+        })
+      }
+    } catch {}
     localStorage.removeItem('accessToken')
     localStorage.removeItem('refreshToken')
     localStorage.removeItem('staffRole')

@@ -305,6 +305,7 @@ model Account {
   level                Int                @default(1)
   welcomeBonusGranted  Boolean            @default(false) @map("welcome_bonus_granted")
   referralSlug         String?            @unique @map("referral_slug") @db.VarChar(16)
+  tokensInvalidatedAt  DateTime?          @map("tokens_invalidated_at") @db.Timestamptz
   createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz
   updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
@@ -548,6 +549,7 @@ model Staff {
   qrSlug         String?   @unique @map("qr_slug") @db.VarChar(16)
   qrCodeUrl      String?   @map("qr_code_url") @db.Text
   qrGeneratedAt  DateTime? @map("qr_generated_at") @db.Timestamptz
+  tokensInvalidatedAt DateTime? @map("tokens_invalidated_at") @db.Timestamptz
   createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 

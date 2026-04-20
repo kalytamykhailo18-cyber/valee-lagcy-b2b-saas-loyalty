@@ -253,6 +253,27 @@ export default async function merchantRoutes(app: FastifyInstance) {
     }
   });
 
+  // ---- AUTH: Logout (Staff) ----
+  // Mirrors the consumer logout: bumps tokens_invalidated_at so any JWT
+  // issued before this moment is rejected at auth-check time, regardless
+  // of whether it still has valid signature/TTL.
+  app.post('/api/merchant/auth/logout', async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const payload = verifyStaffToken(authHeader.slice(7));
+        await prisma.staff.update({
+          where: { id: payload.staffId },
+          data: { tokensInvalidatedAt: new Date() },
+        });
+      } catch {
+        // Caller's token was already invalid; still return success so the
+        // client can reliably call logout from any state.
+      }
+    }
+    return { success: true };
+  });
+
   // ---- CSV UPLOAD (Owner only) ----
   app.post('/api/merchant/csv-upload', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
