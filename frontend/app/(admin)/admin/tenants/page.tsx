@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { MdSearch } from 'react-icons/md'
 import { api } from '@/lib/api'
 
 export default function TenantManagement() {
@@ -9,12 +10,27 @@ export default function TenantManagement() {
   const [form, setForm] = useState({ name: '', slug: '', ownerEmail: '', ownerName: '', ownerPassword: '' })
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
+  const [query, setQuery] = useState('')
 
   useEffect(() => { loadTenants() }, [])
 
   async function loadTenants() {
     try { setTenants((await api.getTenants()).tenants) } catch {}
   }
+
+  // Filter client-side: at ~50 tenants this is instant and avoids a server
+  // round-trip on every keystroke. If the tenant count ever gets large we'll
+  // move the filter server-side.
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return tenants
+    return tenants.filter(t =>
+      (t.name || '').toLowerCase().includes(q) ||
+      (t.slug || '').toLowerCase().includes(q) ||
+      (t.ownerEmail || '').toLowerCase().includes(q) ||
+      (t.rif || '').toLowerCase().includes(q)
+    )
+  }, [tenants, query])
 
   async function handleCreate() {
     setLoading(true); setMsg('')
@@ -41,6 +57,20 @@ export default function TenantManagement() {
       loadTenants()
     } catch (e: any) {
       alert(e?.error || 'No se pudo desactivar el comercio')
+    }
+  }
+
+  async function handleReactivate(id: string) {
+    const reason = window.prompt('Motivo para reactivar el comercio (minimo 5 caracteres):', '')
+    if (!reason || reason.trim().length < 5) {
+      if (reason !== null) alert('El motivo debe tener al menos 5 caracteres.')
+      return
+    }
+    try {
+      await api.reactivateTenant(id, reason.trim())
+      loadTenants()
+    } catch (e: any) {
+      alert(e?.error || 'No se pudo reactivar el comercio')
     }
   }
 
@@ -138,20 +168,60 @@ export default function TenantManagement() {
           </div>
         )}
 
+        {/* Search bar — filters the grid by name, slug, email, or RIF. At
+            this tenant count (hundreds max) client-side filter is instant
+            and avoids a server round-trip per keystroke. */}
+        {tenants.length > 0 && (
+          <div className="mb-4 flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 max-w-md">
+              <MdSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 w-5 h-5" />
+              <input
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                placeholder="Buscar por nombre, slug, email o RIF..."
+                className="aa-field aa-field-indigo w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm"
+              />
+            </div>
+            <span className="text-xs text-slate-500">
+              {filtered.length === tenants.length
+                ? `${tenants.length} comercios`
+                : `${filtered.length} de ${tenants.length}`}
+            </span>
+          </div>
+        )}
+
         {/* Tenants grid */}
         {tenants.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center border border-slate-100 aa-rise">
             <p className="text-slate-400">No hay comercios registrados todavia</p>
           </div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl p-12 text-center border border-slate-100 aa-rise">
+            <p className="text-slate-400">Sin resultados para {query}</p>
+          </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {tenants.map((t, i) => (
+            {filtered.map((t, i) => (
               <div
                 key={t.id}
                 className="aa-card aa-row-in bg-white rounded-2xl p-5 shadow-sm border border-slate-100"
                 style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}
               >
-                <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-start gap-3 mb-3">
+                  {/* Logo — falls back to first-letter tile when the tenant
+                      hasn't uploaded one yet, so the grid reads consistently. */}
+                  {t.logoUrl ? (
+                    <img
+                      src={t.logoUrl}
+                      alt={t.name}
+                      className="w-12 h-12 rounded-xl object-cover border border-slate-200 flex-shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
+                      {(t.name || '?').charAt(0).toUpperCase()}
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <p className="font-semibold text-slate-800 text-lg truncate">{t.name}</p>
                     <p className="text-xs text-slate-500 mt-0.5 truncate">{t.slug}</p>
@@ -163,13 +233,21 @@ export default function TenantManagement() {
                   </span>
                 </div>
                 <p className="text-sm text-slate-600 truncate">{t.ownerEmail}</p>
+                {t.rif && <p className="text-xs text-slate-500 mt-1 font-mono">RIF: {t.rif}</p>}
                 <p className="text-xs text-slate-400 mt-1">Creado: {new Date(t.createdAt).toLocaleDateString('es-VE')}</p>
-                {t.status === 'active' && (
+                {t.status === 'active' ? (
                   <button
                     onClick={() => handleDeactivate(t.id)}
                     className="aa-btn w-full mt-4 py-2 text-xs text-red-600 hover:bg-red-50 rounded-lg font-medium"
                   >
                     <span className="relative z-10">Desactivar</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleReactivate(t.id)}
+                    className="aa-btn w-full mt-4 py-2 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg font-medium border border-emerald-200"
+                  >
+                    <span className="relative z-10">Reactivar</span>
                   </button>
                 )}
               </div>
