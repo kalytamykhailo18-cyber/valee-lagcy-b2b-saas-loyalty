@@ -113,32 +113,42 @@ export async function validateInvoice(params: {
   if (params.imageBuffer) {
     const crypto = await import('crypto');
     imageHash = crypto.createHash('sha256').update(params.imageBuffer).digest('hex');
+    // Check GLOBALLY (across all tenants). A physical receipt belongs to exactly
+    // one merchant; submitting the same photo to a second tenant is fraud
+    // (previously PENDING-00004332 was credited to both recon-store and
+    // valee-demo because this query was scoped to tenantId).
     const existingByHash = await prisma.ledgerEntry.findFirst({
       where: {
-        tenantId,
         eventType: 'INVOICE_CLAIMED',
         entryType: 'CREDIT',
         metadata: { path: ['imageHash'], equals: imageHash },
       },
-      select: { id: true, referenceId: true, status: true, accountId: true },
+      select: { id: true, tenantId: true, referenceId: true, status: true, accountId: true },
     });
     if (existingByHash) {
+      const crossTenant = existingByHash.tenantId !== tenantId;
       // Was the original credit on the same user that is now sending the photo?
       let isOriginalSubmitter = false;
       const senderAccount = await prisma.account.findUnique({
         where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
         select: { id: true },
       });
-      if (senderAccount && senderAccount.id === existingByHash.accountId) {
+      if (!crossTenant && senderAccount && senderAccount.id === existingByHash.accountId) {
         isOriginalSubmitter = true;
       }
-      console.log(`[Validation] Duplicate image hash blocked: tenant=${tenantId} hash=${imageHash.slice(0, 12)} existingRef=${existingByHash.referenceId} status=${existingByHash.status} sameUser=${isOriginalSubmitter}`);
+      console.log(`[Validation] Duplicate image hash blocked: tenant=${tenantId} crossTenant=${crossTenant} hash=${imageHash.slice(0, 12)} existingRef=${existingByHash.referenceId} status=${existingByHash.status} sameUser=${isOriginalSubmitter}`);
+      let message: string;
+      if (crossTenant) {
+        message = 'Esta factura ya fue registrada en otro comercio. Cada factura solo puede acreditarse una vez.';
+      } else if (isOriginalSubmitter) {
+        message = 'Ya enviaste esta foto antes. La factura ya esta registrada en tu cuenta.';
+      } else {
+        message = 'Esta factura ya fue enviada por otro cliente. No se puede reclamar dos veces.';
+      }
       return {
         success: false,
         stage: 'cross_reference',
-        message: isOriginalSubmitter
-          ? 'Ya enviaste esta foto antes. La factura ya esta registrada en tu cuenta.'
-          : 'Esta factura ya fue enviada por otro cliente. No se puede reclamar dos veces.',
+        message,
         invoiceNumber: existingByHash.referenceId,
       };
     }
