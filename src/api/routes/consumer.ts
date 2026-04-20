@@ -310,10 +310,20 @@ export default async function consumerRoutes(app: FastifyInstance) {
     };
 
     const tokenIdByRef = new Map<string, string>();
+    // Track which tokens already have a CONFIRMED (or EXPIRED) terminal
+    // event. Their PENDING entries collapse into a single final-state
+    // row (Genesis M6: 'Canje pendiente -10 / Canje confirmado +10'
+    // shouldn't render as two stacked rows; it's one product canje).
+    const confirmedTokenIds = new Set<string>();
+    const expiredTokenIds = new Set<string>();
     for (const e of entries) {
       if (!redemptionEventTypes.has(e.eventType)) continue;
       const tid = refToTokenId(e.referenceId);
-      if (tid) tokenIdByRef.set(e.referenceId, tid);
+      if (tid) {
+        tokenIdByRef.set(e.referenceId, tid);
+        if (e.eventType === 'REDEMPTION_CONFIRMED') confirmedTokenIds.add(tid);
+        if (e.eventType === 'REDEMPTION_EXPIRED')   expiredTokenIds.add(tid);
+      }
     }
     const redemptionTokenIds = Array.from(new Set(tokenIdByRef.values()));
 
@@ -326,7 +336,30 @@ export default async function consumerRoutes(app: FastifyInstance) {
     const productByTokenId = new Map(tokens.map(t => [t.id, t.product]));
 
     return {
-      entries: entries.map(e => {
+      entries: entries
+        // Collapse PENDING/CONFIRMED/EXPIRED into a single row per token.
+        // PENDING writes a DEBIT on the consumer. CONFIRMED sometimes
+        // writes a CREDIT on the consumer (via holding→consumer in some
+        // flows). We keep the PENDING row but relabel it as CONFIRMED
+        // when a CONFIRMED exists elsewhere for the same token, and
+        // hide any CONFIRMED/EXPIRED credit rows so the consumer sees a
+        // single 'Producto Canjeado -N' line instead of both halves
+        // of the double-entry (Genesis M6).
+        .filter(e => {
+          const tid = tokenIdByRef.get(e.referenceId);
+          if (!tid) return true;
+          if (e.eventType === 'REDEMPTION_CONFIRMED' && e.entryType === 'CREDIT') return false;
+          if (e.eventType === 'REDEMPTION_EXPIRED'   && e.entryType === 'DEBIT')  return false;
+          return true;
+        })
+        .map(e => {
+          const tid = tokenIdByRef.get(e.referenceId);
+          if (tid && e.eventType === 'REDEMPTION_PENDING' && confirmedTokenIds.has(tid)) {
+            return { ...e, eventType: 'REDEMPTION_CONFIRMED' as any };
+          }
+          return e;
+        })
+        .map(e => {
         // Prefer metadata stamped at write time (survives token cleanup);
         // fall back to the token join for older entries.
         const meta: any = (e as any).metadata || {};

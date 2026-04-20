@@ -42,7 +42,7 @@ const EVENT_LABELS: Record<string, string> = {
   INVOICE_CLAIMED: 'Factura validada',
   PRESENCE_VALIDATED: 'Pago en efectivo',
   REDEMPTION_PENDING: 'Canje pendiente',
-  REDEMPTION_CONFIRMED: 'Canje procesado',
+  REDEMPTION_CONFIRMED: 'Producto Canjeado',
   REDEMPTION_EXPIRED: 'Canje expirado',
   REVERSAL: 'Reverso',
   ADJUSTMENT_MANUAL: 'Ajuste manual',
