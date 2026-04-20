@@ -87,7 +87,10 @@ export default function MerchantSignup() {
       localStorage.setItem('staffRole', res.staff.role)
       localStorage.setItem('staffName', res.staff.name)
       localStorage.setItem('tenantName', res.tenant.name)
-      router.push('/merchant')
+      // Route new owners through the onboarding wizard so they see their QR,
+      // pick their points setup, and add a first product before landing on
+      // the full dashboard. Existing owners skip this (they log in directly).
+      router.push('/merchant/onboarding')
     } catch (e: any) {
       setTopError(e?.error || e?.message || 'Error al crear cuenta')
     } finally {

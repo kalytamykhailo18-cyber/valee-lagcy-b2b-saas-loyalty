@@ -252,9 +252,11 @@ export const api = {
   getMerchantSettings: () => request('/api/merchant/settings'),
   updateMerchantSettings: (data: {
     welcomeBonusAmount?: number;
+    referralBonusAmount?: number;
     rif?: string;
     preferredExchangeSource?: string | null;
     referenceCurrency?: string;
+    trustLevel?: string;
     logoUrl?: string | null;
     name?: string;
     address?: string | null;

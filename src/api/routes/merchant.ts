@@ -1052,12 +1052,18 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const assetType = assetConfig
       ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
       : await prisma.assetType.findFirst();
+    // Product count is surfaced so the onboarding wizard can tell whether
+    // step 3 (add first product) is still pending without a separate request.
+    const productCount = await prisma.product.count({ where: { tenantId } });
+    const slug = tenant?.slug || '';
     return {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
       referralBonusAmount: tenant?.referralBonusAmount ?? 100,
       rif: tenant?.rif || null,
+      slug,
       name: tenant?.name || '',
       logoUrl: tenant?.logoUrl || null,
+      qrCodeUrl: tenant?.qrCodeUrl || null,
       address: tenant?.address || null,
       contactPhone: tenant?.contactPhone || null,
       contactEmail: tenant?.contactEmail || null,
@@ -1070,6 +1076,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       assetTypeId: assetType?.id || null,
       assetTypeName: assetType?.name || null,
       unitLabel: assetType?.unitLabel || 'pts',
+      productCount,
     };
   });
 

@@ -19,6 +19,12 @@ const geistMono = localFont({
 export const metadata: Metadata = {
   title: 'Valee — Gana recompensas en tus comercios favoritos',
   description: 'Cada compra cuenta. Acumula puntos en cada visita y canjealos por productos.',
+  // Meta Business Manager domain ownership verification for valee.app. This
+  // tag must be in the static server-rendered <head> of the homepage (must
+  // NOT be added via JS after load) or Meta rejects the verification.
+  other: {
+    'facebook-domain-verification': '0nh418uqc36808waxn3b5s4tmonpiv',
+  },
 }
 
 export const viewport: Viewport = {
