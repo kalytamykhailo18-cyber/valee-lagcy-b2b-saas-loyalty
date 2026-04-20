@@ -868,9 +868,21 @@ function MultiMerchantHub() {
 
         <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 text-white shadow-xl aa-rise overflow-hidden">
           <p className="text-indigo-200 text-xs sm:text-base">Tu saldo total</p>
-          <p key={totalBalance} className="text-4xl sm:text-5xl lg:text-6xl xl:text-7xl font-bold mt-2 tracking-tight aa-count tabular-nums break-all leading-none">
-            {formatPoints(totalBalance)}
-          </p>
+          {/* Size the balance text based on digit count so 9-digit
+              totals don't wrap to 3 lines on mobile (Genesis M9). */}
+          {(() => {
+            const formatted = formatPoints(totalBalance)
+            const digits = String(totalBalance).replace(/\D/g, '').length
+            const sizeClass =
+              digits >= 9 ? 'text-2xl sm:text-4xl lg:text-5xl' :
+              digits >= 7 ? 'text-3xl sm:text-5xl lg:text-6xl' :
+              'text-4xl sm:text-5xl lg:text-6xl xl:text-7xl'
+            return (
+              <p key={totalBalance} className={`${sizeClass} font-bold mt-2 tracking-tight aa-count tabular-nums leading-none`}>
+                {formatted}
+              </p>
+            )
+          })()}
           {(() => {
             const withBalance = merchants.filter(m => Number(m.balance) > 0).length
             return (
@@ -921,9 +933,19 @@ function MultiMerchantHub() {
                                 <p className="text-sm font-semibold text-slate-900 truncate">{m.tenantName}</p>
                               </div>
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 font-semibold mb-1">Saldo</p>
-                              <p className="text-[42px] sm:text-5xl font-bold text-slate-900 tracking-tight tabular-nums leading-none break-all">
-                                {formatPoints(m.balance)}
-                              </p>
+                              {(() => {
+                                // Responsive sizing: prevent 7+ digit saldos
+                                // from wrapping to 3 lines inside the card.
+                                const digits = String(m.balance).replace(/\D/g, '').length
+                                const cls = digits >= 9 ? 'text-2xl sm:text-3xl'
+                                  : digits >= 7 ? 'text-3xl sm:text-4xl'
+                                  : 'text-[42px] sm:text-5xl'
+                                return (
+                                  <p className={`${cls} font-bold text-slate-900 tracking-tight tabular-nums leading-none`}>
+                                    {formatPoints(m.balance)}
+                                  </p>
+                                )
+                              })()}
                               <p className="text-sm text-slate-500 mt-1.5">{m.unitLabel}</p>
                             </div>
                             <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
