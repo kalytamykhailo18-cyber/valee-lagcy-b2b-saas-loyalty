@@ -820,11 +820,27 @@ export default async function merchantRoutes(app: FastifyInstance) {
   // ---- IDENTITY UPGRADE (Cashier + Owner) ----
   app.post('/api/merchant/identity-upgrade', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;
-    const { phoneNumber, cedula, force } = request.body as { phoneNumber: string; cedula: string; force?: boolean };
+    const { phoneNumber, cedula: rawCedula, force } = request.body as { phoneNumber: string; cedula: string; force?: boolean };
 
-    if (!phoneNumber || !cedula) {
+    if (!phoneNumber || !rawCedula) {
       return reply.status(400).send({ error: 'phoneNumber and cedula are required' });
     }
+
+    // Venezuelan cedula normalization + validation. Accept with or without
+    // V/E prefix and with or without separator; reject anything else.
+    // Genesis flagged merchants saving garbage values like 'sssss' or
+    // '21123456FFFFF' because the endpoint stored whatever came in.
+    const cedulaMatch = String(rawCedula)
+      .toUpperCase()
+      .replace(/\s+/g, '')
+      .match(/^([VE])?-?(\d{6,10})$/);
+    if (!cedulaMatch) {
+      return reply.status(400).send({
+        error: 'Cedula invalida. Formato: V-XXXXXXXX o E-XXXXXXXX (6 a 10 digitos)',
+      });
+    }
+    const cedulaPrefix = cedulaMatch[1] || 'V';
+    const cedula = `${cedulaPrefix}-${cedulaMatch[2]}`;
 
     const account = await prisma.account.findUnique({
       where: { tenantId_phoneNumber: { tenantId, phoneNumber } },
@@ -892,8 +908,19 @@ export default async function merchantRoutes(app: FastifyInstance) {
     }
 
     if (cedula !== undefined) {
-      const normalized = cedula ? cedula.replace(/[\s\-]/g, '').toUpperCase() : null;
-      if (normalized) {
+      if (cedula === null || cedula === '') {
+        updates.cedula = null;
+      } else {
+        // Venezuelan cedula: optional V/E prefix + 6-10 digits. Reject
+        // garbage like 'sssss' or '21123456FFFFF' that the old
+        // whitespace-strip-only normalization was letting through.
+        const m = String(cedula).toUpperCase().replace(/\s+/g, '').match(/^([VE])?-?(\d{6,10})$/);
+        if (!m) {
+          return reply.status(400).send({
+            error: 'Cedula invalida. Formato: V-XXXXXXXX o E-XXXXXXXX (6 a 10 digitos)',
+          });
+        }
+        const normalized = `${m[1] || 'V'}-${m[2]}`;
         // Check cedula isn't already linked to a different account in this tenant
         const conflict = await prisma.account.findFirst({
           where: { tenantId, cedula: normalized, NOT: { id } },
@@ -905,8 +932,8 @@ export default async function merchantRoutes(app: FastifyInstance) {
             existingPhone: conflict.phoneNumber,
           });
         }
+        updates.cedula = normalized;
       }
-      updates.cedula = normalized;
     }
 
     const updated = await prisma.account.update({
