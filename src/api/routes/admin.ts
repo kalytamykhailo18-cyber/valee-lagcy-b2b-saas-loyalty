@@ -306,6 +306,71 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { success: true, account: { id: accountId, accountType: 'shadow', cedula: null } };
   });
 
+  // ---- ADMIN: FORCE-LOGOUT A CONSUMER ACCOUNT ----
+  // Bumps accounts.tokens_invalidated_at to now(), which the auth middleware
+  // reads on every authenticated request — any token issued before this call
+  // is rejected at the next hop, regardless of TTL or where it's stored
+  // (localStorage, httpOnly cookie, or copied off the wire).
+  app.post('/api/admin/accounts/:id/force-logout', { preHandler: [requireAdminAuth] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason?: string };
+
+    if (!reason || reason.trim().length < 5) {
+      return reply.status(400).send({ error: 'A reason (min 5 chars) is required' });
+    }
+
+    const account = await prisma.account.findUnique({ where: { id } });
+    if (!account) return reply.status(404).send({ error: 'Account not found' });
+
+    await prisma.account.update({
+      where: { id },
+      data: { tokensInvalidatedAt: new Date() },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type,
+        consumer_account_id, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${account.tenantId}::uuid, ${(request as any).admin.adminId}::uuid,
+        'admin', 'admin', 'SESSION_TERMINATED',
+        ${id}::uuid, 'success',
+        ${JSON.stringify({ reason: reason.trim(), subject: 'account' })}::jsonb, now())
+    `;
+
+    return { success: true, subject: 'account', id, invalidatedAt: new Date() };
+  });
+
+  // ---- ADMIN: FORCE-LOGOUT A STAFF MEMBER ----
+  // Same mechanism as the consumer variant, targeting a specific owner or
+  // cashier row. Useful when a merchant reports a staff credential leak or
+  // when we need to kick a cashier off a shared device.
+  app.post('/api/admin/staff/:id/force-logout', { preHandler: [requireAdminAuth] }, async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const { reason } = request.body as { reason?: string };
+
+    if (!reason || reason.trim().length < 5) {
+      return reply.status(400).send({ error: 'A reason (min 5 chars) is required' });
+    }
+
+    const staff = await prisma.staff.findUnique({ where: { id } });
+    if (!staff) return reply.status(404).send({ error: 'Staff member not found' });
+
+    await prisma.staff.update({
+      where: { id },
+      data: { tokensInvalidatedAt: new Date() },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type,
+        outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${staff.tenantId}::uuid, ${(request as any).admin.adminId}::uuid,
+        'admin', 'admin', 'SESSION_TERMINATED',
+        'success',
+        ${JSON.stringify({ reason: reason.trim(), subject: 'staff', staffId: id, staffEmail: staff.email })}::jsonb, now())
+    `;
+
+    return { success: true, subject: 'staff', id, invalidatedAt: new Date() };
+  });
+
   // ---- PLATFORM METRICS ----
   app.get('/api/admin/metrics', { preHandler: [requireAdminAuth] }, async () => {
     const activeTenants = await prisma.tenant.count({ where: { status: 'active' } });
