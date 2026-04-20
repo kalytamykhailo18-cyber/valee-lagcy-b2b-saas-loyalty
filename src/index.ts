@@ -27,7 +27,27 @@ import webhookRoutes from './api/routes/webhook.js';
 // Trust X-Forwarded-For from nginx so req.ip is the real client IP instead
 // of 127.0.0.1 (nginx). Without this, every request from the proxy shares
 // the same rate-limit bucket and one noisy merchant locks out everyone.
-const app = Fastify({ logger: true, trustProxy: true });
+//
+// genReqId: prefer an inbound X-Request-Id from nginx / load balancer so the
+// same ID chains across hops. Fall back to a random base36 string when the
+// client didn't supply one. Short enough to paste into a support ticket;
+// long enough that collisions are implausible under real traffic.
+const app = Fastify({
+  logger: true,
+  trustProxy: true,
+  genReqId: (req) => {
+    const incoming = req.headers['x-request-id'];
+    if (typeof incoming === 'string' && /^[\w-]{6,64}$/.test(incoming)) return incoming;
+    return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  },
+});
+
+// Surface the request ID on every response so operators (and Sentry) can
+// quote it when a user reports a problem. Hook runs on send so it catches
+// every path — happy, error, rate-limited, or auth-rejected.
+app.addHook('onSend', async (request, reply) => {
+  reply.header('X-Request-Id', request.id);
+});
 
 // Forward any unhandled Fastify error to Sentry. Safe no-op when DSN absent.
 app.setErrorHandler((err: any, request, reply) => {
@@ -42,14 +62,18 @@ app.setErrorHandler((err: any, request, reply) => {
   }
   if (process.env.SENTRY_DSN) {
     Sentry.withScope(scope => {
+      scope.setTag('request_id', request.id);
       scope.setExtra('url', request.url);
       scope.setExtra('method', request.method);
       scope.setExtra('ip', request.ip);
       Sentry.captureException(err);
     });
   }
-  request.log.error(err);
-  reply.status(err?.statusCode || 500).send({ error: err?.message || 'Internal error' });
+  request.log.error({ err, reqId: request.id }, 'unhandled error');
+  reply.status(err?.statusCode || 500).send({
+    error: err?.message || 'Internal error',
+    requestId: request.id,
+  });
 });
 
 async function start() {
