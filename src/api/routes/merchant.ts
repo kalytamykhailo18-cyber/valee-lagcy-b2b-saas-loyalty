@@ -19,7 +19,9 @@ import { createSystemAccounts } from '../../services/accounts.js';
 export default async function merchantRoutes(app: FastifyInstance) {
 
   // ---- PUBLIC SIGNUP (no auth required) ----
-  app.post('/api/merchant/signup', async (request, reply) => {
+  app.post('/api/merchant/signup', {
+    config: { rateLimit: { max: 5, timeWindow: '10 minutes' } },
+  }, async (request, reply) => {
     const {
       businessName, slug: slugInput, ownerName, ownerEmail, password,
       address, contactPhone, rif, description,
@@ -190,7 +192,9 @@ export default async function merchantRoutes(app: FastifyInstance) {
   });
 
   // ---- AUTH: Staff login ----
-  app.post('/api/merchant/auth/login', async (request, reply) => {
+  app.post('/api/merchant/auth/login', {
+    config: { rateLimit: { max: 10, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     const { email, password, tenantSlug } = request.body as { email: string; password: string; tenantSlug?: string };
 
     if (!email || !password) {

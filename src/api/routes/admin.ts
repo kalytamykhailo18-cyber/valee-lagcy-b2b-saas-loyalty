@@ -26,7 +26,9 @@ async function requireAdminAuth(request: any, reply: any) {
 export default async function adminRoutes(app: FastifyInstance) {
 
   // ---- AUTH: Admin login ----
-  app.post('/api/admin/auth/login', async (request, reply) => {
+  app.post('/api/admin/auth/login', {
+    config: { rateLimit: { max: 5, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     const { email, password } = request.body as { email: string; password: string };
     if (!email || !password) return reply.status(400).send({ error: 'email and password required' });
 

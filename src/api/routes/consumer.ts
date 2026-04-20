@@ -18,7 +18,9 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // tenantSlug is optional. With slug → legacy per-merchant flow.
   // Without slug → tenantless "global" login. The OTP itself is per phone number,
   // so we send it the same way regardless.
-  app.post('/api/consumer/auth/request-otp', async (request, reply) => {
+  app.post('/api/consumer/auth/request-otp', {
+    config: { rateLimit: { max: 10, timeWindow: '10 minutes' } },
+  }, async (request, reply) => {
     const { phoneNumber: rawPhone, tenantSlug } = request.body as { phoneNumber: string; tenantSlug?: string };
 
     if (!rawPhone) {
