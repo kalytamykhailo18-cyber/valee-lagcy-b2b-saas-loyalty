@@ -8,6 +8,7 @@ import Link from 'next/link'
 import { getLocalPendingBalance, getPendingCount, syncPendingActions, purgeExpiredActions, type QueuedAction } from '@/lib/offline-queue'
 import { useOnlineStatus } from '@/lib/use-online-status'
 import { formatPoints, formatCash } from '@/lib/format'
+import { getAccess, setTokens, clearTokens } from '@/lib/token-store'
 
 type Screen = 'loading' | 'login' | 'otp' | 'main'
 
@@ -96,11 +97,12 @@ function ConsumerApp() {
   const isOnline = useOnlineStatus(handleSync)
 
   function logEvent(event: string, detail?: string) {
-    try { fetch('/api/consumer/log-event', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(localStorage.getItem('accessToken') ? { Authorization: `Bearer ${localStorage.getItem('accessToken')}` } : {}) }, body: JSON.stringify({ event, detail }) }) } catch {}
+    const t = getAccess('consumer')
+    try { fetch('/api/consumer/log-event', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(t ? { Authorization: `Bearer ${t}` } : {}) }, body: JSON.stringify({ event, detail }) }) } catch {}
   }
 
   useEffect(() => {
-    const token = localStorage.getItem('accessToken')
+    const token = getAccess('consumer')
     logEvent('page_mount', `hasToken=${!!token} slug=${merchantSlugFromUrl || '(none)'}`)
 
     // Remember the current tenant context so inner pages (scan, catalog,
@@ -120,8 +122,7 @@ function ConsumerApp() {
     if (searchParams.get('switch') === '1' && token) {
       ;(async () => {
         try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
+        clearTokens('consumer')
         localStorage.removeItem('tenantSlug')
         // Replace the URL so a refresh doesn't re-trigger the switch.
         window.history.replaceState({}, '', '/consumer')
@@ -136,8 +137,7 @@ function ConsumerApp() {
         ;(async () => {
           try {
             const data = await api.selectMerchant(merchantSlugFromUrl)
-            localStorage.setItem('accessToken', data.accessToken)
-            localStorage.setItem('refreshToken', data.refreshToken)
+            setTokens('consumer', data.accessToken, data.refreshToken)
             logEvent('selectMerchant_ok', merchantSlugFromUrl)
             setScreen('main')
             loadData()
@@ -147,8 +147,7 @@ function ConsumerApp() {
             // user logged in and show main with whatever token they had — don't
             // kick them to login over a transient error.
             if (e?.status === 401 || e?.status === 403) {
-              localStorage.removeItem('accessToken')
-              localStorage.removeItem('refreshToken')
+              clearTokens('consumer')
               setScreen('login')
             } else {
               setScreen('main')
@@ -184,8 +183,7 @@ function ConsumerApp() {
     const [balR, histR, accR, catR, activeR] = results
     const firstAuthFail = results.find(r => r.status === 'rejected' && (r.reason?.status === 401 || r.reason?.status === 403))
     if (firstAuthFail) {
-      localStorage.removeItem('accessToken')
-      localStorage.removeItem('refreshToken')
+      clearTokens('consumer')
       setScreen('login')
       return
     }
@@ -198,8 +196,7 @@ function ConsumerApp() {
       if (slug) {
         try {
           const upgraded = await api.selectMerchant(slug)
-          localStorage.setItem('accessToken', upgraded.accessToken)
-          localStorage.setItem('refreshToken', upgraded.refreshToken)
+          setTokens('consumer', upgraded.accessToken, upgraded.refreshToken)
           logEvent('balance_409_upgrade_ok', slug)
           return loadData()
         } catch (e: any) {
@@ -258,15 +255,13 @@ function ConsumerApp() {
       // we still want to show the per-merchant view, so call selectMerchant
       // immediately to upgrade the token.
       const data = await api.verifyOTP(phoneNumber, otp)
-      localStorage.setItem('accessToken', data.accessToken)
-      localStorage.setItem('refreshToken', data.refreshToken)
+      setTokens('consumer', data.accessToken, data.refreshToken)
       logEvent('verify_otp_ok', `scope=${data.scope} slug=${merchantSlugFromUrl || '(none)'}`)
 
       if (merchantSlugFromUrl) {
         try {
           const upgraded = await api.selectMerchant(merchantSlugFromUrl)
-          localStorage.setItem('accessToken', upgraded.accessToken)
-          localStorage.setItem('refreshToken', upgraded.refreshToken)
+          setTokens('consumer', upgraded.accessToken, upgraded.refreshToken)
           setScreen('main')
           loadData()
           return
@@ -297,8 +292,7 @@ function ConsumerApp() {
     // server authenticates the next request as the prior user, so the UI
     // looks logged out but API calls still hit the old session.
     try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
+    clearTokens('consumer')
     window.location.href = '/'
   }
 
@@ -820,8 +814,7 @@ function MultiMerchantHub() {
         setDisplayName(data.displayName || null)
       } catch {
         // /all-accounts failed — kick to public landing, let them log in again
-        localStorage.removeItem('accessToken')
-        localStorage.removeItem('refreshToken')
+        clearTokens('consumer')
         window.location.href = '/'
       }
       setLoading(false)
@@ -830,8 +823,7 @@ function MultiMerchantHub() {
 
   async function logout() {
     try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
+    clearTokens('consumer')
     window.location.href = '/'
   }
 

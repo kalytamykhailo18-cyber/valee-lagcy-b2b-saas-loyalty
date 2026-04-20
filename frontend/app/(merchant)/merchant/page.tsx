@@ -191,8 +191,9 @@ export default function MerchantDashboard() {
     } catch { setMultiplierMsg('Error al actualizar') }
   }
 
-  function logout() {
-    localStorage.removeItem('accessToken')
+  async function logout() {
+    const { clearTokens } = await import('@/lib/token-store')
+    clearTokens('staff')
     localStorage.removeItem('staffRole')
     localStorage.removeItem('staffName')
     router.push('/merchant/login')

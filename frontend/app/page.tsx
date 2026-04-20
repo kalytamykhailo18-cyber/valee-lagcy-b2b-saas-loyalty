@@ -40,7 +40,7 @@ export default function Home() {
     // "Mi cuenta". When a session exists we also surface the phone number
     // (masked) so the user knows WHICH account they'll enter before clicking.
     if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('accessToken')
+      const token = localStorage.getItem('consumerAccessToken') || localStorage.getItem('accessToken')
       setHasSession(!!token)
       if (token) {
         const ident = getCurrentSessionIdentity()

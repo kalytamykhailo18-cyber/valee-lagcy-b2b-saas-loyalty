@@ -23,8 +23,8 @@ export default function MerchantLogin() {
     setLoading(true)
     try {
       const data = await api.merchantLogin(email, password, tenantSlug || undefined)
-      localStorage.setItem('accessToken', data.accessToken)
-      localStorage.setItem('refreshToken', data.refreshToken)
+      const { setTokens } = await import('@/lib/token-store')
+      setTokens('staff', data.accessToken, data.refreshToken)
       localStorage.setItem('staffRole', data.staff.role)
       localStorage.setItem('staffName', data.staff.name)
       // Pre-fetch tenant branding so header shows logo/name immediately

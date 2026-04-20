@@ -39,7 +39,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       setAuthChecked(true)
       return
     }
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    const token = localStorage.getItem('adminAccessToken') || localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
     if (!token) {
       setAuthorized(false)
       setAuthChecked(true)
@@ -57,7 +57,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onVisibility = () => { if (document.visibilityState === 'visible') runAuthCheck() }
     const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) runAuthCheck() }
-    const onStorage = (e: StorageEvent) => { if (e.key === 'adminToken' || e.key === 'accessToken') runAuthCheck() }
+    const onStorage = (e: StorageEvent) => { if (e.key === 'adminAccessToken' || e.key === 'adminToken' || e.key === 'accessToken') runAuthCheck() }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pageshow', onPageShow)
     window.addEventListener('storage', onStorage)
@@ -72,10 +72,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     return <>{children}</>
   }
 
-  function logout() {
+  async function logout() {
+    const { clearTokens } = await import('@/lib/token-store')
+    clearTokens('admin')
     localStorage.removeItem('adminToken')
-    localStorage.removeItem('adminRefreshToken')
-    localStorage.removeItem('accessToken')
     localStorage.removeItem('adminName')
     // Hard nav so bfcache doesn't restore the previous page if the user swipes back.
     window.location.href = '/admin/login'

@@ -39,21 +39,23 @@ async function main() {
   const fs = await import('fs/promises');
   const src = await fs.readFile('/home/loyalty-platform/frontend/lib/api.ts', 'utf8');
 
-  // Source-level assertions
-  await assert('tryRefreshToken uses a shared refreshPromise',
-    /let\s+refreshPromise\s*:\s*Promise<boolean>\s*\|\s*null\s*=\s*null;/.test(src),
+  // Source-level assertions. After Genesis H2, the single shared promise
+  // got split into a per-role dictionary — parallel 401s on the same role
+  // still await the same refresh, but consumer and staff don't contend.
+  await assert('tryRefreshToken uses per-role shared promises',
+    /refreshPromises\s*:\s*Partial<Record<Role,\s*Promise<boolean>>>/.test(src),
     'verified');
-  await assert('parallel callers await the same promise',
-    /if\s*\(refreshPromise\)\s*return\s+refreshPromise;/.test(src),
+  await assert('parallel callers on the same role await the same promise',
+    /if\s*\(refreshPromises\[role\]\)\s*return\s+refreshPromises\[role\]!;/.test(src),
     'verified');
   await assert('the old isRefreshing single-flight bail-out is gone',
     !/if\s*\(isRefreshing\)\s*return\s+false;/.test(src),
     'verified');
   await assert('cross-tab storage listener installed',
-    /addEventListener\(['"]storage['"]/.test(src) && /e\.key\s*===\s*['"]accessToken['"]/.test(src),
+    /addEventListener\(['"]storage['"]/.test(src) && /consumerAccessToken|staffAccessToken|adminAccessToken/.test(src),
     'verified');
-  await assert('storage listener aborts the pending refresh',
-    /refreshPromise\s*=\s*null;?\s*\n?\s*}/.test(src) && /e\.newValue/.test(src),
+  await assert('storage listener aborts the in-flight refresh',
+    /delete\s+refreshPromises\.(consumer|staff|admin)/.test(src) && /e\.newValue/.test(src),
     'verified');
 
   // End-to-end: the refresh endpoint answers (invalid token → 401 is fine,

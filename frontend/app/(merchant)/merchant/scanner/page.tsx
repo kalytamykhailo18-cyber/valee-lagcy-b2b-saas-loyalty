@@ -22,7 +22,7 @@ export default function CashierScanner() {
   // Auth guard — redirect to login if no session
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const token = localStorage.getItem('accessToken')
+    const token = localStorage.getItem('staffAccessToken') || localStorage.getItem('accessToken')
     const role = localStorage.getItem('staffRole')
     if (!token || !role) {
       window.location.replace('/merchant/login')

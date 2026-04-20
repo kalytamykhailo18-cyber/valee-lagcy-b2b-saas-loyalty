@@ -45,7 +45,7 @@ export default function AdminSessionsPage() {
   const [lastAction, setLastAction] = useState<string>('')
 
   useEffect(() => {
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    const token = localStorage.getItem('adminAccessToken') || localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
     if (!token) router.push('/admin/login')
   }, [router])
 

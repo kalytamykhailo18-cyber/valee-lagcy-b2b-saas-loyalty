@@ -100,8 +100,8 @@ export default function MerchantSignup() {
         description: form.description.trim() || undefined,
       })
       // Auto-login
-      localStorage.setItem('accessToken', res.accessToken)
-      localStorage.setItem('refreshToken', res.refreshToken)
+      const { setTokens } = await import('@/lib/token-store')
+      setTokens('staff', res.accessToken, res.refreshToken)
       localStorage.setItem('staffRole', res.staff.role)
       localStorage.setItem('staffName', res.staff.name)
       localStorage.setItem('tenantName', res.tenant.name)

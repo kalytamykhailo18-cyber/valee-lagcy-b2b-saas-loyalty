@@ -17,8 +17,8 @@ export default function AdminLogin() {
     setLoading(true)
     try {
       const data = await api.adminLogin(email, password)
-      localStorage.setItem('accessToken', data.accessToken)
-      localStorage.setItem('adminToken', data.accessToken)
+      const { setTokens } = await import('@/lib/token-store')
+      setTokens('admin', data.accessToken, data.refreshToken)
       localStorage.setItem('adminName', data.admin.name)
       router.push('/admin')
     } catch (e: any) {

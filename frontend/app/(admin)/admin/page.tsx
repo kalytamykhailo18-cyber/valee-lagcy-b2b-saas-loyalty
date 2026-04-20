@@ -38,7 +38,7 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     const name = localStorage.getItem('adminName') || 'Admin'
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    const token = localStorage.getItem('adminAccessToken') || localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
     if (!token) { router.push('/admin/login'); return }
     setAdminName(name)
     ;(async () => {

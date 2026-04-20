@@ -76,7 +76,7 @@ export default function PlatformHealthPage() {
   }, [router])
 
   useEffect(() => {
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    const token = localStorage.getItem('adminAccessToken') || localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
     if (!token) { router.push('/admin/login'); return }
     load(windowHours)
   }, [load, windowHours, router])

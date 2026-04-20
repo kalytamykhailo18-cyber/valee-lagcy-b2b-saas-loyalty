@@ -80,7 +80,7 @@ export default function AdminAuditPage() {
   }, [tenantId, actionType, page, router])
 
   useEffect(() => {
-    const token = localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
+    const token = localStorage.getItem('adminAccessToken') || localStorage.getItem('adminToken') || localStorage.getItem('accessToken')
     if (!token) { router.push('/admin/login'); return }
     load()
   }, [load, router])

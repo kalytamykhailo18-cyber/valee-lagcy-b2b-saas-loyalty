@@ -59,7 +59,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   // mount-time read would miss the role/name written by the login page.
   const runAuthCheck = useCallback(() => {
     const storedRole = localStorage.getItem('staffRole')
-    const storedToken = localStorage.getItem('accessToken')
+    const storedToken = localStorage.getItem('staffAccessToken') || localStorage.getItem('accessToken')
     setRole(storedRole)
     setStaffName(localStorage.getItem('staffName') || '')
     setTenantName(localStorage.getItem('tenantName') || '')
@@ -90,7 +90,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     const onVisibility = () => { if (document.visibilityState === 'visible') runAuthCheck() }
     const onPageShow = (e: PageTransitionEvent) => { if (e.persisted) runAuthCheck() }
-    const onStorage = (e: StorageEvent) => { if (e.key === 'accessToken' || e.key === 'staffRole') runAuthCheck() }
+    const onStorage = (e: StorageEvent) => { if (e.key === 'staffAccessToken' || e.key === 'accessToken' || e.key === 'staffRole') runAuthCheck() }
     document.addEventListener('visibilitychange', onVisibility)
     window.addEventListener('pageshow', onPageShow)
     window.addEventListener('storage', onStorage)
@@ -133,7 +133,8 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     // clear. Done before localStorage wipe so the Authorization header is
     // still attached to the request.
     try {
-      const token = localStorage.getItem('accessToken')
+      const { getAccess } = await import('@/lib/token-store')
+      const token = getAccess('staff')
       if (token) {
         await fetch('/api/merchant/auth/logout', {
           method: 'POST',
@@ -141,8 +142,8 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
         })
       }
     } catch {}
-    localStorage.removeItem('accessToken')
-    localStorage.removeItem('refreshToken')
+    const { clearTokens } = await import('@/lib/token-store')
+    clearTokens('staff')
     localStorage.removeItem('staffRole')
     localStorage.removeItem('staffName')
     localStorage.removeItem('tenantName')

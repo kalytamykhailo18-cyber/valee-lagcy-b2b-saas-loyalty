@@ -1,3 +1,5 @@
+import { roleForApiPath, getAccess, getRefresh, setTokens, clearTokens, Role } from './token-store';
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 
 // Shared promise across parallel 401s in the same tab. Without this, every
@@ -7,39 +9,40 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
 // storm Genesis hit when she opened the same account in two tabs (H1).
 // Now all parallel 401s await the same refresh and retry with the same new
 // access token.
-let refreshPromise: Promise<boolean> | null = null;
+const refreshPromises: Partial<Record<Role, Promise<boolean>>> = {};
 
-async function tryRefreshToken(): Promise<boolean> {
-  if (refreshPromise) return refreshPromise;
-  const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
+async function tryRefreshToken(role: Role): Promise<boolean> {
+  if (refreshPromises[role]) return refreshPromises[role]!;
+  const refreshToken = getRefresh(role);
   if (!refreshToken) return false;
 
-  refreshPromise = (async () => {
+  const endpoint =
+    role === 'staff'  ? '/api/merchant/auth/refresh' :
+    role === 'admin'  ? '/api/admin/auth/refresh' :
+                        '/api/consumer/auth/refresh';
+
+  refreshPromises[role] = (async () => {
     try {
-      // Try consumer refresh first, then merchant refresh
-      for (const endpoint of ['/api/consumer/auth/refresh', '/api/merchant/auth/refresh']) {
-        try {
-          const res = await fetch(`${API_BASE}${endpoint}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refreshToken }),
-          });
-          if (!res.ok) continue;
-          const data = await res.json();
-          if (data.accessToken) {
-            localStorage.setItem('accessToken', data.accessToken);
-            if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
-            return true;
-          }
-        } catch { continue; }
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken }),
+      });
+      if (!res.ok) return false;
+      const data = await res.json();
+      if (data.accessToken) {
+        setTokens(role, data.accessToken, data.refreshToken);
+        return true;
       }
       return false;
+    } catch {
+      return false;
     } finally {
-      refreshPromise = null;
+      delete refreshPromises[role];
     }
   })();
 
-  return refreshPromise;
+  return refreshPromises[role]!;
 }
 
 // Cross-tab coordination: when tab A rotates the refresh token, tab B's
@@ -50,29 +53,26 @@ async function tryRefreshToken(): Promise<boolean> {
 // own API calls 401, silencing the cascade.
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
-    if (e.key === 'accessToken' && e.newValue) {
-      // Abort any pending refresh in flight — another tab already got a
-      // fresh token, we should use it.
-      refreshPromise = null;
-    }
+    if (!e.key || !e.newValue) return;
+    if (e.key === 'consumerAccessToken') delete refreshPromises.consumer;
+    else if (e.key === 'staffAccessToken') delete refreshPromises.staff;
+    else if (e.key === 'adminAccessToken') delete refreshPromises.admin;
   });
 }
 
-function redirectToLogin() {
+function redirectToLogin(role: Role) {
   if (typeof window === 'undefined') return;
-  localStorage.removeItem('accessToken');
-  localStorage.removeItem('refreshToken');
+  clearTokens(role);
   const path = window.location.pathname;
-  if (path.startsWith('/merchant')) {
+  if (role === 'staff') {
     localStorage.removeItem('staffRole');
     localStorage.removeItem('staffName');
     localStorage.removeItem('tenantName');
     localStorage.removeItem('tenantLogoUrl');
     if (path !== '/merchant/login') window.location.href = '/merchant/login';
-  } else if (path.startsWith('/admin')) {
+  } else if (role === 'admin') {
     if (path !== '/admin/login') window.location.href = '/admin/login';
   } else {
-    // Consumer routes — main page has its own login screen
     if (path.startsWith('/consumer') || path.startsWith('/catalog') || path.startsWith('/scan') || path.startsWith('/my-codes')) {
       window.location.href = '/consumer';
     }
@@ -80,7 +80,8 @@ function redirectToLogin() {
 }
 
 async function request(path: string, options: RequestInit = {}) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+  const role = roleForApiPath(path);
+  const token = getAccess(role);
 
   // Only set Content-Type if there's a body. Fastify rejects requests with
   // Content-Type: application/json but empty body.
@@ -108,9 +109,9 @@ async function request(path: string, options: RequestInit = {}) {
 
   // Auto-refresh on 401: try refreshing the token and retry ONCE
   if (res.status === 401 && !path.includes('/auth/')) {
-    const refreshed = await tryRefreshToken();
+    const refreshed = await tryRefreshToken(role);
     if (refreshed) {
-      const newToken = localStorage.getItem('accessToken');
+      const newToken = getAccess(role);
       const retryHeaders: Record<string, string> = {};
       if (options.body) retryHeaders['Content-Type'] = 'application/json';
       if (newToken) retryHeaders['Authorization'] = `Bearer ${newToken}`;
@@ -120,12 +121,12 @@ async function request(path: string, options: RequestInit = {}) {
       });
       const retryData = await safeJson(retryRes);
       if (!retryRes.ok) {
-        if (retryRes.status === 401) redirectToLogin();
+        if (retryRes.status === 401) redirectToLogin(role);
         throw { status: retryRes.status, ...retryData };
       }
       return retryData;
     } else {
-      redirectToLogin();
+      redirectToLogin(role);
     }
   }
 
@@ -157,7 +158,7 @@ export const api = {
 
   /** Upload an actual invoice image for OCR + validation (multipart/form-data) */
   uploadInvoiceImage: async (file: File, assetTypeId: string, opts?: { latitude?: string; longitude?: string; deviceId?: string; branchId?: string }) => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const token = getAccess('consumer');
     const form = new FormData();
     form.append('invoice', file);
     form.append('assetTypeId', assetTypeId);
@@ -188,7 +189,7 @@ export const api = {
 
   // Consumer image upload (for dispute screenshots)
   uploadConsumerImage: async (file: File): Promise<{ success: boolean; url: string }> => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const token = getAccess('consumer');
     const formData = new FormData();
     formData.append('file', file);
     const res = await fetch(`${API_BASE}/api/consumer/upload-image`, {
@@ -209,7 +210,7 @@ export const api = {
 
   // Merchant Data
   uploadProductImage: async (file: File): Promise<{ success: boolean; url: string }> => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null;
+    const token = getAccess('staff');
     const formData = new FormData();
     formData.append('file', file);
     const res = await fetch(`${API_BASE}/api/merchant/upload-image`, {

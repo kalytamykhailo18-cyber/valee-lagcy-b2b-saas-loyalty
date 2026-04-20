@@ -42,7 +42,10 @@ export interface SessionIdentity {
 
 export function getCurrentSessionIdentity(): SessionIdentity | null {
   if (typeof window === 'undefined') return null
-  const token = localStorage.getItem('accessToken')
+  const token = localStorage.getItem('consumerAccessToken')
+    || localStorage.getItem('staffAccessToken')
+    || localStorage.getItem('adminAccessToken')
+    || localStorage.getItem('accessToken')
   if (!token) return null
   const body = decodeJwtBodyUnverified(token)
   if (!body) return null

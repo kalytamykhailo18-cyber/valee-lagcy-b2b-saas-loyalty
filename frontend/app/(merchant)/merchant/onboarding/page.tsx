@@ -41,7 +41,7 @@ export default function OnboardingWizard() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const token = localStorage.getItem('accessToken')
+    const token = localStorage.getItem('staffAccessToken') || localStorage.getItem('accessToken')
     const role = localStorage.getItem('staffRole')
     if (!token || role !== 'owner') {
       window.location.replace('/merchant/login')
