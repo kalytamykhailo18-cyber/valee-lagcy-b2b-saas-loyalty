@@ -794,6 +794,7 @@ interface MerchantAccount {
   tenantSlug: string
   tenantLogoUrl?: string | null
   balance: string
+  reserved?: string
   unitLabel: string
   hasAccount?: boolean
   topProducts: Array<{ id: string; name: string; photoUrl: string | null; redemptionCost: string; stock: number }>
@@ -804,6 +805,7 @@ function MultiMerchantHub() {
   const [loading, setLoading] = useState(true)
   const [merchants, setMerchants] = useState<MerchantAccount[]>([])
   const [totalBalance, setTotalBalance] = useState('0')
+  const [totalReserved, setTotalReserved] = useState('0')
   const [phoneNumber, setPhoneNumber] = useState('')
   const [displayName, setDisplayName] = useState<string | null>(null)
 
@@ -813,6 +815,7 @@ function MultiMerchantHub() {
         const data: any = await api.getAllAccounts()
         setMerchants(data.merchants || [])
         setTotalBalance(data.totalBalance || '0')
+        setTotalReserved(data.totalReserved || '0')
         setPhoneNumber(data.phoneNumber || '')
         setDisplayName(data.displayName || null)
       } catch {
@@ -869,16 +872,19 @@ function MultiMerchantHub() {
         <section className="bg-gradient-to-br from-indigo-600 to-indigo-800 rounded-2xl sm:rounded-3xl p-4 sm:p-8 lg:p-10 text-white shadow-xl aa-rise overflow-hidden">
           <p className="text-indigo-200 text-xs sm:text-base">Tu saldo total</p>
           {/* Size the balance text based on digit count so 9-digit
-              totals don't wrap to 3 lines on mobile (Genesis M9). */}
+              totals don't wrap to 3 lines on mobile (Genesis M9).
+              Display total = spendable + reserved so a pending canje QR
+              doesn't look like missing points (Genesis M4). */}
           {(() => {
-            const formatted = formatPoints(totalBalance)
-            const digits = String(totalBalance).replace(/\D/g, '').length
+            const displayTotal = (Number(totalBalance) + Number(totalReserved)).toFixed(8)
+            const formatted = formatPoints(displayTotal)
+            const digits = String(displayTotal).replace(/\D/g, '').length
             const sizeClass =
               digits >= 9 ? 'text-2xl sm:text-4xl lg:text-5xl' :
               digits >= 7 ? 'text-3xl sm:text-5xl lg:text-6xl' :
               'text-4xl sm:text-5xl lg:text-6xl xl:text-7xl'
             return (
-              <p key={totalBalance} className={`${sizeClass} font-bold mt-2 tracking-tight aa-count tabular-nums leading-none`}>
+              <p key={displayTotal} className={`${sizeClass} font-bold mt-2 tracking-tight aa-count tabular-nums leading-none`}>
                 {formatted}
               </p>
             )
@@ -891,6 +897,12 @@ function MultiMerchantHub() {
               </p>
             )
           })()}
+          {Number(totalReserved) > 0 && (
+            <div className="mt-3 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
+              <MdLock className="w-3.5 h-3.5" />
+              <span>{formatPoints(totalReserved)} reservados para canje pendiente</span>
+            </div>
+          )}
         </section>
 
         {(() => {
@@ -936,17 +948,26 @@ function MultiMerchantHub() {
                               {(() => {
                                 // Responsive sizing: prevent 7+ digit saldos
                                 // from wrapping to 3 lines inside the card.
-                                const digits = String(m.balance).replace(/\D/g, '').length
+                                // Display total = spendable + reserved so a
+                                // pending canje QR doesn't look like missing
+                                // points (Genesis M4).
+                                const displayBal = Number(m.balance) + Number(m.reserved || 0)
+                                const digits = String(displayBal).replace(/\D/g, '').length
                                 const cls = digits >= 9 ? 'text-2xl sm:text-3xl'
                                   : digits >= 7 ? 'text-3xl sm:text-4xl'
                                   : 'text-[42px] sm:text-5xl'
                                 return (
                                   <p className={`${cls} font-bold text-slate-900 tracking-tight tabular-nums leading-none`}>
-                                    {formatPoints(m.balance)}
+                                    {formatPoints(displayBal)}
                                   </p>
                                 )
                               })()}
                               <p className="text-sm text-slate-500 mt-1.5">{m.unitLabel}</p>
+                              {Number(m.reserved || 0) > 0 && (
+                                <p className="text-[11px] text-amber-600 mt-1 font-medium">
+                                  {formatPoints(m.reserved || '0')} reservados
+                                </p>
+                              )}
                             </div>
                             <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
                           </div>

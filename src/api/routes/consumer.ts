@@ -279,10 +279,31 @@ export default async function consumerRoutes(app: FastifyInstance) {
     }
 
     const breakdown = await getAccountBalanceBreakdown(accountId, assetType.id, tenantId);
+
+    // Reserved = sum of active pending redemption tokens. In the double-entry
+    // ledger these are already debited from the consumer's balance (the QR
+    // must hold the value so a second scan can't double-spend), so
+    // breakdown.total already has them subtracted. The consumer sees this as
+    // "points disappeared before I even showed the QR". We expose the
+    // reserved amount so the PWA can render the big number as
+    // total + reserved with a "N reservados" chip beside it, letting the
+    // customer understand where the missing points went (Genesis M4).
+    const reservedAgg = await prisma.redemptionToken.aggregate({
+      where: {
+        tenantId,
+        consumerAccountId: accountId,
+        status: 'pending',
+        expiresAt: { gt: new Date() },
+      },
+      _sum: { amount: true },
+    });
+    const reserved = reservedAgg._sum.amount?.toString() || '0';
+
     return {
       balance: breakdown.total,           // total displayed (confirmed + provisional)
       confirmed: breakdown.confirmed,
       provisional: breakdown.provisional,
+      reserved,                           // pending redemption QRs still held
       unitLabel: assetType.unitLabel,
       assetTypeId: assetType.id,
     };
@@ -589,9 +610,24 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
       let balance = '0';
       let unitLabel = 'pts';
+      let reserved = '0';
       if (assetType) {
         if (acc) {
           balance = await getAccountBalance(acc.id, assetType.id, tenant.id);
+          // Reserved = sum of this consumer's active pending redemption tokens
+          // at this tenant. See /api/consumer/balance for the rationale — the
+          // PWA displays balance+reserved so the customer doesn't think their
+          // points vanished the moment they tapped "canjear" (Genesis M4).
+          const resAgg = await prisma.redemptionToken.aggregate({
+            where: {
+              tenantId: tenant.id,
+              consumerAccountId: acc.id,
+              status: 'pending',
+              expiresAt: { gt: new Date() },
+            },
+            _sum: { amount: true },
+          });
+          reserved = resAgg._sum.amount?.toString() || '0';
         }
         unitLabel = assetType.unitLabel;
       }
@@ -618,6 +654,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
         accountType: acc?.accountType || null,
         hasAccount: !!acc,
         balance,
+        reserved,
         unitLabel,
         topProducts: topProducts.map(p => ({
           id: p.id,
@@ -645,6 +682,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     // Compute total balance across merchants (note: only meaningful if all use the same unit)
     const totalBalance = merchants.reduce((sum, m) => sum + Number(m.balance), 0);
+    const totalReserved = merchants.reduce((sum, m) => sum + Number(m.reserved || 0), 0);
 
     // Pick the best display name available across this user's accounts
     // (verified/non-null wins; otherwise the most recent).
@@ -657,6 +695,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       displayName,
       merchantCount: merchants.length,
       totalBalance: totalBalance.toFixed(8),
+      totalReserved: totalReserved.toFixed(8),
       merchants,
     };
   });
