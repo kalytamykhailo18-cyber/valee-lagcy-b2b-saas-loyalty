@@ -353,4 +353,10 @@ export const api = {
   getMetrics: () => request('/api/admin/metrics'),
   getExecDashboard: (idleDays = 14, weeks = 8) =>
     request(`/api/admin/exec-dashboard?idleDays=${idleDays}&weeks=${weeks}`),
+  getPlatformHealth: (windowHours = 24) =>
+    request(`/api/admin/platform-health?windowHours=${windowHours}`),
+  forceLogoutAccount: (accountId: string, reason: string) =>
+    request(`/api/admin/accounts/${accountId}/force-logout`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  forceLogoutStaff: (staffId: string, reason: string) =>
+    request(`/api/admin/staff/${staffId}/force-logout`, { method: 'POST', body: JSON.stringify({ reason }) }),
 };

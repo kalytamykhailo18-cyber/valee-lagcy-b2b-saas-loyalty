@@ -59,6 +59,15 @@ export default function AdminDashboard() {
       <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4">
         <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Panel ejecutivo</h1>
         <p className="text-sm text-slate-500 mt-1">Bienvenido {adminName}</p>
+        {/* Top-level quick links — always rendered (outside the data-loaded
+            guard) so operators can navigate even while the dashboard is
+            still loading. */}
+        <nav className="mt-4 flex flex-wrap gap-2 text-xs font-semibold">
+          <Link href="/admin/tenants"     className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Comercios</Link>
+          <Link href="/admin/ledger"      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Ledger global</Link>
+          <Link href="/admin/adjustments" className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Ajustes</Link>
+          <Link href="/admin/health"      className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50">Salud de plataforma</Link>
+        </nav>
       </div>
 
       <div className="px-4 sm:px-6 lg:px-8 pb-12 space-y-6">
@@ -225,6 +234,10 @@ export default function AdminDashboard() {
                 <Link href="/admin/adjustments" className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md transition">
                   <p className="font-semibold text-slate-800">Ajustes manuales</p>
                   <p className="text-xs text-slate-500 mt-1">Correcciones directas al ledger</p>
+                </Link>
+                <Link href="/admin/health" className="block bg-white rounded-2xl p-5 shadow-sm border border-slate-100 hover:shadow-md transition">
+                  <p className="font-semibold text-slate-800">Salud de la plataforma</p>
+                  <p className="text-xs text-slate-500 mt-1">Ranking de comercios en riesgo y razones de rechazo</p>
                 </Link>
               </div>
             </section>
