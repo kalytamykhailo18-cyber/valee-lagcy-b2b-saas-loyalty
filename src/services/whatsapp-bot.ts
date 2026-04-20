@@ -70,8 +70,17 @@ export function getStateGreeting(
   merchantName: string,
   balance: string,
   phoneNumber: string,
-  welcomeBonusAmount?: string
+  welcomeBonusAmount?: string,
+  merchantSlug?: string
 ): string[] {
+  // Prefer the real tenant slug when available; the old fallback slugified
+  // merchantName with spaces→dashes, which usually worked for "Valee Demo" but
+  // would silently break for tenants whose display name doesn't match their
+  // slug (e.g. "Café Juan Valdez" vs cafe-juan).
+  const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
+  const slug = (merchantSlug || merchantName.toLowerCase().replace(/\s+/g, '-')).toLowerCase();
+  const pwaLink = `${base}/consumer?tenant=${encodeURIComponent(slug)}`;
+
   switch (state) {
     case 'first_time': {
       const bonusAmount = welcomeBonusAmount || process.env.WELCOME_BONUS_AMOUNT || '50';
@@ -80,7 +89,7 @@ export function getStateGreeting(
         `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida!`,
         `Ahora puedes ganar más recompensas. Es muy fácil:`,
         `📸 Envíanos una foto de tu factura y te cargaremos tus puntos automáticamente. ¡Así de simple!`,
-        `📱 Accede a tu cuenta aquí: https://valee.app/consumer/${merchantName.toLowerCase().replace(/\s+/g, '-')}`,
+        `📱 Accede a tu cuenta aquí: ${pwaLink}`,
       ];
     }
 
@@ -88,12 +97,14 @@ export function getStateGreeting(
       return [
         `¡Hola de nuevo! Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
         `¿Tienes una nueva factura para escanear? 📸 Envíala aquí.`,
+        `📱 Ver tu saldo y canjear: ${pwaLink}`,
       ];
 
     case 'active_purchase':
       return [
         `¡Acabas de visitar ${merchantName}! No olvides enviar tu factura para ganar tus puntos. 📸`,
         `Tu saldo actual: ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
+        `📱 Ver tu cuenta: ${pwaLink}`,
       ];
 
     case 'registered_never_scanned':
@@ -101,6 +112,7 @@ export function getStateGreeting(
         `¡Hola! Te registraste hace un tiempo pero aún no has ganado puntos.`,
         `Es muy fácil: la próxima vez que compres en ${merchantName}, envíanos una foto de tu factura aquí. 📸`,
         `¡Así empezarás a acumular puntos para canjear por productos!`,
+        `📱 Tu cuenta aquí: ${pwaLink}`,
       ];
   }
 }
@@ -349,14 +361,16 @@ export async function handleIncomingMessage(params: {
     }
   }
 
-  // Get merchant name
+  // Get merchant name + slug (slug is needed so the PWA link in the greeting
+  // deep-links to the right tenant instead of a slugified name guess)
   const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
   const merchantName = tenant?.name || 'el comercio';
+  const merchantSlug = tenant?.slug;
 
   // If account was just created (first contact via QR), always send welcome greeting
   if (created || state === 'first_time') {
     const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
-    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt);
+    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug);
   }
 
   // If it's the first message or a greeting, send state-based greeting
@@ -365,12 +379,12 @@ export async function handleIncomingMessage(params: {
 
     // Check if it's a merchant QR message (already handled by webhook for tenant routing)
     if (/merchant:[a-z0-9\-]+/i.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber);
+      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
     }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber);
+      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
     }
 
     // Check support intents
@@ -429,18 +443,28 @@ export async function handleIncomingMessage(params: {
     });
 
     if (result.success) {
+      // PWA deep link — lets the user jump from WhatsApp straight to their
+      // balance/catalog for this merchant without re-selecting the tenant.
+      const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
+      const pwaLink = merchantSlug
+        ? `${base}/consumer?tenant=${encodeURIComponent(merchantSlug)}`
+        : `${base}/consumer`;
+
       const isPending = result.stage === 'pending';
       if (isPending) {
         return [
-          `✅ Factura validada!`,
-          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
+          `✅ Factura recibida y en verificacion.`,
+          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel} (provisional).`,
           `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
+          `Te confirmamos en breve cuando se valide.`,
+          `📱 Ver tu cuenta y canjear premios: ${pwaLink}`,
         ];
       }
       return [
         `✅ Factura validada!`,
         `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
         `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
+        `📱 Ver tu cuenta y canjear premios: ${pwaLink}`,
       ];
     } else {
       // On failure, hint about typing "factura" for details
@@ -452,5 +476,5 @@ export async function handleIncomingMessage(params: {
   }
 
   // Default: state greeting
-  return getStateGreeting(state, merchantName, balance, phoneNumber);
+  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug);
 }
