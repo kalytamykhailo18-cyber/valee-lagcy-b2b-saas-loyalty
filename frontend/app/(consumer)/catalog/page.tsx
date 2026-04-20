@@ -426,7 +426,6 @@ function QrRedemptionView({ redeemResult, onClear }: { redeemResult: any; onClea
 
 function QRDisplay({ value }: { value: string }) {
   const [qrUrl, setQrUrl] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     import('qrcode').then(QRCode => {
@@ -435,13 +434,6 @@ function QRDisplay({ value }: { value: string }) {
         .catch(() => {})
     })
   }, [value])
-
-  function copyToken() {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    }).catch(() => {})
-  }
 
   return (
     <div className="flex flex-col items-center">
@@ -452,13 +444,10 @@ function QRDisplay({ value }: { value: string }) {
           <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-      <button
-        onClick={copyToken}
-        className="mt-3 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-lg transition flex items-center gap-1"
-      >
-        {copied ? 'Copiado!' : 'Copiar codigo manual'}
-      </button>
-      <p className="text-[10px] text-slate-400 mt-1 max-w-[240px] break-all text-center select-all">{value.slice(0, 40)}...</p>
+      {/* Removed the 'Copiar codigo manual' button and the long JWT
+          preview — Genesis flagged them as confusing. The 6-digit manual
+          code rendered separately below the QR is the proper fallback
+          when the cashier's camera can't read the code. */}
     </div>
   )
 }
