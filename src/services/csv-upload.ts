@@ -70,7 +70,32 @@ export async function processCSV(
     data: { tenantId, filename: 'csv_upload', status: 'processing', uploadedByStaffId: staffId },
   });
 
-  const lines = csvContent.split(/\r?\n/).filter(l => l.trim() !== '');
+  let lines = csvContent.split(/\r?\n/).filter(l => l.trim() !== '');
+
+  // Recover from the 'pasted from WhatsApp' case where newlines got
+  // collapsed to spaces: 'header,cols value1,value2 value3,value4'.
+  // If there's only one 'line' but it has way more commas than a
+  // single-row CSV should have, treat the whole thing as one big stream
+  // of comma-separated tokens and batch them into rows of N where N is
+  // the header column count (detected after this step). Without this
+  // the frontend showed a generic 'client-side exception' because the
+  // upload returned rowsLoaded=0 with an unhelpful 'no data rows'.
+  if (lines.length === 1) {
+    const raw = lines[0];
+    const allTokens = raw.split(/\s+/).filter(t => t.length > 0);
+    if (allTokens.length >= 2 && allTokens[0].includes(',')) {
+      // First whitespace-separated chunk is the header; rest are rows.
+      const header = allTokens[0];
+      const rows = allTokens.slice(1);
+      // Each non-empty row should have the same comma count as the header.
+      const headerCols = header.split(',').length;
+      const rowCommaCountsOk = rows.every(r => r.split(',').length === headerCols);
+      if (rowCommaCountsOk && rows.length > 0) {
+        lines = [header, ...rows];
+      }
+    }
+  }
+
   if (lines.length < 2) {
     const errorDetails = [{ row: 0, reason: 'CSV has no data rows' }];
     await prisma.uploadBatch.update({

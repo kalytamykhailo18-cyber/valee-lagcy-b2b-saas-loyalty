@@ -6,11 +6,15 @@ import { formatCash } from '@/lib/format'
 
 interface UploadResult {
   batchId?: string
+  status?: string
   rowsLoaded: number
   rowsSkipped: number
   rowsErrored: number
   rowsAutoCredited?: number
-  errorDetails?: string[]
+  // Backend returns objects { row, reason } — previously typed as
+  // `string[]` which crashed React ('Objects are not valid as a React
+  // child') when rendering. Keep the union so old responses still render.
+  errorDetails?: Array<string | { row: number; reason: string }>
 }
 
 interface Invoice {
@@ -215,7 +219,13 @@ export default function CsvUploadPage() {
                   <div className="mt-4 pt-4 border-t border-slate-100">
                     <p className="text-xs font-semibold text-red-700 mb-2">Errores:</p>
                     <ul className="text-xs text-red-600 space-y-1 max-h-40 overflow-auto">
-                      {result.errorDetails.map((e, i) => <li key={i}>- {e}</li>)}
+                      {result.errorDetails.map((e, i) => (
+                        <li key={i}>
+                          {typeof e === 'string'
+                            ? `— ${e}`
+                            : `— Fila ${e.row}: ${e.reason}`}
+                        </li>
+                      ))}
                     </ul>
                   </div>
                 )}
