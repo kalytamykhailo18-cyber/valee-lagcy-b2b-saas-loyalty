@@ -35,15 +35,19 @@ async function authedFetch(path: string, token: string, init: RequestInit = {}) 
 async function main() {
   const ts = Date.now();
 
-  // Step 1: signup
+  // Step 1: signup. Spoof a unique X-Forwarded-For so repeated CI runs on
+  // the same host don't collide with the per-IP signup rate limiter
+  // (5 per 10 minutes).
+  const fakeIp = `10.20.${(ts >> 8) & 0xff}.${ts & 0xff}`;
   const signupRes = await fetch(`${API}/api/merchant/signup`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'X-Forwarded-For': fakeIp },
     body: JSON.stringify({
       businessName: `Onboarding E2E ${ts}`,
       ownerName: 'E2E Owner',
       ownerEmail: `e2e-${ts}@example.com`,
       password: 'passw0rd-e2e',
+      rif: `J-${String(ts).slice(-9).padStart(9, '0')}-1`,
     }),
   });
   const signup: any = await signupRes.json();

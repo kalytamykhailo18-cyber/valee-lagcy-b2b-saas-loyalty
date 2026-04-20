@@ -19,6 +19,9 @@ export default function MerchantSignup() {
     address: '',
     description: '',
   })
+  const [rifPrefix, setRifPrefix] = useState<'J' | 'V' | 'E' | 'G' | 'P'>('J')
+  const [rifBody, setRifBody] = useState('')
+  const [rifCheck, setRifCheck] = useState('')
   const [errors, setErrors] = useState<Record<string, string>>({})
   const [submitting, setSubmitting] = useState(false)
   const [topError, setTopError] = useState('')
@@ -57,6 +60,12 @@ export default function MerchantSignup() {
         e.contactPhone = 'Debe tener entre 10 y 15 digitos'
       }
     }
+    // RIF is mandatory — without it the factura RIF-match guard can't do its
+    // job, and that's what prevents cross-merchant fraud. Accept 7-9 body
+    // digits + 1 check digit (matches backend regex).
+    if (!/^\d{7,9}$/.test(rifBody) || !/^\d$/.test(rifCheck)) {
+      e.rif = 'RIF incompleto. Formato: J-XXXXXXXX-X'
+    }
     setErrors(e)
     return Object.keys(e).length === 0
   }
@@ -70,6 +79,7 @@ export default function MerchantSignup() {
     }
     setSubmitting(true)
     try {
+      const rifValue = `${rifPrefix}-${rifBody}-${rifCheck}`
       const res = await api.merchantSignup({
         businessName: form.businessName.trim(),
         // Optional: backend auto-generates from businessName when omitted.
@@ -77,6 +87,7 @@ export default function MerchantSignup() {
         ownerName: form.ownerName.trim(),
         ownerEmail: form.ownerEmail.trim(),
         password: form.password,
+        rif: rifValue,
         contactPhone: form.contactPhone.trim() || undefined,
         address: form.address.trim() || undefined,
         description: form.description.trim() || undefined,
@@ -151,6 +162,44 @@ export default function MerchantSignup() {
                 the backend. The owner can rename it later from Configuracion if
                 needed. We keep it in form state so the auto-derivation logic
                 still runs in setBusinessName, but we don't render the input. */}
+
+            {/* RIF — required. The backend rejects any fiscal factura whose
+                RIF doesn't match this one, which is the anti-fraud guard. */}
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">
+                RIF del comercio <span className="text-red-500">*</span>
+              </label>
+              <div className="mt-1 flex items-center gap-2">
+                <select
+                  value={rifPrefix}
+                  onChange={e => { setRifPrefix(e.target.value as any); if (errors.rif) setErrors({ ...errors, rif: '' }) }}
+                  className="aa-field aa-field-emerald px-2 py-2.5 rounded-lg border border-slate-200 text-sm bg-white"
+                >
+                  {['J','V','E','G','P'].map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <span className="text-slate-400">-</span>
+                <input
+                  type="text" inputMode="numeric"
+                  value={rifBody}
+                  onChange={e => { setRifBody(e.target.value.replace(/\D/g, '').slice(0, 9)); if (errors.rif) setErrors({ ...errors, rif: '' }) }}
+                  placeholder="12345678"
+                  className={`flex-1 px-3 py-2.5 rounded-lg border text-sm tabular-nums focus:outline-none focus:ring-2 ${errors.rif ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
+                />
+                <span className="text-slate-400">-</span>
+                <input
+                  type="text" inputMode="numeric"
+                  value={rifCheck}
+                  onChange={e => { setRifCheck(e.target.value.replace(/\D/g, '').slice(0, 1)); if (errors.rif) setErrors({ ...errors, rif: '' }) }}
+                  placeholder="9"
+                  className={`w-14 px-3 py-2.5 rounded-lg border text-sm text-center tabular-nums focus:outline-none focus:ring-2 ${errors.rif ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
+                />
+              </div>
+              {errors.rif
+                ? <p className="text-red-500 text-xs mt-1">{errors.rif}</p>
+                : <p className="text-xs text-slate-400 mt-1">Lo usamos para validar que cada factura que envien tus clientes sea de tu comercio.</p>
+              }
+            </div>
+
             {field('contactPhone', 'Telefono de contacto (opcional)', 'tel', '0414-1234567')}
             {field('address', 'Direccion (opcional)', 'text', 'Av. Principal, Valencia')}
             <div>
