@@ -62,3 +62,20 @@ export async function sendTenantCredentials(
     `,
   });
 }
+
+export async function sendPasswordResetLink(
+  ownerEmail: string,
+  resetUrl: string,
+  ttlMinutes: number,
+): Promise<boolean> {
+  return sendEmail({
+    to: ownerEmail,
+    subject: 'Recupera tu contrasena de Valee',
+    html: `
+      <p>Recibimos una solicitud para recuperar la contrasena de tu cuenta de comercio en Valee.</p>
+      <p>Haz clic en este enlace para definir una contrasena nueva. El enlace expira en ${ttlMinutes} minutos:</p>
+      <p><a href="${resetUrl}">${resetUrl}</a></p>
+      <p>Si no fuiste tu, ignora este correo — tu contrasena actual sigue siendo valida.</p>
+    `,
+  });
+}

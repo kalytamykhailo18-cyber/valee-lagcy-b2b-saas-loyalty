@@ -299,6 +299,82 @@ export default async function merchantRoutes(app: FastifyInstance) {
     return { success: true };
   });
 
+  // ---- PASSWORD RESET (Genesis M5) ----
+  // Request phase: owner enters email → we look up the staff row, generate
+  // a single-use token (we store only the SHA-256 hash, never the token
+  // itself), and email a link. The endpoint always returns success to
+  // avoid leaking whether an email is registered.
+  app.post('/api/merchant/auth/password-reset/request', async (request, reply) => {
+    const { email } = request.body as { email?: string };
+    if (!email || typeof email !== 'string') {
+      return reply.status(400).send({ error: 'email required' });
+    }
+    const staff = await prisma.staff.findFirst({
+      where: { email: email.trim().toLowerCase(), active: true },
+    });
+    const ttlMinutes = parseInt(process.env.PASSWORD_RESET_TTL_MINUTES || '30');
+    let devResetUrl: string | undefined;
+    if (staff) {
+      const { randomBytes, createHash } = await import('crypto');
+      const raw = randomBytes(32).toString('hex');
+      const hash = createHash('sha256').update(raw).digest('hex');
+      await prisma.passwordResetToken.create({
+        data: {
+          staffId: staff.id,
+          tokenHash: hash,
+          expiresAt: new Date(Date.now() + ttlMinutes * 60 * 1000),
+        },
+      });
+      const base = process.env.FRONTEND_BASE_URL || 'https://valee.app';
+      const resetUrl = `${base}/merchant/reset-password?token=${raw}`;
+      const { sendPasswordResetLink } = await import('../../services/email.js');
+      const sent = await sendPasswordResetLink(staff.email, resetUrl, ttlMinutes);
+      // If Resend isn't wired yet (DNS not verified), surface the link in
+      // the API response so the flow is usable end-to-end for testing and
+      // for Eric to manually forward to the owner while DNS propagates.
+      if (!sent && process.env.NODE_ENV !== 'production') {
+        devResetUrl = resetUrl;
+      }
+    }
+    const body: any = { success: true };
+    if (devResetUrl) body.devResetUrl = devResetUrl;
+    return body;
+  });
+
+  // Confirm phase: owner clicks the link → frontend posts the raw token +
+  // new password. We hash the token and match, enforce TTL + single-use,
+  // then rotate the password and invalidate any live staff sessions.
+  app.post('/api/merchant/auth/password-reset/confirm', async (request, reply) => {
+    const { token, newPassword } = request.body as { token?: string; newPassword?: string };
+    if (!token || !newPassword) {
+      return reply.status(400).send({ error: 'token and newPassword required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return reply.status(400).send({ error: 'La contrasena debe tener al menos 8 caracteres' });
+    }
+    const { createHash } = await import('crypto');
+    const hash = createHash('sha256').update(token).digest('hex');
+    const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hash } });
+    if (!row) return reply.status(400).send({ error: 'Token invalido' });
+    if (row.usedAt) return reply.status(400).send({ error: 'Token ya fue usado' });
+    if (row.expiresAt < new Date()) return reply.status(400).send({ error: 'Token expirado' });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await prisma.$transaction([
+      prisma.staff.update({
+        where: { id: row.staffId },
+        // Rotate the password and kill any outstanding JWTs so a lost
+        // device can't keep hitting the API with the old session.
+        data: { passwordHash: newHash, tokensInvalidatedAt: new Date() },
+      }),
+      prisma.passwordResetToken.update({
+        where: { id: row.id },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+    return { success: true };
+  });
+
   // ---- CSV UPLOAD (Owner only) ----
   app.post('/api/merchant/csv-upload', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId } = request.staff!;

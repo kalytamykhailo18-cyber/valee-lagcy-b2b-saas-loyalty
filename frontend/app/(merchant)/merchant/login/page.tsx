@@ -136,6 +136,9 @@ export default function MerchantLogin() {
               {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Ingresando...' : 'Ingresar'}</span>
             </button>
             <p className="text-center text-sm text-slate-500 pt-2">
+              <Link href="/merchant/forgot-password" className="text-slate-500 hover:text-emerald-700 underline underline-offset-2">Olvide mi contrasena</Link>
+            </p>
+            <p className="text-center text-sm text-slate-500 pt-2">
               No tienes cuenta? <Link href="/merchant/signup" className="text-emerald-600 hover:text-emerald-800 font-semibold">Registra tu comercio</Link>
             </p>
           </div>

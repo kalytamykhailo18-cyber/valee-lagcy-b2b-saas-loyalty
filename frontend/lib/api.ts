@@ -207,6 +207,10 @@ export const api = {
   // Merchant Auth
   merchantLogin: (email: string, password: string, tenantSlug?: string) =>
     request('/api/merchant/auth/login', { method: 'POST', body: JSON.stringify({ email, password, ...(tenantSlug ? { tenantSlug } : {}) }) }),
+  requestPasswordReset: (email: string) =>
+    request('/api/merchant/auth/password-reset/request', { method: 'POST', body: JSON.stringify({ email }) }),
+  confirmPasswordReset: (token: string, newPassword: string) =>
+    request('/api/merchant/auth/password-reset/confirm', { method: 'POST', body: JSON.stringify({ token, newPassword }) }),
 
   // Merchant Data
   uploadProductImage: async (file: File): Promise<{ success: boolean; url: string }> => {
