@@ -275,6 +275,67 @@ export default async function adminRoutes(app: FastifyInstance) {
     return { success: true, newBalance, ledgerEntryId: ledgerResult.credit.id };
   });
 
+  // ---- ADMIN: SEARCH ACCOUNTS BY PHONE ----
+  // Returns accounts whose phone tail matches — admin-scoped, cross-tenant,
+  // so the operator can find a subject quickly before force-logging them
+  // out. Last-10-digit match handles legacy format variants.
+  app.get('/api/admin/accounts/search', { preHandler: [requireAdminAuth] }, async (request) => {
+    const { phone } = request.query as { phone?: string };
+    if (!phone || phone.trim().length < 4) return { accounts: [] };
+    const tail = phone.replace(/\D/g, '').slice(-10);
+    if (tail.length < 4) return { accounts: [] };
+
+    const rows = await prisma.account.findMany({
+      where: {
+        phoneNumber: { endsWith: tail },
+        accountType: { in: ['shadow', 'verified'] },
+      },
+      include: { tenant: { select: { name: true, slug: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    return {
+      accounts: rows.map(a => ({
+        id: a.id,
+        phoneNumber: a.phoneNumber,
+        displayName: a.displayName,
+        accountType: a.accountType,
+        tenantId: a.tenantId,
+        tenantName: a.tenant.name,
+        tenantSlug: a.tenant.slug,
+        tokensInvalidatedAt: a.tokensInvalidatedAt,
+        createdAt: a.createdAt,
+      })),
+    };
+  });
+
+  // ---- ADMIN: SEARCH STAFF BY EMAIL ----
+  app.get('/api/admin/staff/search', { preHandler: [requireAdminAuth] }, async (request) => {
+    const { email } = request.query as { email?: string };
+    if (!email || email.trim().length < 3) return { staff: [] };
+    const rows = await prisma.staff.findMany({
+      where: { email: { contains: email.trim(), mode: 'insensitive' } },
+      include: { tenant: { select: { name: true, slug: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+    });
+
+    return {
+      staff: rows.map(s => ({
+        id: s.id,
+        email: s.email,
+        name: s.name,
+        role: s.role,
+        active: s.active,
+        tenantId: s.tenantId,
+        tenantName: s.tenant.name,
+        tenantSlug: s.tenant.slug,
+        tokensInvalidatedAt: s.tokensInvalidatedAt,
+      })),
+    };
+  });
+
   // ---- ADMIN: UNLINK CEDULA (downgrade verified → shadow) ----
   app.post('/api/admin/unlink-cedula', { preHandler: [requireAdminAuth] }, async (request, reply) => {
     const { accountId, tenantId, reason } = request.body as any;

@@ -359,4 +359,8 @@ export const api = {
     request(`/api/admin/accounts/${accountId}/force-logout`, { method: 'POST', body: JSON.stringify({ reason }) }),
   forceLogoutStaff: (staffId: string, reason: string) =>
     request(`/api/admin/staff/${staffId}/force-logout`, { method: 'POST', body: JSON.stringify({ reason }) }),
+  searchAccounts: (phone: string) =>
+    request(`/api/admin/accounts/search?phone=${encodeURIComponent(phone)}`),
+  searchStaff: (email: string) =>
+    request(`/api/admin/staff/search?email=${encodeURIComponent(email)}`),
 };
