@@ -11,6 +11,7 @@ export default function TenantManagement() {
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState('')
   const [query, setQuery] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'active' | 'inactive' | 'all'>('active')
 
   useEffect(() => { loadTenants() }, [])
 
@@ -23,14 +24,17 @@ export default function TenantManagement() {
   // move the filter server-side.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return tenants
-    return tenants.filter(t =>
-      (t.name || '').toLowerCase().includes(q) ||
-      (t.slug || '').toLowerCase().includes(q) ||
-      (t.ownerEmail || '').toLowerCase().includes(q) ||
-      (t.rif || '').toLowerCase().includes(q)
-    )
-  }, [tenants, query])
+    return tenants.filter(t => {
+      if (statusFilter !== 'all' && t.status !== statusFilter) return false
+      if (!q) return true
+      return (
+        (t.name || '').toLowerCase().includes(q) ||
+        (t.slug || '').toLowerCase().includes(q) ||
+        (t.ownerEmail || '').toLowerCase().includes(q) ||
+        (t.rif || '').toLowerCase().includes(q)
+      )
+    })
+  }, [tenants, query, statusFilter])
 
   async function handleCreate() {
     setLoading(true); setMsg('')
@@ -182,6 +186,22 @@ export default function TenantManagement() {
                 placeholder="Buscar por nombre, slug, email o RIF..."
                 className="aa-field aa-field-indigo w-full pl-10 pr-4 py-2.5 rounded-xl border border-slate-200 text-sm"
               />
+            </div>
+            {/* Status filter — defaults to 'active' so the list is clean by
+                default and test/inactive tenants only appear when explicitly
+                requested. */}
+            <div className="flex bg-white rounded-xl p-1 shadow-sm border border-slate-200">
+              {(['active', 'inactive', 'all'] as const).map(opt => (
+                <button
+                  key={opt}
+                  onClick={() => setStatusFilter(opt)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+                    statusFilter === opt ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  {opt === 'active' ? 'Activos' : opt === 'inactive' ? 'Inactivos' : 'Todos'}
+                </button>
+              ))}
             </div>
             <span className="text-xs text-slate-500">
               {filtered.length === tenants.length
