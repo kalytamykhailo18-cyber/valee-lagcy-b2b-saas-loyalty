@@ -197,6 +197,11 @@ model Tenant {
   dualScanCapPerCashier   Int      @default(50) @map("dual_scan_cap_per_cashier")
   dualScanCapPerConsumer  Int      @default(5)  @map("dual_scan_cap_per_consumer")
   dualScanTtlSeconds      Int      @default(60) @map("dual_scan_ttl_seconds")
+  /// When true, a consumer can redeem a QR generated at one branch from any
+  /// other branch of the same tenant (Genesis H11). When false the cashier's
+  /// branch must match the branch that was selected when the redemption was
+  /// initiated. Default true — consumers expect "points are per merchant".
+  crossBranchRedemption   Boolean  @default(true) @map("cross_branch_redemption")
   plan                    PlanTier @default(basic)
   trustLevel              TrustLevel @default(level_2_standard) @map("trust_level")
   redemptionFeePercent       Decimal? @map("redemption_fee_percent") @db.Decimal(5, 2)

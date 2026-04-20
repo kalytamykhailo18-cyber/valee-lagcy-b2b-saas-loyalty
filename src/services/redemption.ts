@@ -30,6 +30,7 @@ export async function initiateRedemption(params: {
   tenantId: string;
   assetTypeId: string;
   cashAmount?: string | null; // For hybrid redemption: cash portion paid by consumer
+  branchId?: string | null;   // Branch the QR was generated AT (for H11 policy)
 }): Promise<{
   success: boolean;
   message: string;
@@ -103,7 +104,10 @@ export async function initiateRedemption(params: {
   // the consumer history keep showing "Cafe Gratis" forever.
   const productMeta = { productId: product.id, productName: product.name, productPhotoUrl: product.photoUrl || null };
 
-  // Write PENDING_REDEMPTION double-entry for the POINTS portion (skip if 0 points — full cash)
+  // Write PENDING_REDEMPTION double-entry for the POINTS portion (skip if 0 points — full cash).
+  // branchId is stamped on the ledger row so the cashier-side processRedemption can
+  // enforce the cross-branch policy (Genesis H11).
+  const originBranchId = params.branchId || null;
   let ledgerResult;
   if (pointsToDeduct > 0) {
     ledgerResult = await writeDoubleEntry({
@@ -115,6 +119,7 @@ export async function initiateRedemption(params: {
       assetTypeId,
       referenceId,
       referenceType: 'redemption_token',
+      branchId: originBranchId,
       metadata: isHybrid
         ? { ...productMeta, hybrid: true, cashAmount: cashPortion, pointsDeducted: pointsToDeduct, fullPointsCost }
         : productMeta,
@@ -131,6 +136,7 @@ export async function initiateRedemption(params: {
       assetTypeId,
       referenceId,
       referenceType: 'redemption_token',
+      branchId: originBranchId,
       metadata: { ...productMeta, hybrid: true, fullCash: true, cashAmount: cashPortion, pointsDeducted: 0, fullPointsCost },
     });
   }
@@ -323,6 +329,32 @@ export async function processRedemption(params: {
   // 5. Verify tenant match
   if (payload.tenantId !== params.cashierTenantId) {
     return { success: false, message: 'Tenant mismatch — this QR belongs to a different merchant.' };
+  }
+
+  // 5b. Cross-branch policy (Genesis H11). When the tenant turned off
+  // cross-branch redemption, the cashier's branchId must match the branch
+  // recorded on the PENDING ledger entry. If either side has a null
+  // branchId (legacy data or no branches configured) we let it through —
+  // the rule only kicks in when both sides are explicit.
+  const tenantPolicy = await prisma.tenant.findUnique({
+    where: { id: payload.tenantId },
+    select: { crossBranchRedemption: true },
+  });
+  if (tenantPolicy?.crossBranchRedemption === false) {
+    const pendingBranchId = (await prisma.ledgerEntry.findUnique({
+      where: { id: tokenRecord.ledgerPendingEntryId },
+      select: { branchId: true },
+    }))?.branchId;
+    if (pendingBranchId && params.branchId && pendingBranchId !== params.branchId) {
+      const originBranch = await prisma.branch.findUnique({
+        where: { id: pendingBranchId },
+        select: { name: true },
+      });
+      return {
+        success: false,
+        message: `Este canje fue generado en ${originBranch?.name || 'otra sucursal'} y no puede canjearse aqui. Pide al cliente que lo use en esa sucursal.`,
+      };
+    }
   }
 
   // 6. Verify pending ledger entry exists

@@ -926,7 +926,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
   // ---- INITIATE REDEMPTION ----
   app.post('/api/consumer/redeem', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
     const { accountId, tenantId } = request.consumer!;
-    const { productId, assetTypeId, cashAmount, requestId } = request.body as { productId: string; assetTypeId: string; cashAmount?: string; requestId?: string };
+    const { productId, assetTypeId, cashAmount, requestId, branchId } = request.body as { productId: string; assetTypeId: string; cashAmount?: string; requestId?: string; branchId?: string };
 
     if (!productId || !assetTypeId) {
       return reply.status(400).send({ error: 'productId and assetTypeId are required' });
@@ -947,6 +947,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
       tenantId,
       assetTypeId,
       cashAmount: cashAmount || null,
+      branchId: branchId || null,
     });
 
     // Store idempotency after successful redemption

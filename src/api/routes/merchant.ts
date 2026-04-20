@@ -1133,6 +1133,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
       referralBonusAmount: tenant?.referralBonusAmount ?? 100,
       rif: tenant?.rif || null,
+      crossBranchRedemption: tenant?.crossBranchRedemption ?? true,
       slug,
       name: tenant?.name || '',
       logoUrl: tenant?.logoUrl || null,
@@ -1157,7 +1158,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
     const { tenantId } = request.staff!;
     const {
       welcomeBonusAmount, referralBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
-      name, address, contactPhone, contactEmail, website, description, instagramHandle,
+      name, address, contactPhone, contactEmail, website, description, instagramHandle, crossBranchRedemption,
     } = request.body as {
       welcomeBonusAmount?: number;
       referralBonusAmount?: number;
@@ -1173,6 +1174,7 @@ export default async function merchantRoutes(app: FastifyInstance) {
       website?: string | null;
       description?: string | null;
       instagramHandle?: string | null;
+      crossBranchRedemption?: boolean;
     };
 
     const validSources = ['bcv', 'binance_p2p', 'bybit_p2p', 'promedio', 'euro_bcv'];
@@ -1278,6 +1280,12 @@ export default async function merchantRoutes(app: FastifyInstance) {
       const v = instagramHandle ? String(instagramHandle).trim().replace(/^@/, '') : null;
       if (v && v.length > 100) return reply.status(400).send({ error: 'Instagram no puede exceder 100 caracteres' });
       data.instagramHandle = v || null;
+    }
+    if (crossBranchRedemption !== undefined) {
+      if (typeof crossBranchRedemption !== 'boolean') {
+        return reply.status(400).send({ error: 'crossBranchRedemption must be a boolean' });
+      }
+      data.crossBranchRedemption = crossBranchRedemption;
     }
 
     const updated = await prisma.tenant.update({ where: { id: tenantId }, data });
