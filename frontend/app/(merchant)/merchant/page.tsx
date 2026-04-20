@@ -308,6 +308,13 @@ export default function MerchantDashboard() {
               <p className="text-xl lg:text-2xl font-bold text-emerald-700 mt-1 truncate tabular-nums">
                 {formatPoints(metrics?.valueIssued || analytics?.valueIssued || '0')}
               </p>
+              {metrics && (
+                <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500 leading-tight">
+                  <p className="flex justify-between gap-2"><span>Facturas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedInvoices || '0')}</span></p>
+                  <p className="flex justify-between gap-2"><span>Bienvenidas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedWelcome || '0')}</span></p>
+                  <p className="flex justify-between gap-2"><span>Manuales</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedManual || '0')}</span></p>
+                </div>
+              )}
             </div>
             <div className="aa-card bg-white rounded-xl p-4 lg:p-5 shadow-sm border border-slate-100">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Canjeado</p>
