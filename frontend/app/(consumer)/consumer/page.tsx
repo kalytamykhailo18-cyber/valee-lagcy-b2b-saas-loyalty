@@ -112,6 +112,23 @@ function ConsumerApp() {
       localStorage.removeItem('tenantSlug')
     }
 
+    // Landing page sends ?switch=1 when the user clicks "No soy yo — cambiar
+    // de cuenta". Nuke the current session (server cookies + localStorage)
+    // before rendering so the /consumer page shows the login screen and
+    // NOT another user's dashboard for a split second.
+    if (searchParams.get('switch') === '1' && token) {
+      ;(async () => {
+        try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
+        localStorage.removeItem('accessToken')
+        localStorage.removeItem('refreshToken')
+        localStorage.removeItem('tenantSlug')
+        // Replace the URL so a refresh doesn't re-trigger the switch.
+        window.history.replaceState({}, '', '/consumer')
+        setScreen('login')
+      })()
+      return
+    }
+
     if (token) {
       if (merchantSlugFromUrl) {
         logEvent('selectMerchant_start', merchantSlugFromUrl)
@@ -446,6 +463,11 @@ function ConsumerApp() {
   const greeting = account?.displayName
     ? `Hola ${account.displayName.split(/\s+/)[0]}!`
     : 'Hola!'
+  // Surface the full phone number so a user on a shared browser can tell
+  // immediately which account is active. Eric hit this when opening
+  // valee.app on his computer auto-entered Genesis's session — the
+  // greeting was generic enough that he didn't realize until much later.
+  const sessionPhoneLabel = account?.phoneNumber || ''
   const regularProducts = products.filter((p: any) => !p.cashPrice || Number(p.cashPrice) === 0)
   const hybridProducts = products.filter((p: any) => p.cashPrice && Number(p.cashPrice) > 0)
   const userBalance = parseFloat(balance) - getLocalPendingBalance()
@@ -484,6 +506,23 @@ function ConsumerApp() {
         </div>
         <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition whitespace-nowrap">Salir</button>
       </div>
+
+      {/* Active-session banner — always visible so the user can't miss
+          which account they're looking at. Clicking "cambiar" drops the
+          session and lands them on the login screen. */}
+      {sessionPhoneLabel && (
+        <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 text-xs flex items-center justify-between gap-2">
+          <span className="text-indigo-800 truncate">
+            Sesion activa: <span className="font-semibold font-mono">{sessionPhoneLabel}</span>
+          </span>
+          <button
+            onClick={logout}
+            className="text-indigo-700 underline hover:text-indigo-900 font-semibold whitespace-nowrap"
+          >
+            No soy yo
+          </button>
+        </div>
+      )}
 
       {/* Greeting + logo pair (Valee + merchant logo) */}
       <div className="px-4 pt-5 aa-rise-sm flex items-center justify-between gap-3">
@@ -806,7 +845,16 @@ function MultiMerchantHub() {
         <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 flex items-center justify-between gap-2">
           <div className="min-w-0">
             <Link href="/" className="inline-block text-xl sm:text-2xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors">Valee</Link>
-            <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5 truncate">{phoneNumber}</p>
+            {phoneNumber && (
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] sm:text-xs font-mono font-semibold px-2 py-0.5 rounded-full">
+                  {phoneNumber}
+                </span>
+                <button onClick={logout} className="text-[11px] sm:text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">
+                  No soy yo
+                </button>
+              </div>
+            )}
           </div>
           <button onClick={logout} className="text-xs sm:text-sm font-medium text-slate-500 hover:text-indigo-700 hover:underline underline-offset-4 transition-colors whitespace-nowrap flex-shrink-0">Cerrar sesion</button>
         </div>

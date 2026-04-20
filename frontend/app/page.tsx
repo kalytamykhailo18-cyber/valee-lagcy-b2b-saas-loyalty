@@ -5,6 +5,7 @@ import { MdCardGiftcard } from 'react-icons/md'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/api'
+import { getCurrentSessionIdentity, maskPhone } from '@/lib/session-identity'
 
 interface MerchantAccount {
   accountId: string
@@ -28,6 +29,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [affiliated, setAffiliated] = useState<AffiliatedMerchant[]>([])
   const [hasSession, setHasSession] = useState(false)
+  const [sessionPhone, setSessionPhone] = useState<string | null>(null)
 
   useEffect(() => {
     // `/` is ALWAYS the public landing page now. It does not auto-switch to
@@ -35,9 +37,15 @@ export default function Home() {
     // into someone else's consumer dashboard on a shared computer. The
     // multicommerce hub lives at /consumer. We just record whether the user
     // has a session so we can swap the CTA copy from "Ya tengo cuenta" to
-    // "Mi cuenta".
+    // "Mi cuenta". When a session exists we also surface the phone number
+    // (masked) so the user knows WHICH account they'll enter before clicking.
     if (typeof window !== 'undefined') {
-      setHasSession(!!localStorage.getItem('accessToken'))
+      const token = localStorage.getItem('accessToken')
+      setHasSession(!!token)
+      if (token) {
+        const ident = getCurrentSessionIdentity()
+        setSessionPhone(ident?.phoneNumber || null)
+      }
     }
     ;(async () => {
       try {
@@ -80,8 +88,17 @@ export default function Home() {
                 href="/consumer"
                 className="aa-btn inline-block bg-white text-indigo-700 font-semibold text-base py-3 px-8 rounded-xl hover:bg-indigo-50 shadow-lg"
               >
-                <span className="relative z-10">{hasSession ? 'Mi cuenta' : 'Ya tengo cuenta'}</span>
+                <span className="relative z-10">
+                  {hasSession
+                    ? (sessionPhone ? `Entrar como ${maskPhone(sessionPhone)}` : 'Mi cuenta')
+                    : 'Ya tengo cuenta'}
+                </span>
               </Link>
+              {hasSession && (
+                <Link href="/consumer?switch=1" className="block text-xs text-indigo-100 hover:text-white mt-3 underline">
+                  No soy yo — cambiar de cuenta
+                </Link>
+              )}
               <p className="text-xs text-indigo-200 mt-4 max-w-sm">
                 Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
               </p>
@@ -171,8 +188,15 @@ export default function Home() {
               href="/consumer"
               className="block bg-indigo-600 text-white text-center text-base py-4 rounded-2xl font-semibold hover:bg-indigo-700 transition-colors"
             >
-              {hasSession ? 'Mi cuenta' : 'Ya tengo cuenta'}
+              {hasSession
+                ? (sessionPhone ? `Entrar como ${maskPhone(sessionPhone)}` : 'Mi cuenta')
+                : 'Ya tengo cuenta'}
             </Link>
+            {hasSession && (
+              <Link href="/consumer?switch=1" className="block text-center text-xs text-slate-500 hover:text-slate-700 mt-2 underline">
+                No soy yo — cambiar de cuenta
+              </Link>
+            )}
             <p className="text-xs text-slate-400 text-center mt-3">
               Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
             </p>
