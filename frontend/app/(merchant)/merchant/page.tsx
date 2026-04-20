@@ -251,7 +251,16 @@ export default function MerchantDashboard() {
                 {branches.filter(b => b.active).map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
-                <option value="_unassigned">Sin sucursal asignada</option>
+                {/* 'Sin sucursal asignada' was confusing — Genesis M7.
+                    When the merchant has no branches at all, just the
+                    tenant name reads better. When they DO have branches,
+                    show '<tenant> · sin sucursal' so it's still clear
+                    which bucket this is. */}
+                <option value="_unassigned">
+                  {branches.filter(b => b.active).length === 0
+                    ? (typeof window !== 'undefined' && localStorage.getItem('tenantName')) || 'Sin sucursal'
+                    : `${(typeof window !== 'undefined' && localStorage.getItem('tenantName')) || 'Comercio'} · sin sucursal especifica`}
+                </option>
               </select>
               {!selectedBranch && metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0 && (
                 <p className="text-xs text-slate-500 mt-2 leading-relaxed">
