@@ -1,6 +1,50 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import crypto from 'crypto';
 import { parseMerchantIdentifier, parseStaffAttribution, handleIncomingMessage } from '../../services/whatsapp-bot.js';
 import { sendWhatsAppMessage, downloadWhatsAppMedia } from '../../services/whatsapp.js';
+
+/**
+ * Verify Meta's X-Hub-Signature-256 HMAC. Meta signs every webhook body with
+ * HMAC-SHA256(app_secret, rawBody). Without this check anyone who knew the
+ * endpoint URL could POST fake messages and trigger points, refunds, or
+ * reversal flows on behalf of any phone number.
+ *
+ * Behavior:
+ *   - If META_APP_SECRET unset: log a warning and ALLOW (dev-friendly).
+ *   - If header missing:        reject 401.
+ *   - If header present but mismatches: reject 401.
+ */
+async function verifyMetaSignature(request: FastifyRequest, reply: FastifyReply) {
+  const secret = process.env.META_APP_SECRET;
+  if (!secret) {
+    console.warn('[Webhook] META_APP_SECRET not set — skipping signature verification. Set it in .env once Eric shares the Meta app secret.');
+    return;
+  }
+
+  const sigHeader = (request.headers['x-hub-signature-256'] as string | undefined)
+    || (request.headers['x-hub-signature'] as string | undefined);
+  if (!sigHeader?.startsWith('sha256=')) {
+    console.warn(`[Webhook] Rejected: missing or malformed X-Hub-Signature-256 (ip=${request.ip})`);
+    return reply.status(401).send({ error: 'Missing signature' });
+  }
+
+  const rawBody = (request as any).rawBody as string | undefined;
+  if (typeof rawBody !== 'string') {
+    console.error('[Webhook] Rejected: raw body unavailable — parser misconfigured');
+    return reply.status(500).send({ error: 'Internal verification error' });
+  }
+
+  const expected = crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+  const received = sigHeader.slice('sha256='.length);
+
+  // Constant-time compare so attackers can't time the check.
+  const a = Buffer.from(expected, 'hex');
+  const b = Buffer.from(received, 'hex');
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+    console.warn(`[Webhook] Rejected: signature mismatch (ip=${request.ip} expected=${expected.slice(0, 12)}… received=${received.slice(0, 12)}…)`);
+    return reply.status(401).send({ error: 'Invalid signature' });
+  }
+}
 
 /**
  * WhatsApp webhook handler — receives all incoming messages from Meta Cloud API.
@@ -49,7 +93,7 @@ export default async function webhookRoutes(app: FastifyInstance) {
   });
 
   // POST endpoint for incoming WhatsApp messages
-  app.post('/api/webhook/whatsapp', async (request, reply) => {
+  app.post('/api/webhook/whatsapp', { preHandler: [verifyMetaSignature] }, async (request, reply) => {
     const body = request.body as any;
 
     // Meta Cloud API webhook structure

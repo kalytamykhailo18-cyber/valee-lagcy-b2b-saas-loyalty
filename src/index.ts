@@ -53,6 +53,18 @@ app.setErrorHandler((err: any, request, reply) => {
 });
 
 async function start() {
+  // Capture the raw request body alongside the parsed JSON. The WhatsApp
+  // webhook needs the exact bytes Meta sent to recompute the HMAC — once
+  // Fastify's default parser runs, the raw bytes are gone. Storing it on
+  // request.rawBody is ~tens of KB extra per request, tolerable.
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (req, body, done) => {
+    const str = body as string;
+    (req as any).rawBody = str;
+    if (!str) { done(null, {}); return; }
+    try { done(null, JSON.parse(str)); }
+    catch (err) { done(err as Error, undefined); }
+  });
+
   await app.register(cors, { origin: true, credentials: true });
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB max
