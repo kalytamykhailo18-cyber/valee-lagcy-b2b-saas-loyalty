@@ -561,46 +561,81 @@ export async function validateInvoice(params: {
 
   // STAGE B3: same-consumer semantic dedup. Catches the 'resubmit the
   // same receipt with OCR noise' class of bypass when the image hash
-  // doesn't match (WhatsApp recompresses on re-upload): same tenant +
-  // same consumer + same amount (±tolerance) + transaction_date within
-  // a 48h window = almost certainly a duplicate. Not global (different
-  // customers can legitimately have the same amount).
+  // doesn't match (WhatsApp recompresses on re-upload).
+  //
+  // For fiscal invoices we gate on same amount within ±tolerance +
+  // transaction_date within 48h — enough to catch duplicates without
+  // blocking a legitimate second purchase at the same shop next week.
+  //
+  // For vouchers we go stricter: same exact amount + same consumer for
+  // the same tenant is rejected regardless of date. Vouchers encode
+  // a bank reference that's globally unique; the only way we'd see
+  // the exact same centavo amount twice is a resubmit (Genesis H10 Re
+  // Do — her OCR was parsing the date-segment of the voucher
+  // differently each time, yielding different transaction_dates 4+
+  // months apart, which let two submissions sneak past the 48h guard).
   {
+    const normalizedSender = (await import('./accounts.js')).normalizeVenezuelanPhone(senderPhone);
     const senderAccount = await prisma.account.findUnique({
-      where: { tenantId_phoneNumber: { tenantId, phoneNumber: senderPhone } },
+      where: { tenantId_phoneNumber: { tenantId, phoneNumber: normalizedSender } },
       select: { id: true },
     });
-    if (senderAccount && extracted.transaction_date) {
-      const txTime = new Date(extracted.transaction_date).getTime();
-      if (Number.isFinite(txTime)) {
-        const windowMs = 48 * 60 * 60 * 1000;
-        const tolerance = parseFloat(process.env.INVOICE_AMOUNT_TOLERANCE || '0.05');
-        const amt = Number(extracted.total_amount || 0);
-        const floor = amt * (1 - tolerance);
-        const ceil  = amt * (1 + tolerance);
-        const nearbyInvoice = await prisma.invoice.findFirst({
+    if (senderAccount && extracted.total_amount) {
+      const amt = Number(extracted.total_amount);
+      const isVoucher = extracted.document_type === 'voucher';
+
+      if (isVoucher) {
+        // Exact-amount dedup (cents precision) across any date for vouchers.
+        const eps = 0.005;
+        const exactDup = await prisma.invoice.findFirst({
           where: {
             tenantId,
             consumerAccountId: senderAccount.id,
-            amount: { gte: floor, lte: ceil },
-            transactionDate: {
-              gte: new Date(txTime - windowMs),
-              lte: new Date(txTime + windowMs),
-            },
-            // Different invoice_number — we're looking for SEMANTIC dupes
-            // the invoice_number check below would miss.
+            amount: { gte: amt - eps, lte: amt + eps },
             NOT: { invoiceNumber: extracted.invoice_number },
           },
           select: { id: true, invoiceNumber: true, status: true },
         });
-        if (nearbyInvoice) {
-          console.log(`[Validation] Semantic dedup hit: tenant=${tenantId} amount=${amt} nearExisting=${nearbyInvoice.invoiceNumber} status=${nearbyInvoice.status}`);
+        if (exactDup) {
+          console.log(`[Validation] Voucher exact-amount dedup hit: tenant=${tenantId} amount=${amt} nearExisting=${exactDup.invoiceNumber}`);
           return {
             success: false,
             stage: 'cross_reference',
-            message: 'Detectamos una factura tuya muy parecida (mismo monto, fechas cercanas). Si es otra compra diferente, envia la foto completa mostrando bien el numero de factura.',
-            invoiceNumber: nearbyInvoice.invoiceNumber,
+            message: 'Este voucher ya fue enviado (mismo monto y cliente). No se puede procesar dos veces.',
+            invoiceNumber: exactDup.invoiceNumber,
           };
+        }
+      }
+
+      if (extracted.transaction_date) {
+        const txTime = new Date(extracted.transaction_date).getTime();
+        if (Number.isFinite(txTime)) {
+          const windowMs = 48 * 60 * 60 * 1000;
+          const tolerance = parseFloat(process.env.INVOICE_AMOUNT_TOLERANCE || '0.05');
+          const floor = amt * (1 - tolerance);
+          const ceil  = amt * (1 + tolerance);
+          const nearbyInvoice = await prisma.invoice.findFirst({
+            where: {
+              tenantId,
+              consumerAccountId: senderAccount.id,
+              amount: { gte: floor, lte: ceil },
+              transactionDate: {
+                gte: new Date(txTime - windowMs),
+                lte: new Date(txTime + windowMs),
+              },
+              NOT: { invoiceNumber: extracted.invoice_number },
+            },
+            select: { id: true, invoiceNumber: true, status: true },
+          });
+          if (nearbyInvoice) {
+            console.log(`[Validation] Semantic dedup hit: tenant=${tenantId} amount=${amt} nearExisting=${nearbyInvoice.invoiceNumber} status=${nearbyInvoice.status}`);
+            return {
+              success: false,
+              stage: 'cross_reference',
+              message: 'Detectamos una factura tuya muy parecida (mismo monto, fechas cercanas). Si es otra compra diferente, envia la foto completa mostrando bien el numero de factura.',
+              invoiceNumber: nearbyInvoice.invoiceNumber,
+            };
+          }
         }
       }
     }
