@@ -187,43 +187,63 @@ export async function getAccountBalanceBreakdown(
   assetTypeId: string,
   tenantId: string
 ): Promise<{ confirmed: string; provisional: string; total: string }> {
-  // REVERSALs land as status='confirmed' with event_type='REVERSAL'. The
-  // raw status-bucketed formula used to leave their target amount in the
-  // provisional bucket even after they had been reversed, because the
-  // original provisional entry can't be updated in an immutable ledger.
-  // Consumers saw phantom "X en verificacion" points that had already
-  // been reversed (Eric hit this on Kozmo2 after the Bs→EUR fix).
+  // The ledger is append-only at the DB trigger level — we cannot flip a
+  // row's status from 'provisional' to 'confirmed' when the CSV later
+  // matches a pending_validation invoice. The source of truth for "did
+  // the CSV eventually confirm this?" lives on invoices.status. So the
+  // effective status of a ledger entry is:
+  //   effective = 'confirmed' when invoices.status = 'claimed'
+  //               AND the ledger reference matches a PENDING-<inv> row
+  //   effective = row's own status otherwise
   //
-  // Treatment: REVERSALs on this account (debits) come out of the
-  // provisional bucket — they're cancelling a previously-provisional
-  // credit — and are excluded from the confirmed bucket. The grand total
-  // is unchanged; only the split changes.
+  // REVERSALs also land as status='confirmed' and the raw formula used to
+  // leave their target amount in the provisional bucket. Treatment:
+  // REVERSAL debits come out of provisional; REVERSAL credits add back in.
   const result = await prisma.$queryRaw<[{ confirmed: string; provisional: string }]>`
+    WITH le AS (
+      SELECT
+        l.amount,
+        l.entry_type,
+        l.event_type,
+        CASE
+          WHEN l.status = 'provisional'
+           AND l.reference_id LIKE 'PENDING-%'
+           AND EXISTS (
+             SELECT 1 FROM invoices i
+             WHERE i.tenant_id = l.tenant_id
+               AND i.invoice_number = substring(l.reference_id from 9)
+               AND i.status = 'claimed'
+           )
+          THEN 'confirmed'
+          ELSE l.status::text
+        END AS effective_status
+      FROM ledger_entries l
+      WHERE l.account_id = ${accountId}::uuid
+        AND l.asset_type_id = ${assetTypeId}::uuid
+        AND l.tenant_id = ${tenantId}::uuid
+    )
     SELECT
       COALESCE(
         SUM(CASE
-          WHEN status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'CREDIT'
+          WHEN effective_status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'CREDIT'
             THEN amount ELSE 0 END) -
         SUM(CASE
-          WHEN status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'DEBIT'
+          WHEN effective_status = 'confirmed' AND event_type != 'REVERSAL' AND entry_type = 'DEBIT'
             THEN amount ELSE 0 END),
         0
       )::text AS confirmed,
       COALESCE(
-        SUM(CASE WHEN status = 'provisional' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
-        SUM(CASE WHEN status = 'provisional' AND entry_type = 'DEBIT' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN effective_status = 'provisional' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN effective_status = 'provisional' AND entry_type = 'DEBIT' THEN amount ELSE 0 END) -
         SUM(CASE
-          WHEN status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'DEBIT'
+          WHEN effective_status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'DEBIT'
             THEN amount ELSE 0 END) +
         SUM(CASE
-          WHEN status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'CREDIT'
+          WHEN effective_status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'CREDIT'
             THEN amount ELSE 0 END),
         0
       )::text AS provisional
-    FROM ledger_entries
-    WHERE account_id = ${accountId}::uuid
-      AND asset_type_id = ${assetTypeId}::uuid
-      AND tenant_id = ${tenantId}::uuid
+    FROM le
   `;
 
   const confirmed = result[0].confirmed;
