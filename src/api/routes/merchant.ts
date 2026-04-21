@@ -1271,19 +1271,25 @@ export default async function merchantRoutes(app: FastifyInstance) {
       data.referralBonusAmount = referralBonusAmount;
     }
     if (rif !== undefined) {
+      // RIF is required once a tenant has it, and must be set on every PUT
+      // that touches the rif key (Genesis M1 Re Do: the form was saving with
+      // an empty RIF because an empty string silently flipped the DB column
+      // back to NULL). Explicitly reject empty/blank input — the owner must
+      // either leave the key out or send a valid value.
       if (!rif || (typeof rif === 'string' && !rif.trim())) {
-        data.rif = null;
-      } else {
-        // Normalize and validate: [JVEGP]-XXXXXXXX-X (7-9 digits body + 1 check digit)
-        const normalized = String(rif).trim().toUpperCase().replace(/\s+/g, '');
-        const match = normalized.match(/^([JVEGP])-?(\d{7,9})-?(\d)$/);
-        if (!match) {
-          return reply.status(400).send({
-            error: 'RIF invalido. Formato: J-XXXXXXXX-X (prefijo J, V, E, G o P; 7-9 digitos; 1 digito verificador)',
-          });
-        }
-        data.rif = `${match[1]}-${match[2]}-${match[3]}`;
+        return reply.status(400).send({
+          error: 'El RIF es obligatorio. No se puede guardar vacio.',
+        });
       }
+      // Normalize and validate: [JVEGP]-XXXXXXXX-X (7-9 digits body + 1 check digit)
+      const normalized = String(rif).trim().toUpperCase().replace(/\s+/g, '');
+      const match = normalized.match(/^([JVEGP])-?(\d{7,9})-?(\d)$/);
+      if (!match) {
+        return reply.status(400).send({
+          error: 'RIF invalido. Formato: J-XXXXXXXX-X (prefijo J, V, E, G o P; 7-9 digitos; 1 digito verificador)',
+        });
+      }
+      data.rif = `${match[1]}-${match[2]}-${match[3]}`;
     }
     if (preferredExchangeSource !== undefined) {
       if (preferredExchangeSource !== null && !validSources.includes(preferredExchangeSource)) {

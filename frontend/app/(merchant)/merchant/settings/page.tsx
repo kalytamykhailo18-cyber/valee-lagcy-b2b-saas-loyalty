@@ -130,20 +130,23 @@ export default function SettingsPage() {
     }
 
     // RIF: single input, normalize into canonical J-XXXXXXXX-X before send.
-    // Empty input is treated as explicit removal.
+    // It's REQUIRED — the form rejects save on empty/missing RIF (Genesis M1
+    // Re Do). The backend also enforces this; validating here just keeps the
+    // user from hitting a round-trip to see the error.
     let rifValue: string | undefined = undefined;
     const cleaned = rifRaw.toUpperCase().replace(/[^A-Z0-9]/g, '')
-    if (cleaned.length > 0) {
-      const m = cleaned.match(/^([JVEGP])(\d{7,9})(\d)$/)
-      if (!m) {
-        setRifError('RIF invalido. Ejemplo: J123456789')
-        setMessage('Error: revisa el RIF')
-        return
-      }
-      rifValue = `${m[1]}-${m[2]}-${m[3]}`
-    } else if (settings?.rif) {
-      rifValue = ''
+    if (cleaned.length === 0) {
+      setRifError('El RIF es obligatorio.')
+      setMessage('Error: el RIF es obligatorio')
+      return
     }
+    const m = cleaned.match(/^([JVEGP])(\d{7,9})(\d)$/)
+    if (!m) {
+      setRifError('RIF invalido. Ejemplo: J123456789')
+      setMessage('Error: revisa el RIF')
+      return
+    }
+    rifValue = `${m[1]}-${m[2]}-${m[3]}`
 
     setSaving(true)
     try {
@@ -328,9 +331,10 @@ export default function SettingsPage() {
                 {/* RIF — single input: letter + digits, no separators.
                     We normalize into J-XXXXXXXX-X before sending. */}
                 <div>
-                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio</label>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">RIF del comercio <span className="text-red-500">*</span></label>
                   <input
                     type="text"
+                    required
                     value={rifRaw}
                     onChange={e => {
                       const cleaned = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11)
@@ -342,7 +346,7 @@ export default function SettingsPage() {
                   />
                   {rifError && <p className="text-xs text-red-600 mt-1">{rifError}</p>}
                   <p className="text-xs text-slate-400 mt-1">
-                    Empieza con J, V, E, G o P y luego los numeros. Cuando el RIF esta configurado, solo aceptamos facturas fiscales donde aparezca este mismo RIF.
+                    Obligatorio. Empieza con J, V, E, G o P y luego los numeros. Solo aceptamos facturas fiscales donde aparezca este mismo RIF.
                   </p>
                 </div>
               </div>
