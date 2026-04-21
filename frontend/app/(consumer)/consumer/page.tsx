@@ -67,6 +67,7 @@ function ConsumerApp() {
   const [loading, setLoading] = useState(false)
 
   const [balance, setBalance] = useState('0')
+  const [reservedBalance, setReservedBalance] = useState('0')
   const [confirmedBalance, setConfirmedBalance] = useState('0')
   const [provisionalBalance, setProvisionalBalance] = useState('0')
   const [unitLabel, setUnitLabel] = useState('points')
@@ -210,6 +211,7 @@ function ConsumerApp() {
       setBalance(balData.balance)
       setConfirmedBalance(balData.confirmed || balData.balance)
       setProvisionalBalance(balData.provisional || '0')
+      setReservedBalance(balData.reserved || '0')
       setUnitLabel(balData.unitLabel)
       setAssetTypeId(balData.assetTypeId)
       if (balData.assetTypeId) localStorage.setItem('assetTypeId', balData.assetTypeId)
@@ -451,7 +453,9 @@ function ConsumerApp() {
   }
 
   // ---- SINGLE-MERCHANT MAIN SCREEN ----
-  const displayBalance = formatPoints(parseFloat(balance) - getLocalPendingBalance())
+  // Display total = spendable + reserved so a pending canje QR doesn't
+  // look like missing points (Genesis M4). Offline pending still subtracts.
+  const displayBalance = formatPoints(parseFloat(balance) + parseFloat(reservedBalance) - getLocalPendingBalance())
   // Greet with the name the merchant linked in "Buscar cliente". If no name is
   // on file we deliberately skip the phone fallback — showing the number feels
   // robotic and clutters the hero.
@@ -574,6 +578,13 @@ function ConsumerApp() {
             <div className="mt-4 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
               <MdLock className="w-3.5 h-3.5" />
               <span>{formatPoints(provisionalBalance)} en verificacion</span>
+            </div>
+          )}
+
+          {parseFloat(reservedBalance) > 0 && (
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
+              <MdLock className="w-3.5 h-3.5" />
+              <span>{formatPoints(reservedBalance)} reservados para canje pendiente</span>
             </div>
           )}
 
