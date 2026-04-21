@@ -93,6 +93,25 @@ export async function processCSV(
     }
   }
 
+  // Header-less paste recovery (Genesis H5 Re Do). A merchant who pastes
+  // just data rows without the header line — e.g.
+  //   12345, 50, 2026-04-20, 584161972695
+  // — used to get a cryptic "CSV has no data rows" error. If the first row
+  // doesn't contain any recognized column header, assume the canonical
+  // column order (invoice_number, total, date, phone) and synthesize a
+  // header line. The merchant documentation uses this order.
+  const DEFAULT_HEADER = 'invoice_number,total,date,phone';
+  if (lines.length >= 1) {
+    const firstRow = parseCSVLine(lines[0]);
+    const looksLikeHeader =
+      findColumnKey(firstRow, INVOICE_NUMBER_KEYS) !== -1
+      || findColumnKey(firstRow, AMOUNT_KEYS) !== -1;
+    const allRowsSameWidth = lines.every(l => parseCSVLine(l).length === firstRow.length);
+    if (!looksLikeHeader && allRowsSameWidth && firstRow.length >= 2 && firstRow.length <= 4) {
+      lines = [DEFAULT_HEADER, ...lines];
+    }
+  }
+
   if (lines.length < 2) {
     const errorDetails = [{ row: 0, reason: 'CSV has no data rows' }];
     await prisma.uploadBatch.update({
