@@ -296,6 +296,7 @@ export const api = {
     website?: string | null;
     description?: string | null;
     instagramHandle?: string | null;
+    crossBranchRedemption?: boolean;
   }) =>
     request('/api/merchant/settings', { method: 'PUT', body: JSON.stringify(data) }),
   getExchangeRates: () => request('/api/merchant/exchange-rates'),

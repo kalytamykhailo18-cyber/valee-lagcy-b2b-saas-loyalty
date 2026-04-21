@@ -17,6 +17,7 @@ interface Settings {
   instagramHandle: string | null
   preferredExchangeSource: string | null
   referenceCurrency: string
+  crossBranchRedemption?: boolean
 }
 
 interface PlanUsage {
@@ -70,6 +71,7 @@ export default function SettingsPage() {
   const [website, setWebsite] = useState('')
   const [description, setDescription] = useState('')
   const [instagramHandle, setInstagramHandle] = useState('')
+  const [crossBranch, setCrossBranch] = useState(true)
 
   useEffect(() => { load() }, [])
 
@@ -98,6 +100,7 @@ export default function SettingsPage() {
       setWebsite(s.website || '')
       setDescription(s.description || '')
       setInstagramHandle(s.instagramHandle || '')
+      setCrossBranch(s.crossBranchRedemption !== false)
     } catch (e: any) {
       setMessage('Error: ' + (e.error || 'no se pudo cargar'))
     } finally {
@@ -162,6 +165,7 @@ export default function SettingsPage() {
         website: website.trim() || null,
         description: description.trim() || null,
         instagramHandle: instagramHandle.trim().replace(/^@/, '') || null,
+        crossBranchRedemption: crossBranch,
         ...(rifValue !== undefined ? { rif: rifValue } : {}),
       })
       setSettings(updated)
@@ -348,6 +352,26 @@ export default function SettingsPage() {
                   <p className="text-xs text-slate-400 mt-1">
                     Obligatorio. Empieza con J, V, E, G o P y luego los numeros. Solo aceptamos facturas fiscales donde aparezca este mismo RIF.
                   </p>
+                </div>
+
+                {/* Cross-branch redemption policy (Genesis H11) */}
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={crossBranch}
+                      onChange={e => setCrossBranch(e.target.checked)}
+                      className="mt-1 w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+                    />
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">Canje entre sucursales</p>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        {crossBranch
+                          ? 'Los clientes pueden canjear sus puntos en cualquier sucursal.'
+                          : 'Los clientes solo pueden canjear en la sucursal donde generaron el codigo QR.'}
+                      </p>
+                    </div>
+                  </label>
                 </div>
               </div>
             </section>

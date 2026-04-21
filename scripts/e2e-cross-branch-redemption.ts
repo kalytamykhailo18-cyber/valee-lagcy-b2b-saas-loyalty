@@ -75,8 +75,10 @@ async function main() {
     },
   });
 
+  let fundSeq = 0;
   async function fundAndRedeem(branchId: string, fundAmt: string) {
-    const phone = `+19000${String(ts).slice(-7)}${Math.floor(Math.random() * 9)}`;
+    fundSeq++;
+    const phone = `+19000${String(ts).slice(-7)}${fundSeq}`;
     const { account: consumer } = await findOrCreateConsumerAccount(tenant.id, phone);
     await writeDoubleEntry({
       tenantId: tenant.id,
