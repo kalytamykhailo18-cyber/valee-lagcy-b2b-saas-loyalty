@@ -331,22 +331,54 @@ export default async function consumerRoutes(app: FastifyInstance) {
     };
 
     const tokenIdByRef = new Map<string, string>();
-    // Track which tokens already have a CONFIRMED (or EXPIRED) terminal
-    // event. Their PENDING entries collapse into a single final-state
-    // row (Genesis M6: 'Canje pendiente -10 / Canje confirmado +10'
-    // shouldn't render as two stacked rows; it's one product canje).
-    const confirmedTokenIds = new Set<string>();
-    const expiredTokenIds = new Set<string>();
     for (const e of entries) {
       if (!redemptionEventTypes.has(e.eventType)) continue;
       const tid = refToTokenId(e.referenceId);
-      if (tid) {
-        tokenIdByRef.set(e.referenceId, tid);
-        if (e.eventType === 'REDEMPTION_CONFIRMED') confirmedTokenIds.add(tid);
-        if (e.eventType === 'REDEMPTION_EXPIRED')   expiredTokenIds.add(tid);
-      }
+      if (tid) tokenIdByRef.set(e.referenceId, tid);
     }
     const redemptionTokenIds = Array.from(new Set(tokenIdByRef.values()));
+
+    // Track which tokens already have a CONFIRMED (or EXPIRED) terminal
+    // event. Their PENDING entries collapse into a single final-state row
+    // (Genesis M6: 'Canje pendiente -10 / Canje confirmado +10' shouldn't
+    // render as two stacked rows; it's one product canje).
+    //
+    // getAccountHistory only returns entries whose account_id = consumer.
+    // REDEMPTION_CONFIRMED writes holding→pool (neither touches the
+    // consumer) and REDEMPTION_EXPIRED writes holding→consumer (only the
+    // CREDIT side touches the consumer). So to know whether a PENDING was
+    // resolved we must consult redemption_tokens.status directly — that's
+    // the source of truth regardless of which account the ledger leg is on.
+    const confirmedTokenIds = new Set<string>();
+    const expiredTokenIds = new Set<string>();
+    if (redemptionTokenIds.length > 0) {
+      const statusRows = await prisma.redemptionToken.findMany({
+        where: { id: { in: redemptionTokenIds } },
+        select: { id: true, status: true },
+      });
+      for (const r of statusRows) {
+        if (r.status === 'used')    confirmedTokenIds.add(r.id);
+        if (r.status === 'expired') expiredTokenIds.add(r.id);
+      }
+      // Fallback: if no redemption_tokens row (older data or test seeds),
+      // scan the ledger tenant-wide for CONFIRMED-/EXPIRED-<tid> refs.
+      const terminalRefs = await prisma.ledgerEntry.findMany({
+        where: {
+          tenantId,
+          OR: redemptionTokenIds.flatMap(tid => [
+            { referenceId: `CONFIRMED-${tid}` },
+            { referenceId: `EXPIRED-${tid}` },
+          ]),
+        },
+        select: { referenceId: true, eventType: true },
+      });
+      for (const r of terminalRefs) {
+        const m = r.referenceId.match(/^(CONFIRMED|EXPIRED)-(.+)$/);
+        if (!m) continue;
+        if (m[1] === 'CONFIRMED') confirmedTokenIds.add(m[2]);
+        if (m[1] === 'EXPIRED')   expiredTokenIds.add(m[2]);
+      }
+    }
 
     const tokens = redemptionTokenIds.length > 0
       ? await prisma.redemptionToken.findMany({
@@ -358,19 +390,24 @@ export default async function consumerRoutes(app: FastifyInstance) {
 
     return {
       entries: entries
-        // Collapse PENDING/CONFIRMED/EXPIRED into a single row per token.
-        // PENDING writes a DEBIT on the consumer. CONFIRMED sometimes
-        // writes a CREDIT on the consumer (via holding→consumer in some
-        // flows). We keep the PENDING row but relabel it as CONFIRMED
-        // when a CONFIRMED exists elsewhere for the same token, and
-        // hide any CONFIRMED/EXPIRED credit rows so the consumer sees a
-        // single 'Producto Canjeado -N' line instead of both halves
-        // of the double-entry (Genesis M6).
+        // Collapse PENDING/CONFIRMED/EXPIRED into a single row per token
+        // (Genesis M6). Three cases:
+        //   confirmed  → show ONE 'Producto Canjeado' DEBIT row (keep the
+        //                PENDING row, relabel it to CONFIRMED; drop the
+        //                CONFIRMED credit leg that lives on the pool)
+        //   expired    → HIDE BOTH legs (net zero — the consumer got their
+        //                points back, it's not a real event to list)
+        //   in-flight  → keep the PENDING DEBIT as 'Canje pendiente'
         .filter(e => {
           const tid = tokenIdByRef.get(e.referenceId);
           if (!tid) return true;
+          // Case: expired / cancelled → hide both sides of the pair.
+          if (expiredTokenIds.has(tid) && !confirmedTokenIds.has(tid)) return false;
+          // Case: confirmed → drop the system-side credit leg.
           if (e.eventType === 'REDEMPTION_CONFIRMED' && e.entryType === 'CREDIT') return false;
-          if (e.eventType === 'REDEMPTION_EXPIRED'   && e.entryType === 'DEBIT')  return false;
+          // Safety: if for some reason a terminal event is missing, still
+          // hide the EXPIRED DEBIT (it's always system-side).
+          if (e.eventType === 'REDEMPTION_EXPIRED' && e.entryType === 'DEBIT') return false;
           return true;
         })
         .map(e => {

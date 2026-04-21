@@ -2117,12 +2117,14 @@ export default async function merchantRoutes(app: FastifyInstance) {
     // result window for the same token. Hide the system-side CONFIRMED row.
     const tokenIdByRef = new Map<string, string>();
     const confirmedTokenIds = new Set<string>();
+    const expiredTokenIds = new Set<string>();
     for (const e of entries) {
       const ref = String(e.reference_id || '');
       const m = ref.match(/^(REDEEM|CONFIRMED|EXPIRED)-([0-9a-f-]{36})$/i);
       if (!m) continue;
       tokenIdByRef.set(ref, m[2]);
       if (m[1].toUpperCase() === 'CONFIRMED') confirmedTokenIds.add(m[2]);
+      if (m[1].toUpperCase() === 'EXPIRED')   expiredTokenIds.add(m[2]);
     }
 
     return {
@@ -2130,6 +2132,9 @@ export default async function merchantRoutes(app: FastifyInstance) {
         .filter(e => {
           const tid = tokenIdByRef.get(String(e.reference_id || ''));
           if (!tid) return true;
+          // Hide both legs of an expired-only redemption (consumer got
+          // points back, no net movement — don't pollute the merchant log).
+          if (expiredTokenIds.has(tid) && !confirmedTokenIds.has(tid)) return false;
           if (e.event_type === 'REDEMPTION_CONFIRMED' && confirmedTokenIds.has(tid)) return false;
           if (e.event_type === 'REDEMPTION_EXPIRED'   && e.entry_type === 'CREDIT')  return false;
           return true;
