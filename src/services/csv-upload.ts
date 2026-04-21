@@ -1,8 +1,5 @@
 import prisma from '../db/client.js';
-import { findOrCreateConsumerAccount, normalizeVenezuelanPhone } from './accounts.js';
-import { writeDoubleEntry } from './ledger.js';
-import { getSystemAccount } from './accounts.js';
-import { convertToLoyaltyValue } from './assets.js';
+import { normalizeVenezuelanPhone } from './accounts.js';
 
 export interface UploadResult {
   batchId: string;
@@ -128,11 +125,8 @@ export async function processCSV(
 
   // Look up the merchant's primary asset type once — we'll reuse it to credit
   // consumers whose phone is attached to a CSV row.
-  const assetConfig = await prisma.tenantAssetConfig.findFirst({ where: { tenantId } });
-  const assetType = assetConfig
-    ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
-    : await prisma.assetType.findFirst();
-  const poolAccount = assetType ? await getSystemAccount(tenantId, 'issued_value_pool') : null;
+  // No asset/pool lookup here — the CSV no longer writes ledger entries.
+  // Points credit exclusively via the consumer photo flow (Genesis H6).
 
   // Per-row caps. AMOUNT_MAX defaults to the equivalent of 10M Bs at a
   // reasonable exchange rate; anything above is almost certainly a bad row
@@ -274,67 +268,22 @@ export async function processCSV(
         continue;
       }
 
-      // When the CSV row carries the customer's phone, the merchant is
-      // attesting the purchase belongs to that customer. Credit the points
-      // immediately as CONFIRMED (status 'claimed') instead of waiting for the
-      // consumer to submit a photo — that's what the merchant expects when
-      // they put a phone in the row.
-      const initialStatus = customerPhone ? 'claimed' : 'available';
-
+      // CSV rows always land as 'available'. Points credit ONLY when the
+      // consumer sends the invoice photo and Stage C of the validation
+      // pipeline matches it against this row (Genesis H6). The previous
+      // auto-credit path let merchants invent an invoice_number + phone,
+      // hit upload, and silently credit points to a stranger — which is
+      // exactly what Genesis pasted into the CSV test (bogus factura
+      // '12323131231' for Bs 10.5M credited on the spot). The CSV is a
+      // ledger of 'expected' receipts, not a crediting mechanism.
       const result = await prisma.$executeRaw`
         INSERT INTO invoices (id, tenant_id, invoice_number, amount, transaction_date, customer_phone, status, source, upload_batch_id, created_at, updated_at)
-        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${invoiceNumber}, ${amount}, ${transactionDate}::timestamptz, ${customerPhone}, ${initialStatus}::"InvoiceStatus", 'csv_upload', ${batch.id}::uuid, now(), now())
+        VALUES (gen_random_uuid(), ${tenantId}::uuid, ${invoiceNumber}, ${amount}, ${transactionDate}::timestamptz, ${customerPhone}, 'available'::"InvoiceStatus", 'csv_upload', ${batch.id}::uuid, now(), now())
         ON CONFLICT (tenant_id, invoice_number) DO NOTHING
       `;
 
       if (result > 0) {
         rowsLoaded++;
-
-        // Auto-credit the consumer for this invoice.
-        if (customerPhone && assetType && poolAccount) {
-          try {
-            const normalized = normalizeVenezuelanPhone(customerPhone);
-            const { account } = await findOrCreateConsumerAccount(tenantId, normalized);
-            const loyaltyValue = await convertToLoyaltyValue(
-              String(amount),
-              tenantId,
-              assetType.id,
-              transactionDate || undefined,
-              'bs', // CSV amounts are raw Bs — normalize through exchange rate
-            );
-            await writeDoubleEntry({
-              tenantId,
-              eventType: 'INVOICE_CLAIMED',
-              debitAccountId: poolAccount.id,
-              creditAccountId: account.id,
-              amount: loyaltyValue,
-              assetTypeId: assetType.id,
-              referenceId: `CSV-${batch.id}:${invoiceNumber}`,
-              referenceType: 'invoice',
-              metadata: {
-                invoiceNumber,
-                invoiceAmount: amount,
-                source: 'csv_auto_credit',
-                uploadBatchId: batch.id,
-              },
-            });
-            // Link the invoice row to the consumer account so the customer
-            // lookup can find it under Facturas. Without this the invoice is
-            // loaded but appears orphaned in the merchant dashboard.
-            await prisma.$executeRaw`
-              UPDATE invoices SET consumer_account_id=${account.id}::uuid
-              WHERE tenant_id=${tenantId}::uuid AND invoice_number=${invoiceNumber}
-            `;
-            rowsAutoCredited++;
-          } catch (creditErr) {
-            // Don't fail the whole row if credit fails — the invoice is still
-            // loaded, just revert its status so the consumer can submit manually.
-            await prisma.$executeRaw`
-              UPDATE invoices SET status='available' WHERE tenant_id=${tenantId}::uuid AND invoice_number=${invoiceNumber}
-            `;
-            errorDetails.push({ row: i + 1, reason: `Auto-credit failed: ${(creditErr as Error).message}` });
-          }
-        }
       } else {
         rowsSkipped++;
       }
