@@ -30,6 +30,55 @@ export default function Home() {
   const [affiliated, setAffiliated] = useState<AffiliatedMerchant[]>([])
   const [hasSession, setHasSession] = useState(false)
   const [sessionPhone, setSessionPhone] = useState<string | null>(null)
+  const features = [
+    {
+      title: "Sin aplicaciones extra",
+      description: "Olvídate de llenar la memoria de tu teléfono. Todo el proceso ocurre dentro de WhatsApp, la aplicación que ya usas y dominas cada día.",
+      icon: (
+        <svg className="w-6 h-6 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M15 2H9c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 18c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm3-3H9V4h6v13z"/>
+        </svg>
+      ),
+    },
+    {
+      title: "Validación al instante",
+      description: "Leemos tus facturas en segundos. Envía la foto y recibe la confirmación de tus puntos acumulados de inmediato.",
+      icon: (
+        <svg className="w-6 h-6 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+        </svg>
+      ),
+    },
+    {
+      title: "Premios a un mensaje",
+      description: "Consulta tu saldo, descubre recompensas disponibles y canjea tus beneficios enviando un simple mensaje de texto. Así de fácil.",
+      icon: (
+        <svg className="w-6 h-6 text-indigo-600" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/>
+        </svg>
+      ),
+    },
+    // Add the remaining 3 items here following the same pattern
+  ];
+  const faqData = [
+    {
+      question: "¿Tengo que descargar alguna aplicación?",
+      answer: "No. Esa es la magia de Valee. Todo el proceso de registro, envío de tickets y consulta de puntos se realiza directamente a través de WhatsApp. No necesitas sacrificar memoria en tu teléfono ni aprender a usar una interfaz nueva."
+    },
+    {
+      question: "Soy dueño de un negocio, ¿es difícil integrarlo?",
+      answer: "Para nada. Valee funciona de forma externa a tu punto de venta (POS). Solo necesitas registrar tu comercio, configurar tus premios y empezar a invitar a tus clientes. No requiere instalación de hardware ni cambios en tu software actual."
+    },
+    {
+      question: "¿Qué tan seguros están mis datos?",
+      answer: "La privacidad es nuestra prioridad. Solo procesamos la información necesaria para validar tus compras y asignar tus recompensas. Tus datos están protegidos y nunca los compartimos con terceros sin tu consentimiento."
+    },
+    {
+      question: "¿Qué pasa si el sistema no reconoce mi ticket?",
+      answer: "Si la foto es borrosa o falta información, nuestro sistema te notificará por WhatsApp al instante para que puedas enviarla de nuevo. Además, contamos con un equipo de soporte listo para ayudarte si surge cualquier inconveniente."
+    }
+  ];
+  const [openIndex, setOpenIndex] = useState<number | null>(null);
 
   useEffect(() => {
     // `/` is ALWAYS the public landing page now. It does not auto-switch to
@@ -68,26 +117,32 @@ export default function Home() {
   // PUBLIC — Welcoming landing (always shown; session-aware CTA)
   // ============================================================
   return (
-    <div className="min-h-screen bg-gradient-to-b from-indigo-600 via-indigo-500 to-indigo-400">
-      {/* Hero */}
-      <div className="max-w-6xl mx-auto px-6 sm:px-8 lg:px-12 pt-12 lg:pt-24 pb-8 lg:pb-16 text-white">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-          <div className="aa-rise">
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold mb-4 tracking-tight">
-              Valee
-            </h1>
-            <p className="text-indigo-100 text-lg sm:text-xl lg:text-2xl leading-snug">
-              Gana recompensas en tus comercios favoritos.
-            </p>
-            <p className="text-indigo-200 text-base sm:text-lg mt-2">
-              Cada compra cuenta.
-            </p>
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-gray-100">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-20">
+            
+            {/* Logo */}
+            <div className="flex-shrink-0 flex items-center gap-2">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+                {/* Replace with your actual Appline SVG icon */}
+                <span className="text-white font-bold text-xl">V</span>
+              </div>
+              <span className="text-2xl font-bold text-slate-900 tracking-tight">Valee</span>
+            </div>
 
-            <div className="hidden lg:block mt-8">
-              <Link
-                href="/consumer"
-                className="aa-btn inline-block bg-white text-indigo-700 font-semibold text-base py-3 px-8 rounded-xl hover:bg-indigo-50 shadow-lg"
-              >
+            {/* Desktop Navigation Links 
+              <nav className="hidden md:flex space-x-8">
+                <Link href="#features" className="text-sm font-medium text-gray-600 hover:text-indigo-600 transition">Comercios</Link>
+                <Link href="#about" className="text-sm font-medium text-gray-600 hover:text-indigo-600 transition">Nosotros</Link>
+                <Link href="#how-it-works" className="text-sm font-medium text-gray-600 hover:text-indigo-600 transition">Como funciona?</Link>
+                <Link href="#support" className="text-sm font-medium text-gray-600 hover:text-indigo-600 transition">Soporte</Link>
+              </nav>
+            */}
+            {/* Right side actions buttons */}
+            <div className="flex items-center space-x-5">             
+              <Link href="/consumer" className="bg-indigo-500 hover:bg-indigo-600 text-white px-6 py-2.5 rounded-lg text-sm font-semibold shadow-sm transition-all">
                 <span className="relative z-10">
                   {hasSession
                     ? (sessionPhone ? `Entrar como ${maskPhone(sessionPhone)}` : 'Mi cuenta')
@@ -99,138 +154,445 @@ export default function Home() {
                   No soy yo — cambiar de cuenta
                 </Link>
               )}
-              <p className="text-xs text-indigo-200 mt-4 max-w-sm">
-                Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
-              </p>
             </div>
+            
           </div>
+        </div>
+      </header>
+      {/* Hero */}
+      <main className="relative overflow-hidden bg-white pt-[100px] pb-[0px] lg:pt-[100px]">
+        <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+            
+            {/* Left Column: Text Content */}
+            <div className="max-w-[570px]">
+              <span className="block text-base font-semibold text-slate-800 mb-4">
+                Cada negocio cuenta
+              </span>
+              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-extrabold text-slate-900 leading-[1.1] mb-6">
+               Tus facturas de compra ahora son <span className="text-indigo-400">Recompensas</span>.
+              </h1>
+              <p className="text-lg text-gray-500 leading-relaxed mb-10">
+                Gana puntos en tus comercios favoritos enviando una foto de tu facturas por WhatsApp. Sin apps, sin registros eternos, solo beneficios.
+              </p>
 
-          {/* Right column on desktop — phone mockup / how it works */}
-          <div className="hidden lg:block">
-            <div className="bg-white/10 backdrop-blur-sm rounded-3xl p-8 border border-white/20">
-              <h2 className="text-white font-bold text-2xl mb-4">Como funciona</h2>
-              <ol className="space-y-4 text-indigo-50">
-                <li className="flex gap-4">
-                  <span className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-bold">1</span>
-                  <span className="pt-1">Visita un comercio Valee y escanea su codigo QR</span>
-                </li>
-                <li className="flex gap-4">
-                  <span className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-bold">2</span>
-                  <span className="pt-1">Envia foto de tu factura o paga con Pago Movil</span>
-                </li>
-                <li className="flex gap-4">
-                  <span className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-bold">3</span>
-                  <span className="pt-1">Acumula puntos automaticamente</span>
-                </li>
-                <li className="flex gap-4">
-                  <span className="flex-shrink-0 w-8 h-8 bg-white/20 rounded-full flex items-center justify-center font-bold">4</span>
-                  <span className="pt-1">Canjea por productos directo desde la app</span>
-                </li>
-              </ol>
+              {/* CTA Buttons */}
+              <div className="flex flex-wrap items-center gap-5">
+                <Link 
+                  href="/consumer" 
+                  className="inline-flex items-center gap-3 bg-[#1D2130] text-white px-8 py-4 rounded-lg font-semibold hover:bg-slate-800 transition-all shadow-lg"
+                >
+                  Empezar a ganar
+                  <span className="border-l border-white/20 pl-3">
+                  <svg 
+                      width="24" 
+                      height="24" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="w-5 h-5"
+                    >
+                      <path 
+                        d="M17 2H7C5.89543 2 5 2.89543 5 4V20C5 21.1046 5.89543 22 7 22H17C18.1046 22 19 21.1046 19 20V4C19 2.89543 18.1046 2 17 2Z" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                      <path 
+                        d="M12 18H12.01" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                      <path 
+                        d="M10 4H14" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </Link>
+                
+                <button className="group flex items-center gap-4 text-slate-900 font-semibold">
+                  <div className="w-14 h-14 flex items-center justify-center rounded-full border-2 border-slate-100 group-hover:bg-indigo-50 group-hover:border-indigo-100 transition-all">
+                    <svg className="w-5 h-5 text-slate-900 fill-current" viewBox="0 0 24 24">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                  </div>
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm">Ver</span>
+                    <span className="text-xs text-gray-400 font-normal underline">Ver cómo funciona</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Right Column: Image Mockup */}
+            <div className="relative flex justify-center lg:justify-end">
+              {/* Decorative background circle */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-indigo-50 rounded-full -z-10 opacity-60 blur-3xl"></div>
+              
+              <div className="relative w-full max-w-[650px]">
+                {/* Image */}
+                  <img 
+                    src="/images/image-1.png" 
+                    alt="App Interface" 
+                    className="w-full h-auto"
+                  />
+                
+                {/* Floating stars/decorations if you want to match the image exactly */}
+                <div className="absolute -top-10 -right-5 text-indigo-400">✦</div>
+                <div className="absolute top-20 -right-10 text-emerald-400">✦</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </main>
+
+      {/* Businness Carousel */}
+      <section className="pt-10 pb-20 bg-white">
+        <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-6">
+          <div className="grid grid-cols-1 lg:grid-cols-8 gap-10 items-center">
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            A
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            B
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            C
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            D
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            E
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            F
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            G
+            </div>
+            <div  className="bg-gray-50 rounded-[30px] border border-gray-100 p-8 sm:p-16">
+            H
             </div>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* White content section */}
-      <div className="bg-white rounded-t-3xl lg:rounded-t-[3rem]">
-        <div className="max-w-6xl mx-auto px-6 sm:px-8 lg:px-12 pt-10 lg:pt-16 pb-12">
-          {/* Mobile how it works — hidden on desktop (shown in hero above) */}
-          <div className="lg:hidden mb-10">
-            <h2 className="text-slate-800 font-bold text-2xl mb-4">Como funciona</h2>
-            <ol className="space-y-3 text-base text-slate-600">
-              <li className="flex gap-3">
-                <span className="text-indigo-600 font-bold">1.</span>
-                <span>Visita un comercio Valee y escanea su codigo QR</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="text-indigo-600 font-bold">2.</span>
-                <span>Envia foto de tu factura o paga con Pago Movil</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="text-indigo-600 font-bold">3.</span>
-                <span>Acumula puntos automaticamente</span>
-              </li>
-              <li className="flex gap-3">
-                <span className="text-indigo-600 font-bold">4.</span>
-                <span>Canjea por productos directo desde la app</span>
-              </li>
-            </ol>
-          </div>
+      <section className="py-20 bg-gray-50">
+      <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Main Banner Container */}
+        <div className="relative bg-white rounded-[40px] border border-gray-100 overflow-hidden p-8 sm:p-16 lg:p-24 flex flex-col lg:flex-row items-center gap-12">
+          
+          {/* Left Column: Content */}
+          <div className="flex-1 text-center lg:text-left z-10">
+            <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 leading-tight mb-6">
+              Convierte una compra casual en un cliente recurrente.
+            </h2>
+           {/* Numbered List Items */}
+           <div className="space-y-8 pb-10">
+              <div className="flex gap-6">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full border border-gray-100 flex items-center justify-center text-slate-900 font-bold shadow-sm">
+                  01
+                </div>
+                <div>
+                  <h4 className="text-lg font-bold text-slate-900 mb-1">Sin aplicaciones extra</h4>
+                  <p className="text-gray-500">Olvídate de llenar la memoria de tu teléfono. Todo el proceso ocurre dentro de WhatsApp, la aplicación que ya usas y dominas cada día.</p>
+                </div>
+              </div>
 
-          {/* Affiliated merchants grid */}
-          {affiliated.length > 0 && (
-            <div className="mb-10">
-              <h2 className="text-slate-800 font-bold text-2xl mb-6">
-                Comercios afiliados
-              </h2>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-                {affiliated.map(m => (
-                  <div
-                    key={m.id}
-                    className="bg-slate-50 rounded-2xl p-4 text-center border border-slate-100 hover:border-indigo-200 hover:shadow-md transition-all"
-                  >
-                    <div className="w-14 h-14 bg-indigo-100 text-indigo-700 rounded-full mx-auto mb-3 flex items-center justify-center font-bold text-2xl">
-                      {m.name.charAt(0)}
-                    </div>
-                    <p className="text-sm font-medium text-slate-700 line-clamp-2">
-                      {m.name}
-                    </p>
-                  </div>
-                ))}
+              <div className="flex gap-6">
+                <div className="flex-shrink-0 w-12 h-12 rounded-full border border-gray-100 flex items-center justify-center text-slate-900 font-bold shadow-sm">
+                  02
+                </div>
+                <div>
+                  <h4 className="text-lg font-bold text-slate-900 mb-1">Perfiles de usuario precisoso</h4>
+                  <p className="text-gray-500">Identifica a tus clientes más fieles y conoce su ticket promedio de compra automáticamente.</p>
+                </div>
               </div>
             </div>
-          )}
+            
+            {/* Store Buttons */}
+            <div className="flex flex-wrap justify-center lg:justify-start gap-4">
+            <Link 
+                  href="/merchant/signup" 
+                  className="inline-flex items-center gap-3 bg-[#1D2130] text-white px-8 py-4 rounded-lg font-semibold hover:bg-slate-800 transition-all shadow-lg"
+                >
+                  Registrar Comercio
+                  <span className="border-l border-white/20 pl-3">
+                  <svg 
+                      width="24" 
+                      height="24" 
+                      viewBox="0 0 24 24" 
+                      fill="none" 
+                      xmlns="http://www.w3.org/2000/svg"
+                      className="w-5 h-5"
+                    >
+                      <path 
+                        d="M17 2H7C5.89543 2 5 2.89543 5 4V20C5 21.1046 5.89543 22 7 22H17C18.1046 22 19 21.1046 19 20V4C19 2.89543 18.1046 2 17 2Z" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                      <path 
+                        d="M12 18H12.01" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                      <path 
+                        d="M10 4H14" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                </Link>
 
-          {/* Mobile CTA — hidden on desktop */}
-          <div className="lg:hidden">
-            <Link
-              href="/consumer"
-              className="block bg-indigo-600 text-white text-center text-base py-4 rounded-2xl font-semibold hover:bg-indigo-700 transition-colors"
-            >
-              {hasSession
-                ? (sessionPhone ? `Entrar como ${maskPhone(sessionPhone)}` : 'Mi cuenta')
-                : 'Ya tengo cuenta'}
-            </Link>
-            {hasSession && (
-              <Link href="/consumer?switch=1" className="block text-center text-xs text-slate-500 hover:text-slate-700 mt-2 underline">
-                No soy yo — cambiar de cuenta
-              </Link>
-            )}
-            <p className="text-xs text-slate-400 text-center mt-3">
-              Si nunca has visitado un comercio Valee, escanea el QR del comercio para empezar.
+            </div>
+          </div>
+
+          {/* Right Column: Phone Mockup with Circular Gradient */}
+          <div className="relative flex-1 flex justify-center lg:justify-end">
+            {/* The large circular gradient seen in the reference */}
+            <div className="absolute top-1/2 left-1/2 lg:left-2/3 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] sm:w-[450px] sm:h-[450px] bg-gradient-to-tr from-[#FF9F9F] via-[#FFD18B] to-[#7B8FF7] rounded-full opacity-60 blur-2xl -z-10"></div>
+            
+            <div className="relative w-full max-w-[320px] lg:max-w-[500px]">
+              <img 
+                src="/images/image-2.png" 
+                alt="App Interface Final Preview" 
+                className="w-full h-auto drop-shadow-3xl"
+              />
+              {/* Star Decorations */}
+              <div className="absolute top-10 -right-4 text-indigo-400 text-2xl animate-pulse">✦</div>
+              <div className="absolute top-20 -right-12 text-emerald-400 text-xl">✦</div>
+              
+              {/* Wave Decoration at the bottom left of phone */}
+              <div className="absolute -left-10 bottom-10 opacity-60">
+                <svg width="60" height="30" viewBox="0 0 60 30" fill="none">
+                  <path d="M0 15C5 15 5 20 10 20C15 20 15 15 20 15C25 15 25 20 30 20C35 20 35 15 40 15C45 15 45 20 50 20C55 20 55 15 60 15" stroke="#FF9F9F" strokeWidth="3" strokeLinecap="round"/>
+                  <path d="M0 5C5 5 5 10 10 10C15 10 15 5 20 5C25 5 25 10 30 10C35 10 35 5 40 5C45 5 45 10 50 10C55 10 55 5 60 5" stroke="#FF9F9F" strokeWidth="3" strokeLinecap="round" opacity="0.5"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+
+
+
+
+
+    <section className="py-20 bg-gray-50">
+      <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Main Grid Container */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          
+          {/* Left Column Stack */}
+          <div className="flex flex-col gap-8">
+            
+            {/* Top Left Card - Salmon/Coral */}
+            <div className="bg-[#C4F2E4] rounded-[32px] p-8 sm:p-12 border border-gray-100 min-h-[300px] relative overflow-hidden flex items-center">
+              <div className="max-w-[60%] z-10">
+                <h3 className="text-white text-3xl sm:text-4xl font-bold mb-4 leading-tight">
+                Gana sin esfuerzo
+                </h3>
+                <p className="text-white/90 text-lg">
+                Envía una foto de tu ticket por WhatsApp y nosotros hacemos el resto.
+                </p>
+              </div>
+              {/* Wallet/Coins Illustration placeholder */}
+              <div className="absolute right-[-20px] bottom-0 w-1/2 h-full flex items-end justify-end p-4">
+                 <img src="/images/image-3.png" alt="Payment" className="max-h-[100%] object-contain" />
+              </div>
+            </div>
+
+            {/* Bottom Left Card - Gold/Yellow */}
+            <div className="bg-[#FFE3CD] rounded-[32px] p-8 sm:p-12 border border-gray-100 min-h-[300px] relative overflow-hidden flex items-center">
+              <div className="max-w-[60%] z-10">
+                <h3 className="text-white text-3xl sm:text-4xl font-bold mb-4 leading-tight">
+                Tus puntos, al día
+                </h3>
+                <p className="text-white/90 text-lg">
+                Consulta tu saldo y premios en tiempo real desde tu WhatsApp.
+                </p>
+              </div>
+              {/* Phone illustration placeholder */}
+              <div className="absolute right-0 bottom-0 w-1/2 h-full flex items-end justify-end">
+                 <img src="/images/image-5.png" alt="Tracking" className="max-h-[90%] object-contain translate-y-4" />
+              </div>
+            </div>
+
+          </div>
+
+          {/* Right Column - Large Purple Card */}
+          <div className="bg-[#D1E9FF] rounded-[32px] p-8 sm:p-12 border border-gray-100 min-h-[632px] relative overflow-hidden flex items-center">
+            <div className="max-w-[70%] z-10">
+              <h3 className="text-white text-4xl sm:text-5xl font-bold mb-6 leading-tight">
+              +30 comercios aliados
+              </h3>
+              <p className="text-white/90 text-xl">
+              Desde tu café diario hasta tus compras de moda. Elige dónde ganar hoy.
+              </p>
+            </div>
+            {/* Food/Burger illustration placeholder */}
+            <div className="absolute right-[-40px] bottom-0 w-3/5 h-full flex items-end justify-end">
+               <img src="/images/image-4.png" alt="Categories" className="max-h-[80%] object-contain" />
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </section>
+    
+     <section className="py-24 bg-gray-50 relative overflow-hidden">
+      {/* Decorative Background Elements */}
+      <div className="absolute bottom-[-5%] left-[-5%] w-64 h-64 bg-indigo-100 rounded-full blur-3xl opacity-50 -z-10"></div>
+      <div className="absolute top-[-5%] right-[-5%] w-48 h-48 bg-orange-100 rounded-full blur-3xl opacity-50 -z-10"></div>
+
+      <div className="container max-w-3xl mx-auto px-4 sm:px-6">
+        <div className="text-center mb-16">
+          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold text-slate-900 mb-6">
+            Preguntas Frecuentes
+          </h2>
+          <p className="text-gray-500 text-lg leading-relaxed">
+            Todo lo que necesitas saber sobre cómo Valee está transformando la lealtad y las recompensas a través de WhatsApp.
+          </p>
+        </div>
+
+        {/* FAQ Accordion Container */}
+        <div className="bg-white rounded-3xl border border-gray-100 overflow-hidden">
+          {faqData.map((item, index) => (
+            <div key={index} className={`border-b border-gray-100 last:border-0`}>
+              <button
+                onClick={() => setOpenIndex(openIndex === index ? null : index)}
+                className="w-full py-8 px-8 flex items-center justify-between text-left transition-colors hover:bg-gray-50/50"
+              >
+                <span className="text-slate-900 font-bold text-lg pr-4">
+                  {item.question}
+                </span>
+                <div className="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+                  {openIndex === index ? (
+                    <span className="text-2xl text-slate-400">−</span>
+                  ) : (
+                    <span className="text-2xl text-slate-400">+</span>
+                  )}
+                </div>
+              </button>
+              
+              {openIndex === index && (
+                <div className="px-8 pb-8 animate-fadeIn">
+                  <p className="text-gray-500 leading-relaxed">
+                    {item.answer}
+                  </p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    
+    <footer className="bg-[#F8FAFC] pt-20 pb-10">
+      <div className="container max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Top Section: Branding and Links */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-12 mb-16">
+          
+          {/* Brand Column */}
+          <div className="col-span-2 lg:col-span-2">
+            <div className="flex items-center gap-2 mb-6">
+              <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center">
+                <span className="text-white font-bold text-xl">V</span>
+              </div>
+              <span className="text-2xl font-bold text-slate-900 tracking-tight">Valee</span>
+            </div>
+            <p className="text-gray-500 max-w-xs leading-relaxed">
+            La plataforma de lealtad inteligente que conecta a comercios y clientes a través de WhatsApp. Convierte cada ticket en una oportunidad de ganar.
             </p>
           </div>
 
-          {/* Merchant signup CTA */}
-          <div className="mt-8 bg-emerald-50 border border-emerald-200 rounded-2xl p-5 text-center">
-            <p className="text-sm font-semibold text-emerald-800">Tienes un comercio?</p>
-            <p className="text-xs text-emerald-700 mt-1 mb-3">Registra tu negocio en Valee gratis y empieza a fidelizar clientes.</p>
-            <Link
-              href="/merchant/signup"
-              className="inline-block bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700 transition"
-            >
-              Registra tu comercio
-            </Link>
+          {/* Quick Links Column */}
+          <div>
+            <h4 className="text-slate-900 font-bold mb-6">Inicio</h4>
+            <ul className="space-y-4 text-gray-500 text-sm">
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Comercios Asociados</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">¿Cómo funciona?</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Beneficios para Negocios</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Preguntas Frecuentes</a></li>
+            </ul>
           </div>
 
-          {/* Footer links */}
-          <footer className="mt-10 pt-6 border-t border-slate-200 text-center text-sm font-medium text-slate-500 space-x-6">
-            <Link
+          {/* Resources Column */}
+          <div>
+            <h4 className="text-slate-900 font-bold mb-6">Soporte y Comunidad</h4>
+            <ul className="space-y-4 text-gray-500 text-sm">
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Centro de Ayuda</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Canal de WhatsApp</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Directorio de Tiendas</a></li>
+            </ul>
+          </div>
+
+          {/* Tutorial Column */}
+          <div>
+            <h4 className="text-slate-900 font-bold mb-6">Confianza</h4>
+            <ul className="space-y-4 text-gray-500 text-sm">
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Política de Privacidad</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Términos y Condiciones</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Aviso de Cookies</a></li>
+              <li><a href="#" className="hover:text-indigo-600 transition-colors">Contrato para Comercios</a></li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Bottom Section: Sub-footer */}
+        <div className="pt-8 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-6">
+          <p className="text-gray-400 text-sm">
+            © 2026 Valee.Todos los derechos reservados.
+          </p>
+
+          {/* Social Icons (Simplified) */}
+          <div className="flex gap-6">
+             <a href="#" className="text-gray-400 hover:text-indigo-600">Facebook</a>
+             <a href="#" className="text-gray-400 hover:text-indigo-600">Twitter</a>
+             <a href="#" className="text-gray-400 hover:text-indigo-600">LinkedIn</a>
+          </div>
+
+          <div className="flex gap-8 text-sm text-gray-400">
+          <Link
               href="/privacy"
-              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+              className="hover:text-indigo-600 transition-colors"
             >
-              Privacidad
+              Politica de Privacidad
             </Link>
             <Link
               href="/terms"
-              className="hover:text-indigo-700 hover:underline underline-offset-4 transition-colors"
+              className="hover:text-indigo-600 transition-colors"
             >
-              Terminos
+              Terminos y Condiciones
             </Link>
-          </footer>
+          </div>
         </div>
+
       </div>
+    </footer>
+
     </div>
   )
 }
