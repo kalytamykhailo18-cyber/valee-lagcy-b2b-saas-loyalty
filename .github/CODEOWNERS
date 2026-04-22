@@ -1,0 +1,24 @@
+# CODEOWNERS — GitHub auto-requests reviews based on which paths a PR touches.
+#
+# Line format: <path-pattern>  <owners>
+# Owners must be GitHub usernames or teams with access to the repo.
+# Later matches override earlier ones, so put broader rules first and
+# narrow overrides below.
+
+# Default owner for anything not matched below
+*                                @kalytamykhailo18-cyber
+
+# Frontend: all of /frontend/ belongs to Genesis
+/frontend/                       @genearianz
+
+# Backend, data layer, infra, tests: Ustym
+/src/                            @kalytamykhailo18-cyber
+/prisma/                         @kalytamykhailo18-cyber
+/scripts/                        @kalytamykhailo18-cyber
+/ecosystem.config.cjs            @kalytamykhailo18-cyber
+/nginx.conf                      @kalytamykhailo18-cyber
+
+# Shared surface: both should see changes to API contracts or build config
+/frontend/lib/api.ts             @kalytamykhailo18-cyber @genearianz
+/package.json                    @kalytamykhailo18-cyber @genearianz
+/frontend/package.json           @kalytamykhailo18-cyber @genearianz
