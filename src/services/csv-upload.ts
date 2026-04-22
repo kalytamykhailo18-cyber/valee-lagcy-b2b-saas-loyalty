@@ -153,6 +153,36 @@ export async function processCSV(
   // merchant legitimately sells high-ticket items.
   const AMOUNT_MAX = parseFloat(process.env.CSV_AMOUNT_MAX || '50000000');
   const INVOICE_NUMBER_RE = /^[A-Za-z0-9][A-Za-z0-9._\-/]{2,63}$/;
+  // Minimum digit count per invoice number. Venezuelan fiscal invoice
+  // numbers (Control numbers) are typically 8 digits; foreign formats can
+  // be shorter. 4 is a conservative floor that rejects obvious garbage
+  // like '13245' (5 chars / 5 digits — marginal but allowed) while still
+  // letting international formats through. Genesis called out the fact
+  // that bogus numbers like G12345610, o123456789, 12345610 were all
+  // passing the previous regex (items image 4 on Notion).
+  const INVOICE_MIN_DIGITS = parseInt(process.env.CSV_INVOICE_MIN_DIGITS || '4');
+
+  /** Detect obvious ascending/descending sequential digit patterns.
+   *  Matches the full digit string directly (0123456789, 9876543210).
+   *  Doesn't scan sub-windows because short embedded sequential runs
+   *  are common in legit phone numbers (e.g. +34612345678). */
+  const isSequentialPlaceholder = (s: string): boolean => {
+    const digits = s.replace(/\D/g, '');
+    if (digits.length < 4) return false;
+    const ascending = '01234567890123456789';
+    const descending = '98765432109876543210';
+    return ascending.includes(digits) || descending.includes(digits);
+  };
+
+  /** Detect repeated-digit placeholders. Whole-string (11111111) or a
+   *  long embedded run (5811111111111 has '1'x10 after country prefix). */
+  const isRepeatedDigitPlaceholder = (s: string): boolean => {
+    const digits = s.replace(/\D/g, '');
+    if (digits.length < 5) return false;
+    if (/^(\d)\1+$/.test(digits)) return true;
+    if (/(\d)\1{6,}/.test(digits)) return true;
+    return false;
+  };
 
   for (let i = 1; i < lines.length; i++) {
     const fields = parseCSVLine(lines[i]);
@@ -176,6 +206,34 @@ export async function processCSV(
         errorDetails.push({
           row: i + 1,
           reason: `Invoice number invalid: must be 3-64 alphanumeric characters (got '${invoiceNumber.slice(0, 40)}')`,
+        });
+        continue;
+      }
+      // Digit-count minimum. A real invoice number has enough digits to
+      // be unique; anything with fewer than INVOICE_MIN_DIGITS digits is
+      // almost certainly a test string.
+      const invoiceDigitCount = (invoiceNumber.match(/\d/g) || []).length;
+      if (invoiceDigitCount < INVOICE_MIN_DIGITS) {
+        rowsErrored++;
+        errorDetails.push({
+          row: i + 1,
+          reason: `Invoice number '${invoiceNumber}' has too few digits (minimum ${INVOICE_MIN_DIGITS}).`,
+        });
+        continue;
+      }
+      if (isSequentialPlaceholder(invoiceNumber)) {
+        rowsErrored++;
+        errorDetails.push({
+          row: i + 1,
+          reason: `Invoice number '${invoiceNumber}' looks like a sequential placeholder (0123456789, etc).`,
+        });
+        continue;
+      }
+      if (isRepeatedDigitPlaceholder(invoiceNumber)) {
+        rowsErrored++;
+        errorDetails.push({
+          row: i + 1,
+          reason: `Invoice number '${invoiceNumber}' is a repeated-digit placeholder (1111111, etc).`,
         });
         continue;
       }
@@ -215,13 +273,37 @@ export async function processCSV(
       let customerPhone: string | null = null;
       if (phoneCol !== -1 && fields[phoneCol]) {
         const raw = fields[phoneCol].trim();
+        const rawDigits = raw.replace(/\D/g, '');
         const normalized = normalizeVenezuelanPhone(raw);
         const digits = normalized.replace(/\D/g, '');
+        // 10-15 digit range covers Venezuelan local (10) through any
+        // international format (up to 15 per E.164 max). Shorter = not
+        // a phone; longer = malformed input.
         if (digits.length < 10 || digits.length > 15) {
           rowsErrored++;
           errorDetails.push({
             row: i + 1,
             reason: `Invalid phone number: '${raw}' (need 10-15 digits)`,
+          });
+          continue;
+        }
+        // Reject obvious placeholder phones. Check the RAW digit string
+        // too because normalization may prepend country codes that break
+        // the pattern detection (e.g. '0123456789' becomes '+10123456789'
+        // and the whole-string sequential check stops matching).
+        if (isRepeatedDigitPlaceholder(digits) || isRepeatedDigitPlaceholder(rawDigits)) {
+          rowsErrored++;
+          errorDetails.push({
+            row: i + 1,
+            reason: `Phone '${raw}' looks like a placeholder (repeated digits).`,
+          });
+          continue;
+        }
+        if (isSequentialPlaceholder(digits) || isSequentialPlaceholder(rawDigits)) {
+          rowsErrored++;
+          errorDetails.push({
+            row: i + 1,
+            reason: `Phone '${raw}' looks like a placeholder (sequential digits).`,
           });
           continue;
         }
