@@ -42,6 +42,7 @@ export default function HybridDealsPage() {
     minLevel: '',
   })
   const [loading, setLoading] = useState(false)
+  const [createMessage, setCreateMessage] = useState('')
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
@@ -81,6 +82,7 @@ export default function HybridDealsPage() {
 
   async function handleCreate() {
     if (!form.name || !form.cashPrice || !form.redemptionCost) return
+    setCreateMessage('')
     setLoading(true)
     try {
       await api.createProduct({
@@ -95,8 +97,15 @@ export default function HybridDealsPage() {
       })
       setShowForm(false)
       setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1' })
+      setCreateMessage('Promocion creada')
+      setTimeout(() => setCreateMessage(''), 2500)
       loadProducts()
-    } catch {}
+    } catch (e: any) {
+      // Surface plan-limit 402s and other backend rejections to the user
+      // (Genesis QA item 9). Without this the UI looked frozen.
+      const msg = e?.error || e?.message || 'No se pudo crear la promocion.'
+      setCreateMessage(`Error: ${msg}`)
+    }
     setLoading(false)
   }
 
@@ -273,7 +282,17 @@ export default function HybridDealsPage() {
             >
               {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Creando...' : 'Crear promocion'}</span>
             </button>
+            {createMessage && (
+              <p className={`text-sm mt-2 ${createMessage.startsWith('Error') ? 'text-rose-600' : 'text-emerald-600'}`}>
+                {createMessage}
+              </p>
+            )}
           </div>
+        )}
+        {!showForm && createMessage && (
+          <p className={`text-sm mb-4 ${createMessage.startsWith('Error') ? 'text-rose-600' : 'text-emerald-600'}`}>
+            {createMessage}
+          </p>
         )}
 
         {/* Hybrid deals grid */}
