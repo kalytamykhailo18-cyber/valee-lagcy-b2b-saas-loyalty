@@ -48,7 +48,7 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   const [authChecked, setAuthChecked] = useState(false)
   const [authorized, setAuthorized] = useState(false)
 
-  const PUBLIC_ROUTES = ['/merchant/login', '/merchant/signup', '/merchant/scanner', '/merchant/forgot-password', '/merchant/reset-password']
+  const PUBLIC_ROUTES = ['/merchant/login', '/merchant/signup', '/merchant/forgot-password', '/merchant/reset-password']
 
   useEffect(() => {
     setMounted(true)
@@ -122,7 +122,9 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     })()
   }, [mounted, role, tenantName, tenantLogoUrl])
 
-  const bareRoutes = ['/merchant/login', '/merchant/signup', '/merchant/scanner', '/merchant/forgot-password', '/merchant/reset-password']
+  // /merchant/scanner deliberately NOT bare — cashiers need the nav
+  // drawer to jump between sections (Genesis QA item 7).
+  const bareRoutes = ['/merchant/login', '/merchant/signup', '/merchant/forgot-password', '/merchant/reset-password']
   if (bareRoutes.includes(pathname)) {
     return <>{children}</>
   }
