@@ -337,6 +337,21 @@ export async function processRedemption(params: {
     return { success: false, message: 'Tenant mismatch — this QR belongs to a different merchant.' };
   }
 
+  // Derive the effective branch id: the caller may pass one explicitly
+  // (e.g. a cashier terminal that's locked to a specific branch), but if
+  // they don't we auto-fill from the cashier's staff.branchId. That gives
+  // the redemption traceability to the branch the cashier actually works
+  // at — Eric's requirement: if Pedro Perez at "Sucursal de la Viña"
+  // scans the QR, the canje gets stamped with that branch automatically.
+  let effectiveBranchId: string | null = params.branchId || null;
+  if (!effectiveBranchId && params.cashierStaffId) {
+    const cashier = await prisma.staff.findUnique({
+      where: { id: params.cashierStaffId },
+      select: { branchId: true },
+    });
+    if (cashier?.branchId) effectiveBranchId = cashier.branchId;
+  }
+
   // 5b. Cross-branch policy (Genesis H11). When the tenant turned off
   // cross-branch redemption, the cashier's branchId must match the branch
   // recorded on the PENDING ledger entry. If either side has a null
@@ -351,7 +366,7 @@ export async function processRedemption(params: {
       where: { id: tokenRecord.ledgerPendingEntryId },
       select: { branchId: true },
     }))?.branchId;
-    if (pendingBranchId && params.branchId && pendingBranchId !== params.branchId) {
+    if (pendingBranchId && effectiveBranchId && pendingBranchId !== effectiveBranchId) {
       const originBranch = await prisma.branch.findUnique({
         where: { id: pendingBranchId },
         select: { name: true },
@@ -398,7 +413,7 @@ export async function processRedemption(params: {
     assetTypeId: payload.assetTypeId,
     referenceId: `CONFIRMED-${payload.tokenId}`,
     referenceType: 'redemption_token',
-    branchId: params.branchId || null,
+    branchId: effectiveBranchId,
     metadata: {
       cashierId: params.cashierStaffId,
       productId: payload.productId,
@@ -436,7 +451,7 @@ export async function processRedemption(params: {
       status: 'used',
       usedAt: new Date(),
       usedByStaffId: params.cashierStaffId,
-      branchId: params.branchId || null,
+      branchId: effectiveBranchId,
     },
   });
 
