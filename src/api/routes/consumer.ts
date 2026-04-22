@@ -331,10 +331,31 @@ export default async function consumerRoutes(app: FastifyInstance) {
     };
 
     const tokenIdByRef = new Map<string, string>();
+    const pendingLedgerIds: string[] = [];
     for (const e of entries) {
       if (!redemptionEventTypes.has(e.eventType)) continue;
       const tid = refToTokenId(e.referenceId);
       if (tid) tokenIdByRef.set(e.referenceId, tid);
+      if (e.eventType === 'REDEMPTION_PENDING') pendingLedgerIds.push(e.id);
+    }
+    // Bridge old REDEEM-<throwaway> refs whose UUID doesn't match the
+    // token (historical bug: redemption.ts used separate uuids for the
+    // ledger ref vs the token id). redemption_tokens.ledgerPendingEntryId
+    // points back at the PENDING ledger row, so we can rewrite the map
+    // entry to use the real token uuid and let the collapse logic group
+    // PENDING and its terminal event under the same key.
+    if (pendingLedgerIds.length > 0) {
+      const bridges = await prisma.redemptionToken.findMany({
+        where: { ledgerPendingEntryId: { in: pendingLedgerIds } },
+        select: { id: true, ledgerPendingEntryId: true },
+      });
+      const pendingEntryIdToTokenId = new Map<string, string>();
+      for (const b of bridges) pendingEntryIdToTokenId.set(b.ledgerPendingEntryId, b.id);
+      for (const e of entries) {
+        if (e.eventType !== 'REDEMPTION_PENDING') continue;
+        const realTid = pendingEntryIdToTokenId.get(e.id);
+        if (realTid) tokenIdByRef.set(e.referenceId, realTid);
+      }
     }
     const redemptionTokenIds = Array.from(new Set(tokenIdByRef.values()));
 

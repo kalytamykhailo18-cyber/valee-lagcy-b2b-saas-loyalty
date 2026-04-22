@@ -48,15 +48,16 @@ async function main() {
   const phoneA = `+19100${String(ts).slice(-7)}1`;
   const phoneB = `+19100${String(ts).slice(-7)}2`;
 
-  // First voucher: "submitted" with transaction_date in August 2026
+  // First voucher: submitted with transaction_date in February 2026 (4
+  // months before the "April 2026" parse of the second submission).
   const r1 = await validateInvoice({
     tenantId: tenant.id,
     senderPhone: phoneA,
     assetTypeId: asset.id,
     extractedData: {
-      invoice_number: `V-AUG-${ts}`,
+      invoice_number: `V-FEB-${ts}`,
       total_amount: 103893.31,
-      transaction_date: '2026-08-04T15:08:30Z',
+      transaction_date: '2026-02-04T15:08:30Z',
       customer_phone: null,
       merchant_name: 'Banco',
       merchant_rif: null,
@@ -69,7 +70,7 @@ async function main() {
     ocrRawText: `VOUCHER 103893.31 aug-parse`,
     imageBuffer: Buffer.from(`v-aug-${ts}`),
   });
-  await assert('A: first voucher accepted (Aug date)',
+  await assert('A: first voucher accepted (Feb date)',
     r1.success === true, `stage=${r1.stage} msg=${r1.message?.slice(0, 80)}`);
 
   // Second voucher: same amount, same consumer, but transaction_date is

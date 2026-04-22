@@ -16,6 +16,7 @@ export default function ProductManagement() {
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
+  const [createMessage, setCreateMessage] = useState('')
 
   async function handleImageUpload(file: File, target: 'create' | 'edit') {
     const setUploadState = target === 'create' ? setUploading : setEditUploading
@@ -59,6 +60,7 @@ export default function ProductManagement() {
 
   async function handleCreate() {
     if (!form.name || !form.redemptionCost) return
+    setCreateMessage('')
     setLoading(true)
     try {
       await api.createProduct({
@@ -71,10 +73,26 @@ export default function ProductManagement() {
         assetTypeId: form.assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
       })
+      // Reset the form but PRESERVE assetTypeId — it's a tenant-level config
+      // and is required on every create. Clearing it broke the back-to-back
+      // create flow (Genesis QA item 4): second POST went with empty
+      // assetTypeId, backend rejected it, and the silent catch hid the
+      // error so the page looked frozen.
+      setForm(prev => ({
+        name: '', description: '', photoUrl: '', redemptionCost: '',
+        cashPrice: '', stock: '0', minLevel: '1',
+        assetTypeId: prev.assetTypeId,
+      }))
       setShowForm(false)
-      setForm({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1' })
+      setCreateMessage('Producto creado')
+      setTimeout(() => setCreateMessage(''), 2500)
       loadProducts()
-    } catch {}
+    } catch (e: any) {
+      // Surface server errors so plan-limit rejections and backend 4xx don't
+      // fail silently (Genesis QA item 4 + a head-start on item 9).
+      const msg = e?.error || e?.message || 'No se pudo crear el producto.'
+      setCreateMessage(`Error: ${msg}`)
+    }
     setLoading(false)
   }
 
@@ -121,12 +139,19 @@ export default function ProductManagement() {
             <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Catalogo de productos</h1>
             <p className="text-sm text-slate-500 mt-1">Crea y gestiona los productos que tus clientes pueden canjear</p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
-          >
-            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nuevo producto'}</span>
-          </button>
+          <div className="flex items-center gap-3">
+            {createMessage && (
+              <span className={`text-sm ${createMessage.startsWith('Error') ? 'text-rose-600' : 'text-emerald-600'}`}>
+                {createMessage}
+              </span>
+            )}
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
+            >
+              <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nuevo producto'}</span>
+            </button>
+          </div>
         </div>
       </div>
 

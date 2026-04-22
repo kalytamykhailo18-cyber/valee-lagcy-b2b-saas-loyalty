@@ -137,8 +137,19 @@ export async function checkLimit(tenantId: string, action: LimitedAction): Promi
 export async function enforceLimit(tenantId: string, action: LimitedAction): Promise<void> {
   const check = await checkLimit(tenantId, action);
   if (!check.allowed) {
+    // Spanish copy because this error bubbles up to the merchant UI as
+    // a toast (Genesis QA item 9). Frontend renders e.error verbatim.
+    const actionLabels: Record<string, string> = {
+      products_in_catalog: 'productos en tu catalogo',
+      hybrid_offers: 'promociones hibridas',
+      flash_offers: 'ofertas flash este mes',
+      whatsapp_messages: 'mensajes de WhatsApp este mes',
+      csv_uploads: 'cargas de CSV este mes',
+      staff_members: 'miembros del personal',
+    };
+    const label = actionLabels[action] || action;
     const err: any = new Error(
-      `Plan limit reached: ${action} (${check.current}/${check.limit} en plan ${check.plan})`
+      `Ya alcanzaste el maximo de ${label} (${check.current}/${check.limit}) en el plan ${check.plan}. Actualiza el plan para crear mas.`
     );
     err.code = 'PLAN_LIMIT_EXCEEDED';
     err.statusCode = 402;

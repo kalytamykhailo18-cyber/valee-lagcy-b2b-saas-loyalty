@@ -25,6 +25,33 @@ export interface MerchantMetrics {
 export async function getMerchantMetrics(tenantId: string, branchId?: string): Promise<MerchantMetrics> {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
+  // Tenant-global netCirculation (Genesis item 3). Points live at the
+  // tenant, not per-branch, so when a branch slice is requested the
+  // CIRCULACION tile must still reflect the whole merchant's figure —
+  // only EMITIDO and CANJEADO filter per-branch. Compute once up front
+  // and reuse across branchless / branched / _unassigned returns.
+  const globalNetCirculation = async (): Promise<string> => {
+    const [gvi] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(CASE
+        WHEN event_type = 'INVOICE_CLAIMED'   AND entry_type = 'CREDIT' THEN amount
+        WHEN event_type = 'REVERSAL'          AND entry_type = 'DEBIT'  THEN -amount
+        WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT'
+             AND (reference_id LIKE 'WELCOME-%'
+                  OR account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow','verified')))
+          THEN amount
+        ELSE 0
+      END), 0)::text AS total
+      FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
+    `;
+    const [gvr] = await prisma.$queryRaw<[{ total: string }]>`
+      SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
+      WHERE tenant_id = ${tenantId}::uuid AND event_type = 'REDEMPTION_CONFIRMED'
+        AND entry_type = 'CREDIT' AND status != 'reversed'
+    `;
+    return (parseFloat(gvi.total) - parseFloat(gvr.total)).toFixed(8);
+  };
+
   // Sentinel for "entries without any branch_id assigned"
   if (branchId === '_unassigned') {
     // valueIssued = invoices + welcome + manual admin adjustments.
@@ -81,7 +108,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
       valueIssuedWelcome: vi.welcome,
       valueIssuedManual: vi.manual,
       valueRedeemed: vr.total,
-      netCirculation: (parseFloat(viTotal) - parseFloat(vr.total)).toFixed(8),
+      netCirculation: await globalNetCirculation(),
       activeConsumers30d: Number(ac.count),
       totalRedemptions,
       redemptions30d,
@@ -143,7 +170,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
       valueIssuedWelcome: valueIssued.welcome,
       valueIssuedManual: valueIssued.manual,
       valueRedeemed: valueRedeemed.total,
-      netCirculation: (parseFloat(valueIssuedTotal) - parseFloat(valueRedeemed.total)).toFixed(8),
+      netCirculation: await globalNetCirculation(),
       activeConsumers30d: Number(activeConsumers.count),
       totalRedemptions,
       redemptions30d,

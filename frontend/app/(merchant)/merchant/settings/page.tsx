@@ -434,22 +434,33 @@ export default function SettingsPage() {
                   </span>
                 </div>
                 <div className="space-y-4">
-                  {Object.entries(planUsage.usage).map(([key, u]) => (
-                    <div key={key}>
-                      <div className="flex justify-between text-sm text-slate-600 mb-1.5">
-                        <span>{ACTION_LABELS[key] || key}</span>
-                        <span className="font-semibold text-slate-800">{u.current} / {u.limit}</span>
+                  {Object.entries(planUsage.usage).map(([key, u]) => {
+                    // CSV uploads render as a plain counter, no plan cap
+                    // displayed — Genesis QA item 8: showing '23 / 30'
+                    // made the plan feel artificially restrictive when
+                    // the backend doesn't even hard-block at 30.
+                    const isCounterOnly = key === 'csv_uploads';
+                    return (
+                      <div key={key}>
+                        <div className="flex justify-between text-sm text-slate-600 mb-1.5">
+                          <span>{ACTION_LABELS[key] || key}</span>
+                          <span className="font-semibold text-slate-800">
+                            {isCounterOnly ? u.current : `${u.current} / ${u.limit}`}
+                          </span>
+                        </div>
+                        {!isCounterOnly && (
+                          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${
+                                u.percent >= 90 ? 'bg-red-500' : u.percent >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
+                              }`}
+                              style={{ width: `${Math.min(100, u.percent)}%` }}
+                            />
+                          </div>
+                        )}
                       </div>
-                      <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all ${
-                            u.percent >= 90 ? 'bg-red-500' : u.percent >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                          }`}
-                          style={{ width: `${Math.min(100, u.percent)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </section>
             )}

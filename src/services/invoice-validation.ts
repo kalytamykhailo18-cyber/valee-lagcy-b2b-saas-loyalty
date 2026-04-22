@@ -641,6 +641,23 @@ export async function validateInvoice(params: {
     }
   }
 
+  // Future-date guard on photo submissions. The CSV side already blocks
+  // future transaction_dates (Genesis H4); the photo side was still letting
+  // them through and creating a pending_validation for a factura that could
+  // never reconcile. 24h grace for timezone edges.
+  if (extracted.transaction_date) {
+    const txTime = new Date(extracted.transaction_date).getTime();
+    const graceMs = 24 * 60 * 60 * 1000;
+    if (Number.isFinite(txTime) && txTime > Date.now() + graceMs) {
+      return {
+        success: false,
+        stage: 'cross_reference',
+        message: 'La fecha de la factura esta en el futuro. Verifica la fecha e intenta de nuevo.',
+        invoiceNumber: extracted.invoice_number,
+      };
+    }
+  }
+
   // STAGE C: Merchant data cross-reference
   // The invoice number is THE uniqueness key. Once an invoice number has been
   // processed (in any state) it cannot be re-used, ever. Amount is NEVER used
@@ -651,6 +668,25 @@ export async function validateInvoice(params: {
   });
 
   if (!invoice) {
+    // Strict match gate (Genesis): if the tenant has already uploaded at
+    // least one CSV batch, treat that as "the merchant is keeping their
+    // books up to date" and reject submissions whose invoice_number isn't
+    // in the registry. No more silent pending_validation for fabricated
+    // numbers. Before the first CSV upload, keep the old behavior so new
+    // tenants can onboard smoothly — pending_validation waits for the
+    // reconciliation worker.
+    const priorBatchCount = await prisma.uploadBatch.count({
+      where: { tenantId, status: 'completed' },
+    });
+    if (priorBatchCount > 0 && extracted.document_type !== 'voucher') {
+      console.log(`[Validation] Strict CSV match: tenant=${tenantId} has ${priorBatchCount} completed batches but invoice=${extracted.invoice_number} is not registered; rejecting.`);
+      return {
+        success: false,
+        stage: 'cross_reference',
+        message: 'No encontramos esta factura en los registros del comercio. Verifica el numero o pide al comercio que la cargue.',
+        invoiceNumber: extracted.invoice_number,
+      };
+    }
     // Auto-credit provisionally and queue for reconciliation
     const provisional = await createPendingValidation({
       tenantId,
