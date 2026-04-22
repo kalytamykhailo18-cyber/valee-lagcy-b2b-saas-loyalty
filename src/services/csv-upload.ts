@@ -29,6 +29,40 @@ const PHONE_KEYS = [
   'tel', 'celular', 'mobile', 'numero_telefono',
 ];
 
+/**
+ * Parse a calendar-date string coming from a CSV column or a manual
+ * paste. Always returns UTC midnight of the intended calendar day —
+ * if we let `new Date(str)` handle ambiguous formats the invoice ends
+ * up shifted by one day in western-of-UTC timezones (Genesis reported
+ * this on 2026-04-22 for Venezuela, UTC-4: '2026-04-21' was rendering
+ * as 20/04/2026).
+ *
+ * Accepted formats:
+ *   YYYY-MM-DD, YYYY/MM/DD  (ISO — year first)
+ *   DD-MM-YYYY, DD/MM/YYYY  (LATAM common — day first)
+ * Anything else returns null and the row is reported as errored.
+ */
+function parseCalendarDate(raw: string): Date | null {
+  const s = raw.trim();
+  if (!s) return null;
+  let y: number, m: number, d: number;
+  const yFirst = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+  const dFirst = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  if (yFirst) {
+    y = Number(yFirst[1]); m = Number(yFirst[2]); d = Number(yFirst[3]);
+  } else if (dFirst) {
+    d = Number(dFirst[1]); m = Number(dFirst[2]); y = Number(dFirst[3]);
+  } else {
+    return null;
+  }
+  if (m < 1 || m > 12 || d < 1 || d > 31 || y < 2000 || y > 2100) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return dt;
+}
+
+export { parseCalendarDate };
+
 function findColumnKey(headers: string[], candidates: string[]): number {
   const normalized = headers.map(h => h.toLowerCase().trim().replace(/[^a-z0-9_]/g, '_'));
   for (const candidate of candidates) {
@@ -261,8 +295,8 @@ export async function processCSV(
       let transactionDate: Date | null = null;
       if (dateCol !== -1 && fields[dateCol]) {
         const raw = fields[dateCol].trim();
-        const parsed = new Date(raw);
-        if (isNaN(parsed.getTime())) {
+        const parsed = parseCalendarDate(raw);
+        if (!parsed) {
           rowsErrored++;
           errorDetails.push({ row: i + 1, reason: `Unparseable date: '${raw}'` });
           continue;

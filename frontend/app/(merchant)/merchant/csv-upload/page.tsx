@@ -303,7 +303,7 @@ export default function CsvUploadPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-semibold text-slate-800 font-mono text-sm truncate">{inv.invoiceNumber}</p>
                     <div className="text-xs text-slate-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
-                      {inv.transactionDate && <span>{new Date(inv.transactionDate).toLocaleDateString('es-VE')}</span>}
+                      {inv.transactionDate && <span>{new Date(inv.transactionDate).toLocaleDateString('es-VE', { timeZone: 'UTC' })}</span>}
                       {inv.customerPhone && <span>{inv.customerPhone}</span>}
                     </div>
                   </div>
