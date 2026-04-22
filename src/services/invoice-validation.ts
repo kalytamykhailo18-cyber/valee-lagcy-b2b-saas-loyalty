@@ -668,26 +668,17 @@ export async function validateInvoice(params: {
   });
 
   if (!invoice) {
-    // Strict match gate (Genesis): if the tenant has already uploaded at
-    // least one CSV batch, treat that as "the merchant is keeping their
-    // books up to date" and reject submissions whose invoice_number isn't
-    // in the registry. No more silent pending_validation for fabricated
-    // numbers. Before the first CSV upload, keep the old behavior so new
-    // tenants can onboard smoothly — pending_validation waits for the
-    // reconciliation worker.
-    const priorBatchCount = await prisma.uploadBatch.count({
-      where: { tenantId, status: 'completed' },
-    });
-    if (priorBatchCount > 0 && extracted.document_type !== 'voucher') {
-      console.log(`[Validation] Strict CSV match: tenant=${tenantId} has ${priorBatchCount} completed batches but invoice=${extracted.invoice_number} is not registered; rejecting.`);
-      return {
-        success: false,
-        stage: 'cross_reference',
-        message: 'No encontramos esta factura en los registros del comercio. Verifica el numero o pide al comercio que la cargue.',
-        invoiceNumber: extracted.invoice_number,
-      };
-    }
-    // Auto-credit provisionally and queue for reconciliation
+    // Unknown invoice: credit provisionally and queue for reconciliation.
+    // When the merchant later uploads the CSV and the invoice_number
+    // matches, the ledger's effective status flips from 'provisional' to
+    // 'confirmed' (see getAccountBalanceBreakdown) and the customer's
+    // "en verificacion" chip clears.
+    //
+    // An earlier version of this code hard-rejected unknown invoices once
+    // the tenant had uploaded at least one CSV, but that broke the flow
+    // Eric expected: submissions should always be accepted provisionally
+    // as long as the RIF check passed upstream; the CSV is how they get
+    // CONFIRMED, not the gatekeeper that decides acceptance.
     const provisional = await createPendingValidation({
       tenantId,
       senderPhone,

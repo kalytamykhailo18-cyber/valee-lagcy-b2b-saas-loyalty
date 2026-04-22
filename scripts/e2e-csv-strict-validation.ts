@@ -1,17 +1,12 @@
 /**
- * E2E: strict photo-side validation per Genesis's checklist.
+ * E2E: photo-side validation guardrails.
  *
- *   a) If the tenant has uploaded at least one completed CSV batch,
- *      photo submissions for invoice numbers NOT in the registry get
- *      rejected at Stage C. No silent pending_validation.
- *   b) Before any CSV upload (new-tenant grace), photo submissions of
- *      unknown invoices still fall through to pending_validation so
- *      onboarding doesn't dead-lock.
- *   c) Photo submissions with transaction_date > now+24h rejected.
- *   d) Foreign phone format (e.g. US +1XXXXXXXXXX) accepted and
- *      resolved to a consumer account.
- *   e) Voucher submissions skip the strict-match gate because the
- *      merchant doesn't upload bank references in their POS CSV.
+ *   a) Unknown invoices ALWAYS go to pending_validation (regardless of
+ *      whether the tenant has a CSV uploaded already). The CSV flips
+ *      provisional to confirmed on reconcile — it's not a gatekeeper.
+ *   b) Photo submissions with transaction_date > now+24h rejected.
+ *   c) Foreign phone format (e.g. US +1XXXXXXXXXX) accepted.
+ *   d) Voucher submissions bypass the RIF check and go to pending.
  */
 
 import dotenv from 'dotenv';
@@ -71,7 +66,7 @@ async function main() {
       confidence_score: 0.95,
     } as any,
   });
-  await assert('b) pre-CSV: unknown invoice falls through to pending_validation',
+  await assert('pre-CSV: unknown invoice falls through to pending_validation',
     preCsv.success === true && preCsv.stage === 'pending',
     `success=${preCsv.success} stage=${preCsv.stage}`);
 
@@ -84,13 +79,15 @@ async function main() {
   await assert('CSV upload completed', csvResult.status === 'completed',
     `status=${csvResult.status} loaded=${csvResult.rowsLoaded}`);
 
-  // ── a) After CSV: unknown invoice must be REJECTED, not pending ──
+  // ── a) After CSV: unknown invoice STILL goes to pending_validation ──
+  // (The CSV flips provisional → confirmed on reconcile; it doesn't gate
+  // acceptance of new photos. Eric's explicit requirement.)
   const unknownAfter = await validateInvoice({
     tenantId: tenant.id,
-    senderPhone: phoneVE,
+    senderPhone: `+58414${String(ts).slice(-7)}9`,
     assetTypeId: asset.id,
     extractedData: {
-      invoice_number: `FABRICATED-${ts}`,
+      invoice_number: `UNREGISTERED-${ts}`,
       total_amount: 1000,
       transaction_date: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       customer_phone: null,
@@ -103,11 +100,9 @@ async function main() {
       confidence_score: 0.95,
     } as any,
   });
-  await assert('a) post-CSV: unknown invoice is rejected (not pending)',
-    unknownAfter.success === false, `success=${unknownAfter.success} stage=${unknownAfter.stage}`);
-  await assert('a) rejection message mentions "no encontramos" or "registros"',
-    /no encontramos|registros/i.test(unknownAfter.message || ''),
-    `msg="${unknownAfter.message}"`);
+  await assert('a) post-CSV: unknown invoice still goes to pending_validation',
+    unknownAfter.success === true && unknownAfter.stage === 'pending',
+    `success=${unknownAfter.success} stage=${unknownAfter.stage}`);
 
   // Known CSV invoice → claims successfully
   const knownMatch = await validateInvoice({
