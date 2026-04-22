@@ -335,6 +335,8 @@ export const api = {
   listStaff: () => request('/api/merchant/staff'),
   deactivateStaff: (id: string) =>
     request(`/api/merchant/staff/${id}/deactivate`, { method: 'PATCH' }),
+  changeStaffBranch: (id: string, branchId: string) =>
+    request(`/api/merchant/staff/${id}/branch`, { method: 'PATCH', body: JSON.stringify({ branchId }) }),
   generateStaffQr: (id: string) =>
     request(`/api/merchant/staff/${id}/qr`, { method: 'POST' }),
   getStaffPerformance: (days = 30) =>

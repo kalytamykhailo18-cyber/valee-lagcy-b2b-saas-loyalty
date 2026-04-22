@@ -12,10 +12,18 @@ interface Staff {
   role: 'owner' | 'cashier'
   active: boolean
   branchId: string | null
+  branchChangeCount?: number
+  branchLocked?: boolean
   qrSlug: string | null
   qrCodeUrl: string | null
   qrGeneratedAt: string | null
   createdAt: string
+}
+
+interface Branch {
+  id: string
+  name: string
+  active: boolean
 }
 
 interface PerformanceRow {
@@ -30,22 +38,28 @@ interface PerformanceRow {
 export default function StaffPage() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [perf, setPerf] = useState<PerformanceRow[]>([])
+  const [branches, setBranches] = useState<Branch[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
   const [qrPreview, setQrPreview] = useState<{ name: string; url: string } | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier' as 'cashier' | 'owner' })
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier' as 'cashier' | 'owner', branchId: '' })
   const [addError, setAddError] = useState('')
   const [addSubmitting, setAddSubmitting] = useState(false)
+  const [branchEdit, setBranchEdit] = useState<{ staff: Staff; branchId: string } | null>(null)
+  const [branchEditError, setBranchEditError] = useState('')
+  const [branchEditSubmitting, setBranchEditSubmitting] = useState(false)
 
   async function load() {
     try {
-      const [s, p] = await Promise.all([
+      const [s, p, b] = await Promise.all([
         api.listStaff(),
         api.getStaffPerformance(30).catch(() => ({ staff: [] })),
+        api.getBranches().catch(() => ({ branches: [] })),
       ])
       setStaff((s as any).staff || [])
       setPerf(((p as any).staff || []) as PerformanceRow[])
+      setBranches(((b as any).branches || []) as Branch[])
     } finally {
       setLoading(false)
     }
@@ -72,16 +86,39 @@ export default function StaffPage() {
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     setAddError('')
+    const activeBranches = branches.filter(b => b.active)
+    if (form.role === 'cashier' && activeBranches.length > 0 && !form.branchId) {
+      setAddError('Elige la sucursal del cajero.')
+      return
+    }
     setAddSubmitting(true)
     try {
-      await api.createStaff(form)
+      const payload: any = { ...form }
+      if (!payload.branchId) delete payload.branchId
+      await api.createStaff(payload)
       setShowAddForm(false)
-      setForm({ name: '', email: '', password: '', role: 'cashier' })
+      setForm({ name: '', email: '', password: '', role: 'cashier', branchId: '' })
       await load()
     } catch (e: any) {
       setAddError(e?.error || 'No pudimos crear el cajero')
     } finally {
       setAddSubmitting(false)
+    }
+  }
+
+  async function handleBranchEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!branchEdit) return
+    setBranchEditError('')
+    setBranchEditSubmitting(true)
+    try {
+      await api.changeStaffBranch(branchEdit.staff.id, branchEdit.branchId)
+      setBranchEdit(null)
+      await load()
+    } catch (e: any) {
+      setBranchEditError(e?.error || 'No pudimos cambiar la sucursal')
+    } finally {
+      setBranchEditSubmitting(false)
     }
   }
 
@@ -179,9 +216,33 @@ export default function StaffPage() {
                           <div className="min-w-0 flex-1">
                             <p className="font-bold text-slate-800 truncate">{s.name}</p>
                             <p className="text-xs text-slate-500 truncate">{s.email}</p>
-                            <span className="inline-block mt-1.5 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
-                              {s.role}
-                            </span>
+                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                              <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                                {s.role}
+                              </span>
+                              {s.role === 'cashier' && s.branchId && (
+                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                                  {branches.find(b => b.id === s.branchId)?.name || 'Sucursal'}
+                                </span>
+                              )}
+                              {s.role === 'cashier' && !s.branchId && branches.filter(b => b.active).length > 0 && (
+                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
+                                  Sin sucursal
+                                </span>
+                              )}
+                            </div>
+                            {s.role === 'cashier' && branches.filter(b => b.active).length > 0 && (
+                              s.branchLocked ? (
+                                <p className="text-[11px] text-slate-400 mt-1.5">Sucursal bloqueada. Para otro cambio, comunicate con soporte@valee.app.</p>
+                              ) : (
+                                <button
+                                  onClick={() => setBranchEdit({ staff: s, branchId: s.branchId || '' })}
+                                  className="text-[11px] text-emerald-700 hover:underline mt-1.5"
+                                >
+                                  Cambiar sucursal (1 vez)
+                                </button>
+                              )
+                            )}
                           </div>
                           {s.role === 'cashier' && (
                             <button
@@ -317,6 +378,23 @@ export default function StaffPage() {
                   <option value="owner">Owner</option>
                 </select>
               </div>
+              {form.role === 'cashier' && branches.filter(b => b.active).length > 0 && (
+                <div>
+                  <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sucursal</label>
+                  <select
+                    required
+                    value={form.branchId}
+                    onChange={e => setForm({ ...form, branchId: e.target.value })}
+                    className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">Elige una sucursal...</option>
+                    {branches.filter(b => b.active).map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-slate-500 mt-1">La sucursal solo se puede cambiar una vez despues de crear al cajero.</p>
+                </div>
+              )}
               {addError && <p className="text-sm text-red-600">{addError}</p>}
               <button
                 type="submit"
@@ -324,6 +402,47 @@ export default function StaffPage() {
                 className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 mt-2"
               >
                 {addSubmitting ? 'Creando...' : 'Crear cajero'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Branch change modal */}
+      {branchEdit && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-slate-800">Cambiar sucursal de {branchEdit.staff.name}</h3>
+              <button onClick={() => { setBranchEdit(null); setBranchEditError('') }} className="text-slate-400 hover:text-slate-600">
+                <MdClose className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-3">
+              Solo puedes cambiar la sucursal una vez. Despues, cualquier otro cambio requiere contactar a soporte@valee.app.
+            </p>
+            <form onSubmit={handleBranchEdit} className="space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Nueva sucursal</label>
+                <select
+                  required
+                  value={branchEdit.branchId}
+                  onChange={e => setBranchEdit({ ...branchEdit, branchId: e.target.value })}
+                  className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="">Elige una sucursal...</option>
+                  {branches.filter(b => b.active).map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+              </div>
+              {branchEditError && <p className="text-sm text-red-600">{branchEditError}</p>}
+              <button
+                type="submit"
+                disabled={branchEditSubmitting || !branchEdit.branchId || branchEdit.branchId === branchEdit.staff.branchId}
+                className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 mt-2"
+              >
+                {branchEditSubmitting ? 'Guardando...' : 'Confirmar cambio'}
               </button>
             </form>
           </div>

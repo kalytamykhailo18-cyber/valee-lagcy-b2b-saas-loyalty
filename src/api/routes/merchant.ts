@@ -1049,6 +1049,24 @@ export default async function merchantRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: 'name, email, password, and role are required' });
     }
 
+    // Cashiers must be assigned to a branch at creation time when the
+    // tenant has any branches configured. Owners are cross-branch by nature,
+    // so the rule only kicks in for role=cashier. If the tenant has zero
+    // branches yet, we allow a null assignment so early-stage merchants
+    // aren't blocked before Step 5.1 setup.
+    if (branchId) {
+      const branch = await prisma.branch.findFirst({
+        where: { id: branchId, tenantId },
+        select: { id: true },
+      });
+      if (!branch) return reply.status(400).send({ error: 'branchId does not belong to this tenant' });
+    } else if (role === 'cashier') {
+      const branchCount = await prisma.branch.count({ where: { tenantId, active: true } });
+      if (branchCount > 0) {
+        return reply.status(400).send({ error: 'Debes asignar una sucursal al cajero.' });
+      }
+    }
+
     // Plan limit check
     const { enforceLimit } = await import('../../services/plan-limits.js');
     try { await enforceLimit(tenantId, 'staff_members'); }
@@ -1056,16 +1074,67 @@ export default async function merchantRoutes(app: FastifyInstance) {
 
     const passwordHash = await bcrypt.hash(password, 10);
     const staff = await prisma.staff.create({
-      data: { tenantId, name, email, passwordHash, role, branchId },
+      data: { tenantId, name, email, passwordHash, role, branchId: branchId || null },
     });
 
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'STAFF_CREATED', 'success',
-        ${JSON.stringify({ staffId: staff.id, name, role })}::jsonb, now())
+        ${JSON.stringify({ staffId: staff.id, name, role, branchId: branchId || null })}::jsonb, now())
     `;
 
-    return { staff: { id: staff.id, name: staff.name, email: staff.email, role: staff.role } };
+    return { staff: { id: staff.id, name: staff.name, email: staff.email, role: staff.role, branchId: staff.branchId } };
+  });
+
+  // ---- CHANGE CASHIER BRANCH (Owner only, one edit only) ----
+  // Eric's rule: the cashier's branch assignment can be changed exactly once
+  // by the merchant owner. A second attempt returns 403 with a message
+  // instructing the owner to contact Valee support. Prior edits are counted
+  // via audit_log (action_type = STAFF_BRANCH_CHANGED).
+  app.patch('/api/merchant/staff/:id/branch', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId: actorId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const { branchId } = (request.body || {}) as { branchId?: string };
+
+    if (!branchId) return reply.status(400).send({ error: 'branchId is required' });
+
+    const target = await prisma.staff.findFirst({ where: { id, tenantId } });
+    if (!target) return reply.status(404).send({ error: 'Staff member not found' });
+
+    const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
+    if (!branch) return reply.status(400).send({ error: 'branchId does not belong to this tenant' });
+
+    if (target.branchId === branchId) {
+      return reply.status(400).send({ error: 'El cajero ya esta asignado a esa sucursal.' });
+    }
+
+    const priorChanges = await prisma.auditLog.count({
+      where: {
+        tenantId,
+        actionType: 'STAFF_BRANCH_CHANGED',
+        metadata: { path: ['staffId'], equals: id },
+      },
+    });
+    if (priorChanges >= 1) {
+      return reply.status(403).send({
+        error: 'La sucursal del cajero ya fue cambiada una vez. Para otro cambio, comunicate con soporte@valee.app.',
+        changeCount: priorChanges,
+      });
+    }
+
+    const fromBranchId = target.branchId;
+    const updated = await prisma.staff.update({
+      where: { id },
+      data: { branchId },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_BRANCH_CHANGED', 'success',
+        ${JSON.stringify({ staffId: id, name: target.name, fromBranchId, toBranchId: branchId })}::jsonb, now())
+    `;
+
+    return { staff: { id: updated.id, name: updated.name, branchId: updated.branchId } };
   });
 
   // ---- LIST STAFF (Owner only) ----
@@ -1079,7 +1148,26 @@ export default async function merchantRoutes(app: FastifyInstance) {
         qrSlug: true, qrCodeUrl: true, qrGeneratedAt: true,
       },
     });
-    return { staff: staffList };
+
+    // For each cashier, report whether a branch change has already been
+    // spent. The frontend uses this to hide the "Cambiar sucursal" button
+    // after the one allowed edit, matching Eric's rule.
+    const changeRows = await prisma.$queryRaw<Array<{ staff_id: string; n: bigint }>>`
+      SELECT (metadata->>'staffId') AS staff_id, COUNT(*)::bigint AS n
+      FROM audit_log
+      WHERE tenant_id = ${tenantId}::uuid
+        AND action_type = 'STAFF_BRANCH_CHANGED'
+      GROUP BY metadata->>'staffId'
+    `;
+    const changeCountBy = Object.fromEntries(changeRows.map(r => [r.staff_id, Number(r.n)]));
+
+    return {
+      staff: staffList.map(s => ({
+        ...s,
+        branchChangeCount: changeCountBy[s.id] || 0,
+        branchLocked: (changeCountBy[s.id] || 0) >= 1,
+      })),
+    };
   });
 
   // ---- GENERATE STAFF QR (Owner only) ----
