@@ -409,6 +409,32 @@ export default async function consumerRoutes(app: FastifyInstance) {
       : [];
     const productByTokenId = new Map(tokens.map(t => [t.id, t.product]));
 
+    // Build a lookup so the per-row status we send to the client reflects
+    // the reconciled state, not the append-only raw ledger status. An
+    // INVOICE_CLAIMED row with status='provisional' whose linked invoice
+    // has already been matched against the CSV should display as
+    // 'confirmed' to the consumer — otherwise the UI shows a yellow
+    // 'provisional' chip on a transaction whose points are already
+    // spendable (the bug Genesis reported: merchant view said Canjeada,
+    // consumer history still said provisional for the same event).
+    const pendingInvoiceNumbers = new Set<string>();
+    for (const e of entries) {
+      if (e.eventType !== 'INVOICE_CLAIMED' || e.status !== 'provisional') continue;
+      const ref = e.referenceId || '';
+      if (ref.startsWith('PENDING-')) pendingInvoiceNumbers.add(ref.slice('PENDING-'.length));
+    }
+    const claimedInvoices = pendingInvoiceNumbers.size > 0
+      ? await prisma.invoice.findMany({
+          where: {
+            tenantId,
+            invoiceNumber: { in: Array.from(pendingInvoiceNumbers) },
+            status: 'claimed',
+          },
+          select: { invoiceNumber: true },
+        })
+      : [];
+    const claimedInvoiceNumbers = new Set(claimedInvoices.map(i => i.invoiceNumber));
+
     return {
       entries: entries
         // Collapse PENDING/CONFIRMED/EXPIRED into a single row per token
@@ -457,12 +483,24 @@ export default async function consumerRoutes(app: FastifyInstance) {
             ? 'WELCOME_BONUS'
             : e.eventType;
 
+        // Effective status: if this is a provisional INVOICE_CLAIMED
+        // whose invoice has been reconciled via CSV (invoice.status =
+        // 'claimed'), report it as 'confirmed' to the client. Keeps the
+        // transaction history aligned with the balance readout.
+        const ref = e.referenceId || '';
+        const isReconciled =
+          e.eventType === 'INVOICE_CLAIMED'
+          && e.status === 'provisional'
+          && ref.startsWith('PENDING-')
+          && claimedInvoiceNumbers.has(ref.slice('PENDING-'.length));
+        const effectiveStatus = isReconciled ? 'confirmed' : e.status;
+
         return {
           id: e.id,
           eventType: effectiveEventType,
           entryType: e.entryType,
           amount: e.amount.toString(),
-          status: e.status,
+          status: effectiveStatus,
           referenceId: e.referenceId,
           createdAt: e.createdAt,
           merchantName: tenant?.name || null,
