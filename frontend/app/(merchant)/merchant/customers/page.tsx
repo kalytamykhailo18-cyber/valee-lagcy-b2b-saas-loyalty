@@ -351,7 +351,13 @@ export default function CustomersPage() {
                                 ? `${inv.currencySymbol || '$'}${formatCash(inv.amountInReference)}`
                                 : `Bs ${formatCash(inv.amount)}`}
                             </p>
-                            <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{inv.status}</span>
+                            <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{
+                              inv.status === 'available' ? 'No reclamada'
+                              : inv.status === 'claimed' ? 'Canjeada'
+                              : inv.status === 'pending_validation' ? 'En validacion'
+                              : inv.status === 'rejected' ? 'Rechazada'
+                              : inv.status
+                            }</span>
                           </div>
                         </div>
                       ))}

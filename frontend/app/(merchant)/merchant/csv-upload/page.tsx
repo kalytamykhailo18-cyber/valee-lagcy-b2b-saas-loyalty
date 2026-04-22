@@ -29,7 +29,10 @@ interface Invoice {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-  available: 'Disponible',
+  // 'Disponible' was confusing the merchant — read as 'product in stock'.
+  // 'No reclamada' is explicit: the sale is registered but no customer has
+  // submitted the photo to claim the points yet.
+  available: 'No reclamada',
   claimed: 'Canjeada',
   pending_validation: 'En validacion',
   rejected: 'Rechazada',
