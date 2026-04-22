@@ -96,7 +96,14 @@ export async function initiateRedemption(params: {
   if (!holdingAccount) throw new Error('redemption_holding account not found');
 
   const pointsAmount = pointsToDeduct.toFixed(8);
-  const referenceId = `REDEEM-${uuidv4()}`;
+  // The PENDING ledger ref and the RedemptionToken id must share a UUID
+  // so the downstream collapse/history logic in consumer.ts and
+  // merchant.ts can bridge REDEEM-<uuid>, CONFIRMED-<uuid> and
+  // EXPIRED-<uuid> to the same redemption. Previously we generated two
+  // independent uuids here and the two halves of a single canje could
+  // not be grouped (Genesis QA items 5/8).
+  const tokenId = uuidv4();
+  const referenceId = `REDEEM-${tokenId}`;
 
   // Product info stamped into ledger metadata. Historically we relied on the
   // RedemptionToken row for lookups, but those get purged once expired/used,
@@ -148,7 +155,6 @@ export async function initiateRedemption(params: {
   const ttlMinutes = parseInt(process.env.REDEMPTION_TOKEN_TTL_MINUTES || '15');
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlMinutes * 60 * 1000);
-  const tokenId = uuidv4();
 
   const payload: RedemptionTokenPayload = {
     tokenId,

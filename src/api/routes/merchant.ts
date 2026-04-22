@@ -2115,16 +2115,68 @@ export default async function merchantRoutes(app: FastifyInstance) {
     // (it still holds the consumer account so phone/name render correctly)
     // but relabel it as REDEMPTION_CONFIRMED when a CONFIRMED exists in this
     // result window for the same token. Hide the system-side CONFIRMED row.
+    // Build a map from ledger entry reference -> tokenId so the collapse
+    // can group both halves of a redemption (PENDING leg + CONFIRMED /
+    // EXPIRED leg) under a single key.
+    //
+    // Two sources of tokenId:
+    //   1. Refs that directly encode the uuid (CONFIRMED-<uuid>,
+    //      EXPIRED-<uuid>, and REDEEM-<uuid> for new redemptions where
+    //      redemption.ts now reuses the token uuid for the ledger ref).
+    //   2. Old redemptions where REDEEM-<throwaway> used a different uuid
+    //      than the token. Those rows still link to the correct token via
+    //      redemption_tokens.ledgerPendingEntryId. Bridging through that
+    //      relation keeps historical data groupable (Genesis QA item 5/8).
     const tokenIdByRef = new Map<string, string>();
     const confirmedTokenIds = new Set<string>();
     const expiredTokenIds = new Set<string>();
+    const pendingLedgerIds: string[] = [];
     for (const e of entries) {
       const ref = String(e.reference_id || '');
       const m = ref.match(/^(REDEEM|CONFIRMED|EXPIRED)-([0-9a-f-]{36})$/i);
-      if (!m) continue;
-      tokenIdByRef.set(ref, m[2]);
-      if (m[1].toUpperCase() === 'CONFIRMED') confirmedTokenIds.add(m[2]);
-      if (m[1].toUpperCase() === 'EXPIRED')   expiredTokenIds.add(m[2]);
+      if (m) {
+        tokenIdByRef.set(ref, m[2]);
+        if (m[1].toUpperCase() === 'CONFIRMED') confirmedTokenIds.add(m[2]);
+        if (m[1].toUpperCase() === 'EXPIRED')   expiredTokenIds.add(m[2]);
+        if (m[1].toUpperCase() === 'REDEEM')    pendingLedgerIds.push(e.id);
+      }
+    }
+    // Bridge old REDEEM-<throwaway> refs to their token via the
+    // ledgerPendingEntryId relation, and pull token.status for all tokens.
+    if (pendingLedgerIds.length > 0) {
+      const bridges = await prisma.redemptionToken.findMany({
+        where: { ledgerPendingEntryId: { in: pendingLedgerIds } },
+        select: { id: true, status: true, ledgerPendingEntryId: true },
+      });
+      const pendingEntryIdToToken = new Map<string, { id: string; status: string }>();
+      for (const b of bridges) {
+        pendingEntryIdToToken.set(b.ledgerPendingEntryId, { id: b.id, status: b.status });
+        if (b.status === 'used')    confirmedTokenIds.add(b.id);
+        if (b.status === 'expired') expiredTokenIds.add(b.id);
+      }
+      // Now rewrite the tokenIdByRef for PENDING entries whose ref UUID
+      // doesn't match the token uuid — bridge it back through the pending
+      // entry id relation.
+      for (const e of entries) {
+        const ref = String(e.reference_id || '');
+        const m = ref.match(/^REDEEM-[0-9a-f-]{36}$/i);
+        if (!m) continue;
+        const token = pendingEntryIdToToken.get(e.id);
+        if (token) tokenIdByRef.set(ref, token.id);
+      }
+    }
+    // Finally pull status for any tokenIds we got purely through ref parsing
+    // (e.g. CONFIRMED-<uuid> on page 1 without the PENDING leg present).
+    const collapseTokenIds = Array.from(new Set(tokenIdByRef.values()));
+    if (collapseTokenIds.length > 0) {
+      const statusRows = await prisma.redemptionToken.findMany({
+        where: { id: { in: collapseTokenIds } },
+        select: { id: true, status: true },
+      });
+      for (const r of statusRows) {
+        if (r.status === 'used')    confirmedTokenIds.add(r.id);
+        if (r.status === 'expired') expiredTokenIds.add(r.id);
+      }
     }
 
     return {
