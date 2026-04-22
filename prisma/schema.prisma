@@ -517,19 +517,22 @@ model RedemptionToken {
 // ============================================================
 
 model Product {
-  id             String    @id @default(uuid()) @db.Uuid
-  tenantId       String    @map("tenant_id") @db.Uuid
-  name           String    @db.VarChar(255)
-  description    String?
-  photoUrl       String?   @map("photo_url")
-  redemptionCost Decimal   @map("redemption_cost") @db.Decimal(18, 8)
-  cashPrice      Decimal?  @map("cash_price") @db.Decimal(18, 2)
-  assetTypeId    String    @map("asset_type_id") @db.Uuid
-  stock          Int       @default(0)
-  minLevel       Int       @default(1) @map("min_level")
-  active         Boolean   @default(true)
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt      DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  id                  String    @id @default(uuid()) @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  name                String    @db.VarChar(255)
+  description         String?
+  photoUrl            String?   @map("photo_url")
+  redemptionCost      Decimal   @map("redemption_cost") @db.Decimal(18, 8)
+  cashPrice           Decimal?  @map("cash_price") @db.Decimal(18, 2)
+  assetTypeId         String    @map("asset_type_id") @db.Uuid
+  stock               Int       @default(0)
+  minLevel            Int       @default(1) @map("min_level")
+  active              Boolean   @default(true)
+  archivedAt          DateTime? @map("archived_at") @db.Timestamptz
+  identityEditCount   Int       @default(0) @map("identity_edit_count")
+  stockAutoDisabled   Boolean   @default(false) @map("stock_auto_disabled")
+  createdAt           DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   tenant           Tenant            @relation(fields: [tenantId], references: [id])
   assetType        AssetType         @relation(fields: [assetTypeId], references: [id])
@@ -537,6 +540,7 @@ model Product {
 
   @@index([tenantId, active])
   @@index([tenantId, active, stock])
+  @@index([tenantId, archivedAt])
   @@map("products")
 }
 

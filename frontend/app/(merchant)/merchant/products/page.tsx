@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { MdCardGiftcard } from 'react-icons/md'
+import { MdCardGiftcard, MdArchive, MdUnarchive } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints, formatCash } from '@/lib/format'
 
+const MAX_IDENTITY_EDITS = 2
+
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
+  const [archivedProducts, setArchivedProducts] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
@@ -17,6 +20,8 @@ export default function ProductManagement() {
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
   const [createMessage, setCreateMessage] = useState('')
+  const [toggleError, setToggleError] = useState<{ id: string; msg: string } | null>(null)
+  const [showArchived, setShowArchived] = useState(false)
 
   async function handleImageUpload(file: File, target: 'create' | 'edit') {
     const setUploadState = target === 'create' ? setUploading : setEditUploading
@@ -53,8 +58,12 @@ export default function ProductManagement() {
 
   async function loadProducts() {
     try {
-      const data = await api.getProducts()
-      setProducts(data.products)
+      const [active, archived] = await Promise.all([
+        api.getProducts(),
+        api.getProducts({ archived: true }).catch(() => ({ products: [] })),
+      ])
+      setProducts(active.products)
+      setArchivedProducts((archived as any).products || [])
     } catch {}
   }
 
@@ -97,7 +106,23 @@ export default function ProductManagement() {
   }
 
   async function handleToggle(id: string) {
-    try { await api.toggleProduct(id); loadProducts() } catch {}
+    setToggleError(null)
+    try { await api.toggleProduct(id); await loadProducts() }
+    catch (e: any) {
+      setToggleError({ id, msg: e?.error || 'No se pudo cambiar el estado.' })
+      setTimeout(() => setToggleError(null), 4000)
+    }
+  }
+
+  async function handleArchive(p: any) {
+    if (!confirm(`Archivar "${p.name}"? Dejara de verse en el catalogo. Podes restaurarla luego sin perder la data.`)) return
+    try { await api.archiveProduct(p.id); await loadProducts() }
+    catch (e: any) { alert(e?.error || 'No se pudo archivar.') }
+  }
+
+  async function handleUnarchive(p: any) {
+    try { await api.unarchiveProduct(p.id); await loadProducts() }
+    catch (e: any) { alert(e?.error || 'No se pudo restaurar.') }
   }
 
   function startEdit(p: any) {
@@ -114,6 +139,7 @@ export default function ProductManagement() {
 
   async function handleSaveEdit(id: string) {
     setLoading(true)
+    setCreateMessage('')
     try {
       await api.updateProduct(id, {
         name: editForm.name,
@@ -125,7 +151,13 @@ export default function ProductManagement() {
       })
       setEditingId(null)
       loadProducts()
-    } catch {}
+    } catch (e: any) {
+      // Edit-cap or stock-guard rejections must bubble to the UI so
+      // the owner understands why the save didn't stick (silent catch
+      // was masking these during Genesis QA).
+      const msg = e?.error || 'No se pudo guardar.'
+      setCreateMessage(`Error: ${msg}`)
+    }
     setLoading(false)
   }
 
@@ -351,12 +383,11 @@ export default function ProductManagement() {
                       ) : (
                         <MdCardGiftcard className="w-12 h-12 text-slate-400" />
                       )}
-                      <button
-                        onClick={() => handleToggle(p.id)}
-                        className={`absolute top-3 right-3 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-sm shadow-sm ${p.active ? 'bg-green-100/95 text-green-700' : 'bg-red-100/95 text-red-700'}`}
-                      >
-                        {p.active ? 'Activo' : 'Inactivo'}
-                      </button>
+                      {p.identityEditCount >= MAX_IDENTITY_EDITS && (
+                        <span className="absolute top-3 left-3 px-2 py-1 rounded-full text-[10px] font-semibold bg-slate-800/80 text-white backdrop-blur-sm">
+                          Ediciones agotadas
+                        </span>
+                      )}
                     </div>
 
                     {/* Product info */}
@@ -384,20 +415,101 @@ export default function ProductManagement() {
                       {p.minLevel > 1 && (
                         <p className="text-xs text-indigo-600 mt-1">Requiere nivel {p.minLevel}+</p>
                       )}
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Ediciones usadas: {p.identityEditCount || 0}/{MAX_IDENTITY_EDITS}
+                      </p>
                       {p.stock === 0 && p.active && (
                         <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
                       )}
+                      {p.stockAutoDisabled && (
+                        <p className="text-xs text-amber-600 mt-1">Apagada por falta de stock. Se reactiva al reponer.</p>
+                      )}
+
+                      {/* Explicit toggle button — replaces the old pill. */}
                       <button
-                        onClick={() => startEdit(p)}
-                        className="aa-btn w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium"
+                        onClick={() => handleToggle(p.id)}
+                        disabled={!p.active && p.stock <= 0}
+                        className={`w-full mt-3 py-2.5 rounded-lg text-sm font-semibold transition ${
+                          p.active
+                            ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200'
+                            : p.stock <= 0
+                              ? 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                        }`}
+                        title={!p.active && p.stock <= 0 ? 'Agrega stock para activar' : undefined}
                       >
-                        <span className="relative z-10">Editar</span>
+                        {p.active ? 'Activa — Desactivar' : (p.stock <= 0 ? 'Sin stock' : 'Inactiva — Activar')}
                       </button>
+                      {toggleError && toggleError.id === p.id && (
+                        <p className="text-xs text-rose-600 mt-1.5">{toggleError.msg}</p>
+                      )}
+
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => startEdit(p)}
+                          disabled={p.identityEditCount >= MAX_IDENTITY_EDITS}
+                          className="flex-1 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed"
+                          title={p.identityEditCount >= MAX_IDENTITY_EDITS ? 'Archivala y crea una nueva' : undefined}
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => handleArchive(p)}
+                          className="flex-1 py-2 text-xs text-slate-600 hover:bg-slate-100 rounded-lg font-medium inline-flex items-center justify-center gap-1"
+                        >
+                          <MdArchive className="w-4 h-4" />
+                          Archivar
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Archived bin */}
+        {archivedProducts.length > 0 && (
+          <div className="mt-10">
+            <button
+              onClick={() => setShowArchived(v => !v)}
+              className="text-sm text-slate-600 hover:text-slate-800 font-semibold inline-flex items-center gap-2"
+            >
+              <MdArchive className="w-4 h-4" />
+              Archivadas ({archivedProducts.length}) {showArchived ? '▾' : '▸'}
+            </button>
+            {showArchived && (
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {archivedProducts.map(p => (
+                  <div key={p.id} className="bg-white rounded-2xl border border-slate-200 overflow-hidden opacity-70">
+                    <div className="relative bg-slate-100 aspect-square flex items-center justify-center">
+                      {p.photoUrl ? (
+                        <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover grayscale" />
+                      ) : (
+                        <MdCardGiftcard className="w-12 h-12 text-slate-400" />
+                      )}
+                      <span className="absolute top-3 right-3 px-2 py-1 rounded-full text-[10px] font-semibold bg-slate-800/80 text-white backdrop-blur-sm">
+                        Archivada
+                      </span>
+                    </div>
+                    <div className="p-4">
+                      <p className="font-semibold text-slate-700 truncate">{p.name}</p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        Ediciones: {p.identityEditCount || 0}/{MAX_IDENTITY_EDITS}
+                      </p>
+                      <button
+                        onClick={() => handleUnarchive(p)}
+                        className="w-full mt-3 py-2 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-medium inline-flex items-center justify-center gap-1"
+                      >
+                        <MdUnarchive className="w-4 h-4" />
+                        Restaurar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

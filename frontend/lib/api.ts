@@ -239,13 +239,18 @@ export const api = {
     if (params.offset != null) qs.set('offset', String(params.offset))
     return request(`/api/merchant/invoices${qs.toString() ? `?${qs}` : ''}`)
   },
-  getProducts: () => request('/api/merchant/products'),
+  getProducts: (opts?: { archived?: boolean }) =>
+    request(`/api/merchant/products${opts?.archived ? '?archived=true' : ''}`),
   createProduct: (data: any) =>
     request('/api/merchant/products', { method: 'POST', body: JSON.stringify(data) }),
   updateProduct: (id: string, data: any) =>
     request(`/api/merchant/products/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   toggleProduct: (id: string) =>
     request(`/api/merchant/products/${id}/toggle`, { method: 'PATCH' }),
+  archiveProduct: (id: string) =>
+    request(`/api/merchant/products/${id}/archive`, { method: 'PATCH' }),
+  unarchiveProduct: (id: string) =>
+    request(`/api/merchant/products/${id}/unarchive`, { method: 'PATCH' }),
   scanRedemption: (token: string) =>
     request('/api/merchant/scan-redemption', { method: 'POST', body: JSON.stringify({ token }) }),
   merchantSignup: (data: {

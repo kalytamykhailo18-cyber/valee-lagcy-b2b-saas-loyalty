@@ -675,7 +675,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
     const tenantsWithProducts = await prisma.tenant.findMany({
       where: {
         status: 'active',
-        products: { some: { active: true, stock: { gt: 0 } } },
+        products: { some: { active: true, stock: { gt: 0 }, archivedAt: null } },
       },
     });
 
@@ -977,7 +977,7 @@ export default async function consumerRoutes(app: FastifyInstance) {
     const account = await prisma.account.findUnique({ where: { id: accountId } });
     const consumerLevel = account?.level || 1;
 
-    const where = { tenantId, active: true, stock: { gt: 0 } as any, minLevel: { lte: consumerLevel } };
+    const where = { tenantId, active: true, archivedAt: null, stock: { gt: 0 } as any, minLevel: { lte: consumerLevel } };
 
     // Paginated product list for infinite scroll
     const products = await prisma.product.findMany({
