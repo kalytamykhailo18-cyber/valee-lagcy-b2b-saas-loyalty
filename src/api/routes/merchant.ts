@@ -393,10 +393,10 @@ export default async function merchantRoutes(app: FastifyInstance) {
       if (cached) return cached;
     }
 
-    // Plan limit check
-    const { enforceLimit } = await import('../../services/plan-limits.js');
-    try { await enforceLimit(tenantId, 'csv_uploads'); }
-    catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
+    // CSV uploads are intentionally UNCAPPED. Genesis's QA: merchants
+    // need to be able to re-upload bulk invoice batches freely while
+    // onboarding or backfilling. We still surface the per-month counter
+    // in the settings UI (getUsage runs), but we never block on it.
 
     // If async=true and Redis is configured, queue the job
     if (useAsync && process.env.REDIS_URL) {

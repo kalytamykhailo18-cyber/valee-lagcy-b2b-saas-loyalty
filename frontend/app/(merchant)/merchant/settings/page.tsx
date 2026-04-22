@@ -435,29 +435,31 @@ export default function SettingsPage() {
                 </div>
                 <div className="space-y-4">
                   {Object.entries(planUsage.usage).map(([key, u]) => {
-                    // CSV uploads render as a plain counter, no plan cap
-                    // displayed — Genesis QA item 8: showing '23 / 30'
-                    // made the plan feel artificially restrictive when
-                    // the backend doesn't even hard-block at 30.
-                    const isCounterOnly = key === 'csv_uploads';
+                    // CSV uploads: show the counter and progress bar but
+                    // hide the "/limit" suffix and never switch to red —
+                    // Genesis asked for the bar to stay visible as a
+                    // month-to-month activity indicator while the backend
+                    // runs without any hard cap on uploads.
+                    const hideLimit = key === 'csv_uploads';
+                    const barColor = hideLimit
+                      ? 'bg-emerald-500'
+                      : u.percent >= 90 ? 'bg-red-500'
+                      : u.percent >= 70 ? 'bg-amber-500'
+                      : 'bg-emerald-500';
                     return (
                       <div key={key}>
                         <div className="flex justify-between text-sm text-slate-600 mb-1.5">
                           <span>{ACTION_LABELS[key] || key}</span>
                           <span className="font-semibold text-slate-800">
-                            {isCounterOnly ? u.current : `${u.current} / ${u.limit}`}
+                            {hideLimit ? u.current : `${u.current} / ${u.limit}`}
                           </span>
                         </div>
-                        {!isCounterOnly && (
-                          <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${
-                                u.percent >= 90 ? 'bg-red-500' : u.percent >= 70 ? 'bg-amber-500' : 'bg-emerald-500'
-                              }`}
-                              style={{ width: `${Math.min(100, u.percent)}%` }}
-                            />
-                          </div>
-                        )}
+                        <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${barColor}`}
+                            style={{ width: `${Math.min(100, u.percent)}%` }}
+                          />
+                        </div>
                       </div>
                     );
                   })}
