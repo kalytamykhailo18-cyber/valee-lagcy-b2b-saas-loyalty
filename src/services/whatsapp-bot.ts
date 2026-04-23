@@ -34,6 +34,21 @@ export async function detectConversationState(
   });
 
   if (claimedCount === 0) {
+    // Eric 2026-04-23 "Bot de whatsaap" Notion: a user scanning a
+    // referral QR for the first time was getting the "te registraste
+    // hace un tiempo" (registered_never_scanned) greeting instead of
+    // the warm first-time welcome. Trace: webhook.ts creates the
+    // account + grants the welcome bonus BEFORE handleIncomingMessage
+    // runs, so by the time detectConversationState peeks, the account
+    // exists and has zero INVOICE_CLAIMED rows (welcome bonus is
+    // ADJUSTMENT_MANUAL). Treat an account created within the last
+    // two hours with no claims as "effectively first_time" — they're
+    // brand new on this merchant and haven't had any other session.
+    const FIRST_TIME_WINDOW_MS = 2 * 60 * 60 * 1000;
+    const justArrived = Date.now() - account.createdAt.getTime() < FIRST_TIME_WINDOW_MS;
+    if (justArrived) {
+      return { state: 'first_time', accountId: account.id, balance: '0' };
+    }
     return { state: 'registered_never_scanned', accountId: account.id, balance: '0' };
   }
 
@@ -392,18 +407,20 @@ export async function handleIncomingMessage(params: {
     branchName = branch?.name || null;
   }
 
-  // If account was just created (first contact via QR), always send welcome greeting
-  if (created || state === 'first_time') {
-    const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
-    return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName);
-  }
-
   // Prefix line surfaced whenever the caller detected a re-used referral
-  // code. Applies to both greeting responses and support-intent responses
-  // so the user always gets the feedback on a rescan.
+  // code. Applies to greeting responses, support-intent responses AND the
+  // first_time welcome path so the user always gets the feedback on a
+  // rescan, even when state detection still reads first_time because the
+  // account was just created.
   const referralPrefix: string[] = referralAlreadyUsed
     ? ['Este codigo de referido ya lo usaste — solo funciona una vez por persona. Sigue enviando tus facturas para ganar puntos normalmente.']
     : [];
+
+  // If account was just created (first contact via QR), always send welcome greeting
+  if (created || state === 'first_time') {
+    const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
+    return [...referralPrefix, ...getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName)];
+  }
 
   // If it's the first message or a greeting, send state-based greeting
   if (messageType === 'text' && messageText) {
