@@ -6,8 +6,6 @@ import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints, formatCash } from '@/lib/format'
 
-const MAX_IDENTITY_EDITS = 2
-
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
   const [archivedProducts, setArchivedProducts] = useState<any[]>([])
@@ -383,11 +381,6 @@ export default function ProductManagement() {
                       ) : (
                         <MdCardGiftcard className="w-12 h-12 text-slate-400" />
                       )}
-                      {p.identityEditCount >= MAX_IDENTITY_EDITS && (
-                        <span className="absolute top-3 left-3 px-2 py-1 rounded-full text-[10px] font-semibold bg-slate-800/80 text-white backdrop-blur-sm">
-                          Ediciones agotadas
-                        </span>
-                      )}
                     </div>
 
                     {/* Product info */}
@@ -415,9 +408,6 @@ export default function ProductManagement() {
                       {p.minLevel > 1 && (
                         <p className="text-xs text-indigo-600 mt-1">Requiere nivel {p.minLevel}+</p>
                       )}
-                      <p className="text-[11px] text-slate-400 mt-1">
-                        Ediciones usadas: {p.identityEditCount || 0}/{MAX_IDENTITY_EDITS}
-                      </p>
                       {p.stock === 0 && p.active && (
                         <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
                       )}
@@ -447,9 +437,7 @@ export default function ProductManagement() {
                       <div className="flex gap-2 mt-2">
                         <button
                           onClick={() => startEdit(p)}
-                          disabled={p.identityEditCount >= MAX_IDENTITY_EDITS}
-                          className="flex-1 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium disabled:text-slate-400 disabled:hover:bg-transparent disabled:cursor-not-allowed"
-                          title={p.identityEditCount >= MAX_IDENTITY_EDITS ? 'Archivala y crea una nueva' : undefined}
+                          className="flex-1 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium"
                         >
                           Editar
                         </button>
@@ -495,9 +483,6 @@ export default function ProductManagement() {
                     </div>
                     <div className="p-4">
                       <p className="font-semibold text-slate-700 truncate">{p.name}</p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Ediciones: {p.identityEditCount || 0}/{MAX_IDENTITY_EDITS}
-                      </p>
                       <button
                         onClick={() => handleUnarchive(p)}
                         className="w-full mt-3 py-2 text-xs bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg font-medium inline-flex items-center justify-center gap-1"

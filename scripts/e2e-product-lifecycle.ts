@@ -1,17 +1,18 @@
 /**
- * E2E: product lifecycle — 2-edit cap, stock-coupled toggle, archive.
+ * E2E: product lifecycle — unlimited identity edits, stock-coupled toggle, archive.
  *
- * Eric's rules from the 2026-04-22 group call:
- *   1. A product card is "identity-edited" at most 2 times. After
- *      that, editing is blocked and the merchant must archive it and
- *      create a new one.  Stock and the active toggle do NOT count.
- *   2. Stock=0 auto-disables the card. Re-enabling via the toggle
- *      while stock=0 is rejected ("no tienes stock"). When stock
- *      returns, a card that was auto-disabled flips back on; a card
- *      the owner explicitly deactivated stays off.
- *   3. Instead of deleting, merchants archive. Archived cards hide
- *      from the consumer catalog but keep redemption_tokens FK intact.
- *      Unarchive does NOT consume an edit slot.
+ * Eric reversed the 2-edit cap on 2026-04-23: "no podemos limitar a los
+ * comercios la edicion de sus productos... el comercio deberia poder
+ * cambiar todo lo que desee, sobre todo los puntos y el stock". The
+ * identityEditCount counter is still maintained (audit), but PUTs past
+ * the old threshold now succeed. The rest of the lifecycle rules still
+ * hold:
+ *   1. Stock=0 auto-disables. Re-enabling via toggle while stock=0 is
+ *      rejected. When stock returns, a card that was auto-disabled flips
+ *      back on; a card the owner explicitly deactivated stays off.
+ *   2. Archive hides from consumer catalog but keeps redemption_tokens
+ *      FK intact. Editing an archived card is rejected. Unarchive does
+ *      NOT consume an edit slot.
  */
 
 import dotenv from 'dotenv';
@@ -103,22 +104,28 @@ async function main() {
     edit2.status === 200 && edit2.body.product.identityEditCount === 2,
     `count=${edit2.body?.product?.identityEditCount}`);
 
-  // --- Identity edit #3 (name) — rejected ---
+  // --- Identity edit #3 (name) — now ALLOWED (Eric 2026-04-23) ---
   const edit3 = await http(`/api/merchant/products/${pid}`, token, {
     method: 'PUT', body: JSON.stringify({ name: 'Water' }),
   });
-  await assert('third identity edit rejected',
-    edit3.status === 403,
-    `status=${edit3.status}`);
-  await assert('rejection message mentions archivar',
-    typeof edit3.body?.error === 'string' && edit3.body.error.toLowerCase().includes('archi'),
-    `error=${edit3.body?.error}`);
+  await assert('third identity edit now allowed',
+    edit3.status === 200 && edit3.body.product.identityEditCount === 3
+      && edit3.body.product.name === 'Water',
+    `status=${edit3.status} count=${edit3.body?.product?.identityEditCount} name=${edit3.body?.product?.name}`);
 
-  // --- Stock change still allowed after cap ---
+  // --- Identity edit #4 (redemptionCost) — also allowed, no cap ---
+  const edit4 = await http(`/api/merchant/products/${pid}`, token, {
+    method: 'PUT', body: JSON.stringify({ redemptionCost: '200' }),
+  });
+  await assert('fourth identity edit still allowed (no cap)',
+    edit4.status === 200 && edit4.body.product.identityEditCount === 4,
+    `status=${edit4.status} count=${edit4.body?.product?.identityEditCount}`);
+
+  // --- Stock change is independent of identity edits ---
   const postCapStock = await http(`/api/merchant/products/${pid}`, token, {
     method: 'PUT', body: JSON.stringify({ stock: 5 }),
   });
-  await assert('stock change after edit cap still allowed',
+  await assert('stock change after many edits still allowed',
     postCapStock.status === 200 && postCapStock.body.product.stock === 5,
     `status=${postCapStock.status}`);
 

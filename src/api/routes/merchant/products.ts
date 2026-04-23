@@ -2,12 +2,13 @@ import type { FastifyInstance } from 'fastify';
 import prisma from '../../../db/client.js';
 import { requireStaffAuth, requireOwnerRole } from '../../middleware/auth.js';
 
-// Fields whose change counts against the 2-edit lifetime cap. Stock,
-// minLevel and the active toggle are operational, not identity, so
-// they're intentionally excluded (Eric's call — the card's historical
-// metric should remain tied to a fixed pizza/water/whatever identity).
+// Identity-fields whose change bumps an audit counter. Eric removed the
+// 2-edit cap on 2026-04-23 ("no podemos limitar a los comercios la
+// edicion de sus productos") — merchants need to adjust points, promos
+// and reshuffle stock freely. We keep incrementing identityEditCount so
+// the audit log still shows how many times a card's identity shifted,
+// but we no longer reject edits past a threshold.
 const IDENTITY_FIELDS = ['name', 'description', 'photoUrl', 'redemptionCost', 'cashPrice'] as const;
-const MAX_IDENTITY_EDITS = 2;
 
 export async function registerProductsRoutes(app: FastifyInstance): Promise<void> {
   // ---- CATALOG MANAGEMENT (Owner only) ----
@@ -87,14 +88,6 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
         : (product.cashPrice?.toString() ?? null),
     };
     const identityChanged = IDENTITY_FIELDS.some(f => current[f] !== incoming[f]);
-
-    if (identityChanged && product.identityEditCount >= MAX_IDENTITY_EDITS) {
-      return reply.status(403).send({
-        error: `Esta tarjeta ya alcanzo el maximo de ${MAX_IDENTITY_EDITS} ediciones. Archivala y crea una nueva para mantener la trazabilidad historica.`,
-        identityEditCount: product.identityEditCount,
-        maxEdits: MAX_IDENTITY_EDITS,
-      });
-    }
 
     const newStock = data.stock != null ? parseInt(data.stock) : product.stock;
 
