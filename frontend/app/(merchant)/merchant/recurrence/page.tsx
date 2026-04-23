@@ -213,6 +213,7 @@ export default function RecurrencePage() {
                   onChange={e => { setForm({ ...form, intervalDays: e.target.value }); if (errors.intervalDays) setErrors({ ...errors, intervalDays: '' }) }}
                   className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.intervalDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
+                <p className="text-[11px] text-slate-400 mt-1">Cada cuantos dias esperas que el cliente regrese.</p>
                 {errors.intervalDays && <p className="text-red-500 text-xs mt-1">{errors.intervalDays}</p>}
               </div>
               <div>
@@ -225,9 +226,20 @@ export default function RecurrencePage() {
                   onChange={e => { setForm({ ...form, graceDays: e.target.value }); if (errors.graceDays) setErrors({ ...errors, graceDays: '' }) }}
                   className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.graceDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
+                <p className="text-[11px] text-slate-400 mt-1">Dias extra antes de mandar el recordatorio. Se suma al intervalo.</p>
                 {errors.graceDays && <p className="text-red-500 text-xs mt-1">{errors.graceDays}</p>}
               </div>
             </div>
+            {(() => {
+              const i = parseInt(form.intervalDays)
+              const g = parseInt(form.graceDays)
+              if (!Number.isFinite(i) || !Number.isFinite(g) || i < 1 || g < 0) return null
+              return (
+                <p className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-100 rounded-md px-2 py-1.5">
+                  Se envia el mensaje cuando el cliente lleve {i + g} dias sin volver ({i} del intervalo + {g} de gracia).
+                </p>
+              )
+            })()}
             <div>
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Mensaje WhatsApp <span className="text-red-500">*</span></label>
               <textarea

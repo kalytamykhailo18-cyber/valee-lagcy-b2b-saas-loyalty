@@ -1,9 +1,33 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
+import { MdCheckCircle } from 'react-icons/md'
 import { api } from '@/lib/api'
-import { formatCash } from '@/lib/format'
+import { formatCash, formatPoints } from '@/lib/format'
+
+function decodeDualScanNonce(token: string): string | null {
+  try {
+    const decoded = JSON.parse(atob(token))
+    const nonce = decoded?.payload?.nonce
+    return typeof nonce === 'string' ? nonce : null
+  } catch {
+    return null
+  }
+}
+
+function maskPhone(p: string | null): string {
+  if (!p) return ''
+  if (p.length < 4) return p
+  return `***${p.slice(-4)}`
+}
+
+interface ConfirmedPayment {
+  valueAssigned: string
+  consumerPhone: string | null
+  consumerName: string | null
+  confirmedAt: string
+}
 
 function QRImage({ value }: { value: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
@@ -45,6 +69,8 @@ export default function DualScanPage() {
   const [secondsLeft, setSecondsLeft] = useState(0)
   const [error, setError] = useState('')
   const [multiplier, setMultiplier] = useState<MultiplierInfo | null>(null)
+  const [confirmed, setConfirmed] = useState<ConfirmedPayment | null>(null)
+  const confirmedRef = useRef(false)
 
   // Load multiplier + exchange rate so the merchant can preview how many
   // points a given Bs amount will generate, BEFORE committing the QR.
@@ -69,6 +95,39 @@ export default function DualScanPage() {
     return Math.max(1, Math.round(n * rate))
   })()
 
+  // Poll the backend so we can swap to a success animation the instant the
+  // consumer confirms — Eric flagged on 2026-04-23 that the cashier had no
+  // feedback other than the TTL ticking down. We check every 1.5s while a
+  // token is displayed, and stop the moment consumed=true comes back.
+  useEffect(() => {
+    if (!token || confirmed) return
+    const nonce = decodeDualScanNonce(token)
+    if (!nonce) return
+    confirmedRef.current = false
+    let cancelled = false
+    const tick = async () => {
+      if (cancelled || confirmedRef.current) return
+      try {
+        const res = await api.getDualScanStatus(nonce)
+        if (cancelled) return
+        if (res?.consumed) {
+          confirmedRef.current = true
+          setConfirmed({
+            valueAssigned: String(res.valueAssigned || '0'),
+            consumerPhone: res.consumerPhone || null,
+            consumerName: res.consumerName || null,
+            confirmedAt: res.confirmedAt || new Date().toISOString(),
+          })
+        }
+      } catch {}
+    }
+    const interval = setInterval(tick, 1500)
+    // Fire one immediately so a lucky race (consumer confirms right before
+    // we mount the poller) still lights up the success view.
+    tick()
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [token, confirmed])
+
   // Countdown — compute initial value synchronously so user never sees 0 on mount
   useEffect(() => {
     if (!expiresAt) {
@@ -84,8 +143,13 @@ export default function DualScanPage() {
       setSecondsLeft(left)
       if (left <= 0) {
         clearInterval(interval)
-        setToken(null)
-        setExpiresAt(null)
+        // Only clear the token if the consumer never confirmed. When a
+        // success landed we keep the view mounted so the cashier sees the
+        // green confirmation instead of getting bounced back to the form.
+        if (!confirmedRef.current) {
+          setToken(null)
+          setExpiresAt(null)
+        }
       }
     }, 1000)
     return () => clearInterval(interval)
@@ -119,6 +183,8 @@ export default function DualScanPage() {
     setExpiresAt(null)
     setAmount('')
     setError('')
+    setConfirmed(null)
+    confirmedRef.current = false
   }
 
   return (
@@ -140,7 +206,40 @@ export default function DualScanPage() {
       {/* Content */}
       <div className="px-4 sm:px-6 lg:px-8 pb-8">
         <div className="max-w-xl mx-auto">
-          {!token ? (
+          {confirmed ? (
+            <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white rounded-2xl p-8 text-center space-y-5 aa-pop shadow-xl">
+              <div className="flex justify-center">
+                <div className="w-24 h-24 rounded-full bg-white/20 flex items-center justify-center animate-qr-build">
+                  <MdCheckCircle className="w-20 h-20 text-white" />
+                </div>
+              </div>
+              <h2 className="text-3xl font-extrabold tracking-tight">Pago registrado</h2>
+              <div className="bg-white/10 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-emerald-100">Monto</span>
+                  <span className="font-bold text-lg">{currencySymbol}{formatCash(amount)}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-emerald-100">Cliente</span>
+                  <span className="font-semibold">
+                    {confirmed.consumerName || maskPhone(confirmed.consumerPhone)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-emerald-100">Puntos entregados</span>
+                  <span className="font-bold text-lg tabular-nums">
+                    +{formatPoints(confirmed.valueAssigned)} pts
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={reset}
+                className="aa-btn w-full bg-white text-emerald-700 py-3 rounded-xl font-bold text-sm hover:bg-emerald-50 transition"
+              >
+                <span className="relative z-10">Nuevo pago</span>
+              </button>
+            </div>
+          ) : !token ? (
             <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5 aa-rise" style={{ animationDelay: '80ms' }}>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto de la transaccion ({currencySymbol})</label>

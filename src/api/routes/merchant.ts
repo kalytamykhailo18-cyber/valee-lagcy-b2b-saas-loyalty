@@ -12,6 +12,7 @@ import { registerDisputesRoutes } from './merchant/disputes.js';
 import { registerManualReviewRoutes } from './merchant/manual-review.js';
 import { registerAuditRoutes } from './merchant/audit.js';
 import { registerAnalyticsRoutes } from './merchant/analytics.js';
+import { registerReferralsRoutes } from './merchant/referrals.js';
 
 /**
  * Merchant route plugin. The file used to hold every handler inline
@@ -34,4 +35,5 @@ export default async function merchantRoutes(app: FastifyInstance) {
   await registerManualReviewRoutes(app);
   await registerAuditRoutes(app);
   await registerAnalyticsRoutes(app);
+  await registerReferralsRoutes(app);
 }

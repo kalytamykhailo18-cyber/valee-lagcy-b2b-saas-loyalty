@@ -7,6 +7,7 @@ import {
   MdDashboard, MdQrCodeScanner, MdAccessTime, MdInventory2,
   MdLocalOffer, MdUploadFile, MdPeople, MdStorefront, MdAutorenew,
   MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups, MdArrowBack, MdBadge,
+  MdShare, MdKey,
 } from 'react-icons/md'
 
 interface NavItem {
@@ -29,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/merchant/branches', label: 'Sucursales', Icon: MdStorefront, ownerOnly: true },
   { href: '/merchant/staff', label: 'Cajeros y QR', Icon: MdBadge, ownerOnly: true },
   { href: '/merchant/recurrence', label: 'Recurrencia', Icon: MdAutorenew, ownerOnly: true },
+  { href: '/merchant/referrals', label: 'Referidos', Icon: MdShare, ownerOnly: true },
   { href: '/merchant/disputes', label: 'Disputas', Icon: MdFeedback, ownerOnly: true },
   { href: '/merchant/settings', label: 'Configuracion', Icon: MdSettings, ownerOnly: true },
 ]
@@ -212,6 +214,13 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
         {staffName && (
           <p className="text-xs text-slate-500 px-3 mb-2 truncate">{staffName}</p>
         )}
+        <Link
+          href="/merchant/account"
+          className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 transition-all"
+        >
+          <MdKey className="w-5 h-5" />
+          Cambiar contrasena
+        </Link>
         <button
           onClick={logout}
           className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-600 hover:bg-red-50 hover:text-red-600 transition-all"

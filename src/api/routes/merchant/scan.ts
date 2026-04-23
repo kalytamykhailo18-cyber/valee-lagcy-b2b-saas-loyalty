@@ -54,6 +54,45 @@ export async function registerScanRoutes(app: FastifyInstance): Promise<void> {
     return { success: true, token: result.token, expiresAt: result.expiresAt };
   });
 
+  // ---- DUAL-SCAN: Status poll ----
+  // The merchant UI polls this while the QR is displayed so the cashier sees a
+  // success animation the instant the customer confirms — instead of staring
+  // at the countdown and not knowing if it worked (Eric 2026-04-23). Scoped to
+  // tenant via the staff session; the nonce carries no data beyond identifying
+  // the specific token, so surfacing "consumed=true + payer phone + amount" is
+  // information the merchant already owns via the ledger.
+  app.get('/api/merchant/dual-scan/status/:nonce', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { nonce } = request.params as { nonce: string };
+    if (!/^[a-f0-9]{8,64}$/i.test(nonce)) {
+      return reply.status(400).send({ error: 'Invalid nonce' });
+    }
+    const referenceId = `DUALSCAN-${nonce}`;
+    const entry = await prisma.ledgerEntry.findFirst({
+      where: {
+        tenantId,
+        referenceId,
+        entryType: 'CREDIT',
+        eventType: 'PRESENCE_VALIDATED',
+      },
+      select: { id: true, amount: true, createdAt: true, accountId: true },
+    });
+    if (!entry) return { consumed: false };
+    const acc = entry.accountId
+      ? await prisma.account.findUnique({
+          where: { id: entry.accountId },
+          select: { phoneNumber: true, displayName: true },
+        })
+      : null;
+    return {
+      consumed: true,
+      valueAssigned: entry.amount.toString(),
+      consumerPhone: acc?.phoneNumber || null,
+      consumerName: acc?.displayName || null,
+      confirmedAt: entry.createdAt,
+    };
+  });
+
   // ---- CASHIER QR SCANNER ----
   app.post('/api/merchant/scan-redemption', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { staffId, tenantId } = request.staff!;

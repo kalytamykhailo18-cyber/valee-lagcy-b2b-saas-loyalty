@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import prisma from '../../../db/client.js';
 import { authenticateStaff, issueStaffTokens, verifyStaffToken } from '../../../services/auth.js';
+import { requireStaffAuth } from '../../middleware/auth.js';
 import { createSystemAccounts } from '../../../services/accounts.js';
 import { generateMerchantQR } from '../../../services/merchant-qr.js';
 
@@ -339,5 +340,60 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       }),
     ]);
     return { success: true };
+  });
+
+  // ---- CHANGE PASSWORD (logged-in staff, both owner and cashier) ----
+  // Genesis asked on 2026-04-23 that the cashier be able to change their own
+  // password from inside the panel instead of going through the email reset
+  // flow. Verify the current password (so a stolen session can't rotate
+  // credentials without knowing the old one), bcrypt the new one, and bump
+  // tokensInvalidatedAt so any OTHER live sessions are killed. The caller's
+  // current session keeps working because they just logged in with the old
+  // password and we reissue fresh tokens below.
+  app.post('/api/merchant/auth/change-password', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { staffId } = request.staff!;
+    const { currentPassword, newPassword } = request.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
+    if (!currentPassword || !newPassword) {
+      return reply.status(400).send({ error: 'currentPassword y newPassword son obligatorios' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 6) {
+      return reply.status(400).send({ error: 'La nueva contrasena debe tener al menos 6 caracteres' });
+    }
+    if (currentPassword === newPassword) {
+      return reply.status(400).send({ error: 'La nueva contrasena debe ser diferente a la actual' });
+    }
+
+    const staff = await prisma.staff.findUnique({ where: { id: staffId } });
+    if (!staff) return reply.status(401).send({ error: 'Sesion invalida' });
+
+    const ok = await bcrypt.compare(currentPassword, staff.passwordHash);
+    if (!ok) return reply.status(400).send({ error: 'La contrasena actual es incorrecta' });
+
+    const newHash = await bcrypt.hash(newPassword, 10);
+    await prisma.staff.update({
+      where: { id: staffId },
+      data: { passwordHash: newHash, tokensInvalidatedAt: new Date() },
+    });
+
+    // JWT iat has second precision. If we issue the caller's fresh token in
+    // the same second as the tokensInvalidatedAt bump, the auth middleware
+    // rejects it too (iat <= invalidatedAt). Sleep past the next-second
+    // boundary so the new token's iat is strictly greater than the cutoff.
+    const msToNextSecond = 1000 - (Date.now() % 1000) + 50;
+    await new Promise(r => setTimeout(r, msToNextSecond));
+
+    // Issue fresh tokens so the caller stays logged in. Any OTHER session on
+    // the same account that was issued before this moment is killed by the
+    // tokensInvalidatedAt check on its next request.
+    const tokens = issueStaffTokens({
+      staffId: staff.id,
+      tenantId: staff.tenantId,
+      role: staff.role as any,
+      type: 'staff',
+    });
+    return { success: true, ...tokens };
   });
 }

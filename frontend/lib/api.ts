@@ -282,10 +282,17 @@ export const api = {
   getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
   initiateDualScan: (amount: string, branchId?: string) =>
     request('/api/merchant/dual-scan/initiate', { method: 'POST', body: JSON.stringify({ amount, branchId }) }),
+  getDualScanStatus: (nonce: string) =>
+    request(`/api/merchant/dual-scan/status/${encodeURIComponent(nonce)}`),
   confirmDualScan: (token: string) =>
     request('/api/consumer/dual-scan/confirm', { method: 'POST', body: JSON.stringify({ token }) }),
   getPlanUsage: () => request('/api/merchant/plan-usage'),
   getMerchantSettings: () => request('/api/merchant/settings'),
+  changeStaffPassword: (currentPassword: string, newPassword: string) =>
+    request('/api/merchant/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }),
   updateMerchantSettings: (data: {
     welcomeBonusAmount?: number;
     referralBonusAmount?: number;
@@ -311,6 +318,7 @@ export const api = {
     return request(`/api/merchant/metrics${qs}`);
   },
   getProductPerformance: () => request('/api/merchant/product-performance'),
+  getReferralMetrics: () => request('/api/merchant/referrals/metrics'),
   getTransactions: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request(`/api/merchant/transactions${qs}`);

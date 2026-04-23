@@ -390,7 +390,7 @@ export default function StaffPage() {
                 />
               </div>
               <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Contrasena temporal</label>
+                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Contrasena</label>
                 <input
                   required type="text" minLength={6}
                   value={form.password}
@@ -398,6 +398,7 @@ export default function StaffPage() {
                   className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   placeholder="min. 6 caracteres"
                 />
+                <p className="text-[11px] text-slate-500 mt-1">El cajero podra cambiarla despues desde su propio panel.</p>
               </div>
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Rol</label>
