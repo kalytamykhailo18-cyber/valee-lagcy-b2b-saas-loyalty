@@ -17,6 +17,9 @@ interface Staff {
   qrSlug: string | null
   qrCodeUrl: string | null
   qrGeneratedAt: string | null
+  qrRegenCount?: number
+  qrRegenCap?: number
+  qrRegenLocked?: boolean
   createdAt: string
 }
 
@@ -77,12 +80,25 @@ export default function StaffPage() {
   useEffect(() => { load() }, [])
 
   async function handleGenerate(id: string) {
+    const target = staff.find(s => s.id === id)
+    // Regenerations (QR already exists) require a reason and are
+    // capped at 2. Initial generation (no QR yet) just goes through.
+    let reason: string | undefined
+    if (target?.qrCodeUrl) {
+      if (target.qrRegenLocked) {
+        alert('Este QR ya fue regenerado 2 veces. Para otro cambio, comunicate con soporte@valee.app.')
+        return
+      }
+      const input = prompt(`Vas a regenerar el QR de ${target.name}. Indica la razon del cambio (perdida, robo, cambio de rol, etc):`)
+      if (!input || input.trim().length < 3) return
+      reason = input.trim()
+    }
     setGenerating(id)
     try {
-      const res: any = await api.generateStaffQr(id)
+      const res: any = await api.generateStaffQr(id, reason)
       await load()
       setQrPreview({
-        name: staff.find(s => s.id === id)?.name || 'Cajero',
+        name: target?.name || 'Cajero',
         url: res.qrCodeUrl,
       })
     } catch (e: any) {
@@ -292,11 +308,17 @@ export default function StaffPage() {
                             </button>
                             <button
                               onClick={() => handleGenerate(s.id)}
-                              disabled={generating === s.id}
-                              className="inline-flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
-                              title="Regenerar (crea un nuevo QR, invalida el anterior)"
+                              disabled={generating === s.id || s.qrRegenLocked}
+                              className="inline-flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 px-3 py-2.5 rounded-xl text-sm font-semibold hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                              title={s.qrRegenLocked
+                                ? 'Ya regeneraste este QR 2 veces. Contacta soporte@valee.app.'
+                                : `Regenerar (${s.qrRegenCount || 0}/${s.qrRegenCap || 2}) — invalida el anterior e invita a un cambio de razon.`}
                             >
-                              {generating === s.id ? '...' : 'Regenerar'}
+                              {generating === s.id
+                                ? '...'
+                                : s.qrRegenLocked
+                                  ? 'Bloqueado'
+                                  : `Regenerar (${s.qrRegenCount || 0}/${s.qrRegenCap || 2})`}
                             </button>
                           </div>
                         ) : (

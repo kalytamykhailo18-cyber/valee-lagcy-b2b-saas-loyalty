@@ -342,8 +342,11 @@ export const api = {
     request(`/api/merchant/staff/${id}/deactivate`, { method: 'PATCH' }),
   changeStaffBranch: (id: string, branchId: string | null) =>
     request(`/api/merchant/staff/${id}/branch`, { method: 'PATCH', body: JSON.stringify({ branchId }) }),
-  generateStaffQr: (id: string) =>
-    request(`/api/merchant/staff/${id}/qr`, { method: 'POST' }),
+  generateStaffQr: (id: string, reason?: string) =>
+    request(`/api/merchant/staff/${id}/qr`, {
+      method: 'POST',
+      ...(reason ? { body: JSON.stringify({ reason }) } : {}),
+    }),
   getStaffPerformance: (days = 30) =>
     request(`/api/merchant/staff-performance?days=${days}`),
 

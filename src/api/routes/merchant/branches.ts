@@ -9,7 +9,39 @@ export async function registerBranchesRoutes(app: FastifyInstance): Promise<void
   app.get('/api/merchant/branches', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
     const branches = await listBranches(tenantId);
-    return { branches };
+
+    // Attach the cashiers attached to each branch so the dashboard can
+    // render the sucursal → cajeros correlation at a glance. Eric flagged
+    // on 2026-04-23 that he couldn't see the link between a sucursal and
+    // "sus cajeros". The staff.branchId column already carries this, we
+    // just need to surface it grouped by branch.
+    const cashiers = await prisma.staff.findMany({
+      where: { tenantId, role: 'cashier', active: true },
+      select: { id: true, name: true, email: true, branchId: true },
+    });
+    const cashiersByBranch = new Map<string | null, Array<{ id: string; name: string; email: string }>>();
+    for (const c of cashiers) {
+      const key = c.branchId;
+      if (!cashiersByBranch.has(key)) cashiersByBranch.set(key, []);
+      cashiersByBranch.get(key)!.push({ id: c.id, name: c.name, email: c.email });
+    }
+
+    const enriched = branches.map(b => {
+      const list = cashiersByBranch.get(b.id) || [];
+      return { ...b, cashierCount: list.length, cashiers: list };
+    });
+
+    // Also surface cashiers attached to the "sede principal" (branchId=null)
+    // so the owner can see them as a virtual grouping on the branches page.
+    const mainCashiers = cashiersByBranch.get(null) || [];
+
+    return {
+      branches: enriched,
+      mainBranch: {
+        cashierCount: mainCashiers.length,
+        cashiers: mainCashiers,
+      },
+    };
   });
 
   app.post('/api/merchant/branches', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {

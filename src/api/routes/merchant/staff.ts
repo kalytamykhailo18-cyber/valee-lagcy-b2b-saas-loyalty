@@ -140,22 +140,70 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     `;
     const changeCountBy = Object.fromEntries(changeRows.map(r => [r.staff_id, Number(r.n)]));
 
+    // QR regen count per cashier — same pattern as the branch-change
+    // count, but counting only rows flagged isRegen=true. Two regens
+    // max; the frontend uses this to disable the Regenerar button.
+    const qrRegenRows = await prisma.$queryRaw<Array<{ staff_id: string; n: bigint }>>`
+      SELECT (metadata->>'staffId') AS staff_id, COUNT(*)::bigint AS n
+      FROM audit_log
+      WHERE tenant_id = ${tenantId}::uuid
+        AND action_type = 'STAFF_QR_GENERATED'
+        AND (metadata->>'isRegen') = 'true'
+      GROUP BY metadata->>'staffId'
+    `;
+    const qrRegenCountBy = Object.fromEntries(qrRegenRows.map(r => [r.staff_id, Number(r.n)]));
+    const QR_REGEN_CAP = 2;
+
     return {
       staff: staffList.map(s => ({
         ...s,
         branchChangeCount: changeCountBy[s.id] || 0,
         branchLocked: (changeCountBy[s.id] || 0) >= 1,
+        qrRegenCount: qrRegenCountBy[s.id] || 0,
+        qrRegenCap: QR_REGEN_CAP,
+        qrRegenLocked: (qrRegenCountBy[s.id] || 0) >= QR_REGEN_CAP,
       })),
     };
   });
 
   // ---- GENERATE STAFF QR (Owner only) ----
+  // Mirrors the branch-QR regen policy: after the initial generation,
+  // each subsequent regeneration requires a reason (min 3 chars) and
+  // the owner is capped at 2 regens. After that they have to talk to
+  // Valee. Eric 2026-04-23: he flagged that the button could be
+  // clicked without limit, which looks abusable even though the
+  // underlying qr_slug is reused — we lock it down so the UX matches
+  // the rest of the QR regen surface.
   app.post('/api/merchant/staff/:id/qr', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId: actorId } = request.staff!;
     const { id } = request.params as { id: string };
+    const { reason } = (request.body || {}) as { reason?: string };
 
     const target = await prisma.staff.findFirst({ where: { id, tenantId } });
     if (!target) return reply.status(404).send({ error: 'Staff member not found' });
+
+    const isRegen = !!target.qrCodeUrl;
+    if (isRegen) {
+      if (!reason || reason.trim().length < 3) {
+        return reply.status(400).send({ error: 'Debes indicar la razon del cambio de QR.' });
+      }
+      // Count only actual regens (isRegen=true entries in the audit log).
+      const [{ n: priorRegensBig }] = await prisma.$queryRaw<Array<{ n: bigint }>>`
+        SELECT COUNT(*)::bigint AS n
+        FROM audit_log
+        WHERE tenant_id = ${tenantId}::uuid
+          AND action_type = 'STAFF_QR_GENERATED'
+          AND (metadata->>'staffId') = ${id}
+          AND (metadata->>'isRegen') = 'true'
+      `;
+      const priorRegens = Number(priorRegensBig);
+      if (priorRegens >= 2) {
+        return reply.status(403).send({
+          error: 'Este QR del cajero ya fue regenerado 2 veces. Para otro cambio, comunicate con soporte@valee.app.',
+          regenCount: priorRegens,
+        });
+      }
+    }
 
     const { generateStaffQR } = await import('../../../services/merchant-qr.js');
     const result = await generateStaffQR(id);
@@ -163,7 +211,7 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_QR_GENERATED', 'success',
-        ${JSON.stringify({ staffId: id, staffName: target.name, qrSlug: result.qrSlug })}::jsonb, now())
+        ${JSON.stringify({ staffId: id, staffName: target.name, qrSlug: result.qrSlug, isRegen, reason: reason?.trim() || null })}::jsonb, now())
     `;
 
     return result;

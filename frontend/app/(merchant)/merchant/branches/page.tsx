@@ -8,6 +8,12 @@ import { ImageLightbox } from '@/components/ImageLightbox'
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), { ssr: false })
 
+interface CashierRef {
+  id: string
+  name: string
+  email: string
+}
+
 interface Branch {
   id: string
   name: string
@@ -17,10 +23,18 @@ interface Branch {
   active: boolean
   qrCodeUrl: string | null
   createdAt: string
+  cashierCount?: number
+  cashiers?: CashierRef[]
+}
+
+interface MainBranchSummary {
+  cashierCount: number
+  cashiers: CashierRef[]
 }
 
 export default function BranchesPage() {
   const [branches, setBranches] = useState<Branch[]>([])
+  const [mainBranch, setMainBranch] = useState<MainBranchSummary>({ cashierCount: 0, cashiers: [] })
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ name: '', address: '', latitude: '', longitude: '' })
@@ -94,8 +108,9 @@ export default function BranchesPage() {
 
   async function loadBranches() {
     try {
-      const data = await api.getBranches()
-      setBranches(data.branches)
+      const data: any = await api.getBranches()
+      setBranches(data.branches || [])
+      if (data.mainBranch) setMainBranch(data.mainBranch)
     } catch {} finally { setLoading(false) }
   }
 
@@ -308,13 +323,31 @@ export default function BranchesPage() {
         {/* Branch grid */}
         {loading ? (
           <p className="text-center text-slate-400 mt-8">Cargando...</p>
-        ) : branches.length === 0 ? (
-          <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
-            <MdStorefront className="w-12 h-12 text-slate-400 mx-auto" />
-            <p className="text-slate-500 mt-4">No hay sucursales creadas todavia</p>
-            <p className="text-sm text-slate-400 mt-1">Crea tu primera sucursal para empezar</p>
-          </div>
         ) : (
+          <>
+            {/* Sede principal virtual card — shows the cashiers attached
+                 to the tenant itself (branchId=null). Always visible so
+                 the owner sees where cajeros de "sede principal" end up. */}
+            {mainBranch.cashierCount > 0 && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-4">
+                <p className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wide">Sede principal (tu local)</p>
+                <p className="text-sm text-indigo-900 mt-1">
+                  Cajeros asignados a la sede principal ({mainBranch.cashierCount})
+                </p>
+                <ul className="text-xs text-indigo-900/80 mt-2 space-y-0.5">
+                  {mainBranch.cashiers.map(c => (
+                    <li key={c.id} className="truncate">{c.name} <span className="text-indigo-700/60">· {c.email}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {branches.length === 0 ? (
+              <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
+                <MdStorefront className="w-12 h-12 text-slate-400 mx-auto" />
+                <p className="text-slate-500 mt-4">No hay sucursales creadas todavia</p>
+                <p className="text-sm text-slate-400 mt-1">Crea tu primera sucursal para empezar</p>
+              </div>
+            ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {branches.map((b, i) => (
               <div key={b.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
@@ -344,6 +377,23 @@ export default function BranchesPage() {
                     <button onClick={() => deleteBranch(b)} disabled={deletingId === b.id} className="text-xs text-red-600 hover:text-red-800 font-semibold disabled:opacity-50">
                       {deletingId === b.id ? 'Eliminando...' : 'Eliminar'}
                     </button>
+                  </div>
+
+                  {/* Cajeros asignados — hace visible la correlacion
+                       sucursal → cajero que Eric marco el 2026-04-23. */}
+                  <div className="mt-4 pt-3 border-t border-slate-100">
+                    <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
+                      Cajeros asignados ({b.cashierCount || 0})
+                    </p>
+                    {b.cashiers && b.cashiers.length > 0 ? (
+                      <ul className="text-xs text-slate-700 space-y-0.5">
+                        {b.cashiers.map(c => (
+                          <li key={c.id} className="truncate">{c.name} <span className="text-slate-400">· {c.email}</span></li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-slate-400">Sin cajeros asignados todavia.</p>
+                    )}
                   </div>
                 </div>
 
@@ -412,6 +462,8 @@ export default function BranchesPage() {
               </div>
             ))}
           </div>
+            )}
+          </>
         )}
       </div>
 
