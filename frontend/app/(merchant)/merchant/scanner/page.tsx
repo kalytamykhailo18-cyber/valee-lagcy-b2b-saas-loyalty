@@ -18,6 +18,30 @@ import { formatPoints, formatCash } from '@/lib/format'
 type ScanState = 'scanning' | 'processing' | 'success' | 'failure' | 'queued'
 type InputMode = 'camera' | 'manual'
 
+// Shape-check a decoded string before we even hit the API. The camera
+// occasionally decodes a half-focused frame into garbled text, which
+// used to hit the backend and come back as "Codigo QR invalido" —
+// surfacing a red failure screen on the cashier. By filtering obvious
+// noise here we just keep scanning until we see a well-formed token.
+// Valid inputs: a 6-digit short code, OR a base64 string whose decoded
+// JSON has { payload: { tokenId: <uuid> }, signature: <string> }.
+function looksLikeRedemptionToken(token: string): boolean {
+  if (/^\d{6}$/.test(token)) return true
+  try {
+    const decoded = JSON.parse(atob(token))
+    return (
+      !!decoded
+      && typeof decoded.signature === 'string'
+      && decoded.signature.length > 0
+      && !!decoded.payload
+      && typeof decoded.payload.tokenId === 'string'
+      && decoded.payload.tokenId.length === 36
+    )
+  } catch {
+    return false
+  }
+}
+
 export default function CashierScanner() {
   // Auth guard — redirect to login if no session
   useEffect(() => {
@@ -163,9 +187,17 @@ export default function CashierScanner() {
           },
         } as any,
         (decodedText: string) => {
-          if (!isProcessingRef.current && decodedText.trim()) {
-            processToken(decodedText.trim())
-          }
+          if (isProcessingRef.current) return
+          const clean = decodedText.trim()
+          if (!clean) return
+          // Silently skip decodes that don't look like a real redemption
+          // token (camera noise, half-focused frame, some other QR in
+          // frame). Keeps the scanner running — the cashier sees no
+          // rejection screen until the camera catches the actual QR.
+          // Manual input bypasses this check, so typos there still
+          // surface the real server error.
+          if (!looksLikeRedemptionToken(clean)) return
+          processToken(clean)
         },
         () => {}
       )
