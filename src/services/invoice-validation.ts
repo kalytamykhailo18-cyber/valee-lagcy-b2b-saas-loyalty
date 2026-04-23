@@ -71,6 +71,23 @@ export async function validateInvoice(params: {
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, assetTypeId } = params;
 
+  // STAGE 0-PRE: Reject screenshots of Valee's own in-app QR screens. Eric
+  // flagged on 2026-04-23 that a customer was sending the DUAL-SCAN qr
+  // (the "pago en efectivo" QR the cashier generates) via WhatsApp and the
+  // bot was processing it as a voucher. Same risk with the consumer's
+  // redemption QR screen. These screens carry a very specific Spanish
+  // label so we catch them via the OCR raw text and short-circuit before
+  // any ledger write or voucher row is created.
+  const appScreenRe = /(muestra\s+(?:este|tu)\s+codigo\s+al\s+(?:cliente|cajero)|dile\s+este\s+codigo\s+al\s+cajero)/i;
+  if (params.ocrRawText && appScreenRe.test(params.ocrRawText)) {
+    console.log('[Validation] Rejected in-app screenshot via OCR pattern');
+    return {
+      success: false,
+      stage: 'app_screenshot',
+      message: 'Esto es un QR de la app Valee (no una factura). Si es un pago en efectivo, escanea ese QR desde la app (boton "Escanear QR"), no lo envies por aqui.',
+    };
+  }
+
   // STAGE 0: Trust-level gate
   // Each tenant declares which source types they accept. A tenant on level_1_strict
   // rejects voucher and mobile_payment entirely. A tenant on level_3_presence only
