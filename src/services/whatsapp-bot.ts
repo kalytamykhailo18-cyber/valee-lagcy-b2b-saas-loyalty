@@ -351,8 +351,13 @@ export async function handleIncomingMessage(params: {
   messageText?: string;
   imageBuffer?: Buffer;
   senderProfileName?: string | null;
+  // True when the incoming text carries a Ref2U: marker but the referral
+  // was already recorded for this referee (Genesis re-scanning Eric's
+  // code). We prepend a one-line explanation so the UX doesn't pretend
+  // every rescan is a fresh "you just visited" event.
+  referralAlreadyUsed?: boolean;
 }): Promise<string[]> {
-  const { phoneNumber, tenantId, messageType, messageText } = params;
+  const { phoneNumber, tenantId, messageType, messageText, referralAlreadyUsed } = params;
 
   // Detect conversation state BEFORE creating account (to catch first-time)
   const { state, accountId, balance } = await detectConversationState(phoneNumber, tenantId);
@@ -390,23 +395,30 @@ export async function handleIncomingMessage(params: {
     return getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName);
   }
 
+  // Prefix line surfaced whenever the caller detected a re-used referral
+  // code. Applies to both greeting responses and support-intent responses
+  // so the user always gets the feedback on a rescan.
+  const referralPrefix: string[] = referralAlreadyUsed
+    ? ['Este codigo de referido ya lo usaste — solo funciona una vez por persona. Sigue enviando tus facturas para ganar puntos normalmente.']
+    : [];
+
   // If it's the first message or a greeting, send state-based greeting
   if (messageType === 'text' && messageText) {
     const lower = messageText.toLowerCase().trim();
 
     // Check if it's a merchant QR message (already handled by webhook for tenant routing)
     if (/merchant:[a-z0-9\-]+/i.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName)];
     }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {
-      return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName)];
     }
 
     // Check support intents
     const intent = detectSupportIntent(messageText);
-    return handleSupportIntent(intent, phoneNumber, tenantId, accountId);
+    return [...referralPrefix, ...(await handleSupportIntent(intent, phoneNumber, tenantId, accountId))];
   }
 
   // If it's an image, it's an invoice submission — run the full validation pipeline

@@ -155,6 +155,10 @@ export default async function webhookRoutes(app: FastifyInstance) {
     // Parse merchant identifier from the QR pre-filled message
     let tenantId: string | null = null;
     let branchId: string | null = null;
+    // Tracks whether the Ref2U marker pointed at a referral that already
+    // existed for this referee (reason=already_referred or the referee had
+    // prior activity) so the bot can tell the user the code is consumed.
+    let referralAlreadyUsed = false;
 
     if (messageText) {
       const merchantInfo = await parseMerchantIdentifier(messageText);
@@ -198,18 +202,23 @@ export default async function webhookRoutes(app: FastifyInstance) {
 
         // If the QR message carries a Ref2U: marker, this is a referral scan.
         // Record a pending referral row so the referrer gets credited on the
-        // referee's first validated transaction. Silently no-ops if the
-        // referee already has activity or is the referrer themself.
+        // referee's first validated transaction. If the referral was already
+        // recorded (Genesis scanning Eric's code a second time) we flag it
+        // so the bot can tell her explicitly that the code is consumed for
+        // her — without silently behaving identically on every rescan.
         const { parseReferralSlug, recordPendingReferral } = await import('../../services/referrals.js');
         const referrerAccountId = await parseReferralSlug(messageText);
         if (referrerAccountId) {
           const { findOrCreateConsumerAccount } = await import('../../services/accounts.js');
           const { account: referee, created } = await findOrCreateConsumerAccount(tenantId, formattedPhone);
-          await recordPendingReferral({
+          const result = await recordPendingReferral({
             tenantId,
             referrerAccountId,
             refereeAccountId: referee.id,
           });
+          if (!result.recorded && (result.reason === 'already_referred' || result.reason === 'referee_has_activity')) {
+            referralAlreadyUsed = true;
+          }
           // Grant the welcome bonus here — otherwise handleIncomingMessage
           // later sees created=false (the row already exists) and skips the
           // bonus branch entirely. Users arriving via a referral link were
@@ -322,6 +331,7 @@ export default async function webhookRoutes(app: FastifyInstance) {
       messageText: messageType === 'text' ? messageText : undefined,
       imageBuffer,
       senderProfileName,
+      referralAlreadyUsed,
     });
 
     // Send all response lines as a single WhatsApp message
