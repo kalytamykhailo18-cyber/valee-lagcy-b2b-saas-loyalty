@@ -39,6 +39,7 @@ export default function StaffPage() {
   const [staff, setStaff] = useState<Staff[]>([])
   const [perf, setPerf] = useState<PerformanceRow[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
+  const [tenantName, setTenantName] = useState<string>('Sede principal')
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
   const [qrPreview, setQrPreview] = useState<{ name: string; url: string } | null>(null)
@@ -52,14 +53,22 @@ export default function StaffPage() {
 
   async function load() {
     try {
-      const [s, p, b] = await Promise.all([
+      const [s, p, b, settings] = await Promise.all([
         api.listStaff(),
         api.getStaffPerformance(30).catch(() => ({ staff: [] })),
         api.getBranches().catch(() => ({ branches: [] })),
+        api.getMerchantSettings().catch(() => ({ name: '' })),
       ])
       setStaff((s as any).staff || [])
       setPerf(((p as any).staff || []) as PerformanceRow[])
       setBranches(((b as any).branches || []) as Branch[])
+      // Surface the tenant's actual name as the dropdown label for the
+      // main location so Eric sees e.g. "Kromi Parral (sede principal)"
+      // instead of the generic "Sede principal (tu local)". Matches how
+      // he names the tenant vs its branches in the real store ("Kromi
+      // Parral" for the main local, "Kromi Manongo" for a sub-location).
+      const name = (settings as any)?.name?.trim()
+      if (name) setTenantName(name)
     } finally {
       setLoading(false)
     }
@@ -228,7 +237,7 @@ export default function StaffPage() {
                               )}
                               {s.role === 'cashier' && !s.branchId && (
                                 <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
-                                  Sede principal
+                                  {tenantName} (sede principal)
                                 </span>
                               )}
                             </div>
@@ -387,7 +396,7 @@ export default function StaffPage() {
                     onChange={e => setForm({ ...form, branchId: e.target.value })}
                     className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="">Sede principal (tu local)</option>
+                    <option value="">{tenantName} (sede principal)</option>
                     {branches.filter(b => b.active).map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
