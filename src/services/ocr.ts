@@ -238,7 +238,7 @@ Return ONLY a JSON object with these exact fields:
 - document_type: one of "fiscal_invoice", "mobile_payment", "voucher" (string)
 - invoice_number: the FISCAL invoice number as shown (string or null). NOT Ticket or ID de orden.
 - total_amount: final total in document's currency (number or null)
-- transaction_date: date in ISO format YYYY-MM-DD (string or null)
+- transaction_date: date in ISO format YYYY-MM-DD (string or null). CRITICAL: Venezuelan and LATAM receipts ALWAYS use day-first format. When the receipt shows "01/04/2026" or "01-04-2026" that means 1 April 2026, NOT 4 January. When you see "DD/MM/YYYY" or "DD/MM/YY" or "DD-MM-YYYY" always interpret the FIRST number as the day and the SECOND as the month. The FECHA value on Venezuelan fiscal receipts is never in US MM/DD format. Convert to ISO YYYY-MM-DD for the output. If the year is two digits (e.g. "26"), expand to 20XX.
 - transaction_time: time if visible, e.g. "14:30" (string or null)
 - customer_phone: the customer/buyer phone number. On Venezuelan receipts, look for "Tlf:" or "Tel:" that appears in the CUSTOMER section (near "RIF/CI:", "RAZON SOCIAL:", "Nombre:", "Cliente:"). This is the customer's phone, not the store's. Do NOT return the store's 0800 number or the phone in the merchant header. Return in format 04XX-XXXXXXX if visible. (string or null)
 - customer_cedula: customer's Venezuelan ID (cedula). Look for "RIF/C.I.:", "CI:", "Cedula:" labels. Starts with V or E + digits. NOT the merchant's RIF (J-). (string or null)
