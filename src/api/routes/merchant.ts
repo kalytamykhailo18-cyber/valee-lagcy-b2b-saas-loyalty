@@ -2400,6 +2400,28 @@ export default async function merchantRoutes(app: FastifyInstance) {
       }
     }
 
+    // Effective status for INVOICE_CLAIMED rows: a row stays raw
+    // status='provisional' in the ledger (it's immutable), but if the
+    // linked invoice has since been reconciled to status='claimed' via
+    // CSV, the consumer + merchant UI should show it as confirmed. Eric
+    // flagged this on 2026-04-22: his CSV page correctly labeled rows
+    // Canjeada while the dashboard movimientos kept saying Provisional.
+    // Mirror the same derivation already used in consumer history and
+    // the balance breakdown.
+    const pendingInvoiceNumbers = new Set<string>();
+    for (const e of entries) {
+      if (e.event_type !== 'INVOICE_CLAIMED' || e.status !== 'provisional') continue;
+      const ref = String(e.reference_id || '');
+      if (ref.startsWith('PENDING-')) pendingInvoiceNumbers.add(ref.slice('PENDING-'.length));
+    }
+    const claimedInvoices = pendingInvoiceNumbers.size > 0
+      ? await prisma.invoice.findMany({
+          where: { tenantId, invoiceNumber: { in: Array.from(pendingInvoiceNumbers) }, status: 'claimed' },
+          select: { invoiceNumber: true },
+        })
+      : [];
+    const claimedInvoiceNumbers = new Set(claimedInvoices.map(i => i.invoiceNumber));
+
     return {
       entries: entries
         .filter(e => {
@@ -2431,12 +2453,18 @@ export default async function merchantRoutes(app: FastifyInstance) {
           if (tid && e.event_type === 'REDEMPTION_PENDING' && confirmedTokenIds.has(tid)) {
             effectiveEventType = 'REDEMPTION_CONFIRMED';
           }
+          const ref = String(e.reference_id || '');
+          const isReconciled = e.event_type === 'INVOICE_CLAIMED'
+            && e.status === 'provisional'
+            && ref.startsWith('PENDING-')
+            && claimedInvoiceNumbers.has(ref.slice('PENDING-'.length));
+          const effectiveStatus = isReconciled ? 'confirmed' : e.status;
           return {
             id: e.id,
             eventType: effectiveEventType,
             entryType: e.entry_type,
             amount: e.amount,
-            status: e.status,
+            status: effectiveStatus,
             referenceId: e.reference_id,
             branchId: e.branch_id,
             branchName: e.branch_name,
