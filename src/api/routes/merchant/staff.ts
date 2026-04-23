@@ -13,22 +13,19 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'name, email, password, and role are required' });
     }
 
-    // Cashiers must be assigned to a branch at creation time when the
-    // tenant has any branches configured. Owners are cross-branch by nature,
-    // so the rule only kicks in for role=cashier. If the tenant has zero
-    // branches yet, we allow a null assignment so early-stage merchants
-    // aren't blocked before Step 5.1 setup.
+    // branchId is optional. A null branchId means the cashier is attached
+    // to the tenant itself — the "sede principal" — and can operate across
+    // any branch (subject to the tenant's crossBranchRedemption flag). Eric
+    // flagged the earlier strict rule on 2026-04-23 because the tenant
+    // Kromi Parral has no Branch row for its own main location, so owners
+    // could never assign a cashier to the main. If a non-null branchId IS
+    // supplied, it still has to belong to this tenant.
     if (branchId) {
       const branch = await prisma.branch.findFirst({
         where: { id: branchId, tenantId },
         select: { id: true },
       });
       if (!branch) return reply.status(400).send({ error: 'branchId does not belong to this tenant' });
-    } else if (role === 'cashier') {
-      const branchCount = await prisma.branch.count({ where: { tenantId, active: true } });
-      if (branchCount > 0) {
-        return reply.status(400).send({ error: 'Debes asignar una sucursal al cajero.' });
-      }
     }
 
     // Plan limit check
@@ -58,18 +55,30 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/api/merchant/staff/:id/branch', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId, staffId: actorId } = request.staff!;
     const { id } = request.params as { id: string };
-    const { branchId } = (request.body || {}) as { branchId?: string };
-
-    if (!branchId) return reply.status(400).send({ error: 'branchId is required' });
+    const body = (request.body || {}) as { branchId?: string | null };
+    // branchId === null means "move back to sede principal" (tenant-level).
+    // Accept both an explicit null and a missing key the same way — but if
+    // the key was sent with an invalid shape, reject.
+    const hasBranchIdKey = 'branchId' in body;
+    if (!hasBranchIdKey) {
+      return reply.status(400).send({ error: 'branchId is required (use null for sede principal)' });
+    }
+    const nextBranchId: string | null = body.branchId ?? null;
 
     const target = await prisma.staff.findFirst({ where: { id, tenantId } });
     if (!target) return reply.status(404).send({ error: 'Staff member not found' });
 
-    const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
-    if (!branch) return reply.status(400).send({ error: 'branchId does not belong to this tenant' });
+    if (nextBranchId !== null) {
+      const branch = await prisma.branch.findFirst({ where: { id: nextBranchId, tenantId } });
+      if (!branch) return reply.status(400).send({ error: 'branchId does not belong to this tenant' });
+    }
 
-    if (target.branchId === branchId) {
-      return reply.status(400).send({ error: 'El cajero ya esta asignado a esa sucursal.' });
+    if (target.branchId === nextBranchId) {
+      return reply.status(400).send({
+        error: nextBranchId === null
+          ? 'El cajero ya esta asignado a la sede principal.'
+          : 'El cajero ya esta asignado a esa sucursal.',
+      });
     }
 
     // Raw SQL instead of prisma.auditLog.count with a metadata JSON filter:
@@ -95,13 +104,13 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     const fromBranchId = target.branchId;
     const updated = await prisma.staff.update({
       where: { id },
-      data: { branchId },
+      data: { branchId: nextBranchId },
     });
 
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_BRANCH_CHANGED', 'success',
-        ${JSON.stringify({ staffId: id, name: target.name, fromBranchId, toBranchId: branchId })}::jsonb, now())
+        ${JSON.stringify({ staffId: id, name: target.name, fromBranchId, toBranchId: nextBranchId })}::jsonb, now())
     `;
 
     return { staff: { id: updated.id, name: updated.name, branchId: updated.branchId } };

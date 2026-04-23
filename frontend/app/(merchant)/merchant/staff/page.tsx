@@ -87,10 +87,9 @@ export default function StaffPage() {
     e.preventDefault()
     setAddError('')
     const activeBranches = branches.filter(b => b.active)
-    if (form.role === 'cashier' && activeBranches.length > 0 && !form.branchId) {
-      setAddError('Elige la sucursal del cajero.')
-      return
-    }
+    // Empty branchId in the form maps to "Sede principal" (tenant-level,
+    // branchId=null). No need to block submission on it anymore.
+    void activeBranches;
     setAddSubmitting(true)
     try {
       const payload: any = { ...form }
@@ -112,7 +111,9 @@ export default function StaffPage() {
     setBranchEditError('')
     setBranchEditSubmitting(true)
     try {
-      await api.changeStaffBranch(branchEdit.staff.id, branchEdit.branchId)
+      // Empty selection in the edit modal maps to "sede principal" (null).
+      const nextBranchId = branchEdit.branchId || null
+      await api.changeStaffBranch(branchEdit.staff.id, nextBranchId)
       setBranchEdit(null)
       await load()
     } catch (e: any) {
@@ -225,13 +226,13 @@ export default function StaffPage() {
                                   {branches.find(b => b.id === s.branchId)?.name || 'Sucursal'}
                                 </span>
                               )}
-                              {s.role === 'cashier' && !s.branchId && branches.filter(b => b.active).length > 0 && (
-                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">
-                                  Sin sucursal
+                              {s.role === 'cashier' && !s.branchId && (
+                                <span className="inline-block text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700">
+                                  Sede principal
                                 </span>
                               )}
                             </div>
-                            {s.role === 'cashier' && branches.filter(b => b.active).length > 0 && (
+                            {s.role === 'cashier' && (
                               s.branchLocked ? (
                                 <p className="text-[11px] text-slate-400 mt-1.5">Sucursal bloqueada. Para otro cambio, comunicate con soporte@valee.app.</p>
                               ) : (
@@ -378,21 +379,20 @@ export default function StaffPage() {
                   <option value="owner">Owner</option>
                 </select>
               </div>
-              {form.role === 'cashier' && branches.filter(b => b.active).length > 0 && (
+              {form.role === 'cashier' && (
                 <div>
                   <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Sucursal</label>
                   <select
-                    required
                     value={form.branchId}
                     onChange={e => setForm({ ...form, branchId: e.target.value })}
                     className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="">Elige una sucursal...</option>
+                    <option value="">Sede principal (tu local)</option>
                     {branches.filter(b => b.active).map(b => (
                       <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
                   </select>
-                  <p className="text-[11px] text-slate-500 mt-1">La sucursal solo se puede cambiar una vez despues de crear al cajero.</p>
+                  <p className="text-[11px] text-slate-500 mt-1">Sede principal = tu local original. La sucursal solo se puede cambiar una vez despues de crear al cajero.</p>
                 </div>
               )}
               {addError && <p className="text-sm text-red-600">{addError}</p>}
@@ -425,12 +425,11 @@ export default function StaffPage() {
               <div>
                 <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Nueva sucursal</label>
                 <select
-                  required
                   value={branchEdit.branchId}
                   onChange={e => setBranchEdit({ ...branchEdit, branchId: e.target.value })}
                   className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
-                  <option value="">Elige una sucursal...</option>
+                  <option value="">Sede principal (tu local)</option>
                   {branches.filter(b => b.active).map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
@@ -439,7 +438,10 @@ export default function StaffPage() {
               {branchEditError && <p className="text-sm text-red-600">{branchEditError}</p>}
               <button
                 type="submit"
-                disabled={branchEditSubmitting || !branchEdit.branchId || branchEdit.branchId === branchEdit.staff.branchId}
+                disabled={
+                  branchEditSubmitting
+                  || (branchEdit.branchId || null) === (branchEdit.staff.branchId || null)
+                }
                 className="w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700 disabled:opacity-50 mt-2"
               >
                 {branchEditSubmitting ? 'Guardando...' : 'Confirmar cambio'}

@@ -50,6 +50,10 @@ async function main() {
   await prisma.tenantAssetConfig.create({
     data: { tenantId: tenant.id, assetTypeId: asset.id, conversionRate: 1 },
   });
+  // This test creates > 3 staff members across its steps. Skip the basic
+  // plan's 3-staff cap so the plan-limit path doesn't bleed into these
+  // assertions — the cap is exercised separately in e2e-plan-limits.
+  await prisma.tenant.update({ where: { id: tenant.id }, data: { plan: 'x10' } });
 
   const branchA = await prisma.branch.create({
     data: { tenantId: tenant.id, name: 'Sucursal A', active: true },
@@ -71,17 +75,20 @@ async function main() {
     staffId: owner.id, tenantId: tenant.id, role: 'owner', type: 'staff',
   }).accessToken;
 
-  // --- 1. Creating a cashier WITHOUT branch is rejected
+  // --- 1. Creating a cashier WITHOUT branch lands on "sede principal"
+  // (Eric's 2026-04-23 Notion card: the tenant's main location should
+  // always be a valid target, even when it has no Branch row). branchId
+  // stays null and the UI renders the cashier as "Sede principal".
   const createNoBranch = await http('/api/merchant/staff', ownerToken, {
     method: 'POST',
     body: JSON.stringify({
-      name: 'Pedro Sin Sucursal', email: `pedro-nob-${ts}@e2e.local`,
+      name: 'Pedro Sede Principal', email: `pedro-main-${ts}@e2e.local`,
       password: 'pw', role: 'cashier',
     }),
   });
-  await assert('create cashier without branchId is rejected',
-    createNoBranch.status === 400,
-    `status=${createNoBranch.status}`);
+  await assert('create cashier without branchId assigns to sede principal',
+    createNoBranch.status === 200 && createNoBranch.body.staff.branchId === null,
+    `status=${createNoBranch.status} branchId=${createNoBranch.body?.staff?.branchId}`);
 
   // --- 2. Creating a cashier WITH a valid branch succeeds
   const createOk = await http('/api/merchant/staff', ownerToken, {
@@ -166,6 +173,23 @@ async function main() {
   await assert('same-branch edit did not burn the one allowed edit',
     freshRow?.branchLocked === false && freshRow?.branchChangeCount === 0,
     `locked=${freshRow?.branchLocked} count=${freshRow?.branchChangeCount}`);
+
+  // --- 9. PATCH accepts null to move back to sede principal (same
+  //        one-edit rule — Eric's 2026-04-23 Notion card).
+  const toMain = await http(`/api/merchant/staff/${freshId}/branch`, ownerToken, {
+    method: 'PATCH', body: JSON.stringify({ branchId: null }),
+  });
+  await assert('edit to sede principal (branchId=null) is allowed',
+    toMain.status === 200 && toMain.body?.staff?.branchId === null,
+    `status=${toMain.status} branchId=${toMain.body?.staff?.branchId}`);
+
+  // That edit consumed the one-time slot — a second edit is blocked.
+  const toMainAgain = await http(`/api/merchant/staff/${freshId}/branch`, ownerToken, {
+    method: 'PATCH', body: JSON.stringify({ branchId: branchB.id }),
+  });
+  await assert('second edit after moving to sede principal is rejected',
+    toMainAgain.status === 403,
+    `status=${toMainAgain.status}`);
 
   console.log('\n=== ALL ASSERTIONS PASSED ===');
   process.exit(0);
