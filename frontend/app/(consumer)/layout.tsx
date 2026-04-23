@@ -7,10 +7,8 @@
  */
 export default function ConsumerLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="min-h-screen bg-slate-100 lg:py-6">
-      <div className="lg:max-w-md lg:mx-auto lg:shadow-xl lg:rounded-2xl lg:overflow-hidden lg:bg-white min-h-screen lg:min-h-[calc(100vh-3rem)]">
-        {children}
-      </div>
+    <div className="min-h-screen bg-white">
+      {children}
     </div>
   )
 }
