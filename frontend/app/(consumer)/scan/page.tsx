@@ -202,7 +202,14 @@ export default function ScanPage() {
         { facingMode: 'environment' },
         {
           fps: 10,
-          qrbox: { width: 320, height: 320 },
+          // Adapt the scan zone to ~90% of the shorter side of whatever the
+          // browser hands us. A fixed 320x320 left a lot of dead space on
+          // phones (Eric 2026-04-23: "el recuadro es muy pequeno"), and kept
+          // the detector blind to QRs that extended beyond the box.
+          qrbox: (vw: number, vh: number) => {
+            const side = Math.floor(Math.min(vw, vh) * 0.9)
+            return { width: side, height: side }
+          },
           disableFlip: false,
           // Request continuous autofocus so the camera keeps receipts sharp
           // as the user moves the phone. Most browsers silently ignore unknown
@@ -339,13 +346,16 @@ export default function ScanPage() {
       <div className="flex-1 relative bg-black overflow-hidden">
         <div id={SCANNER_ID} className="w-full h-full" />
 
-        {/* Corner brackets to signal the capture area + hint */}
+        {/* Corner brackets to signal the capture area + hint. Sized to match
+            the ~90% scan zone so what the user frames is what the detector
+            sees (Eric flagged on 2026-04-23 that the old 80vw box looked
+            cramped and did not match the actual preview square). */}
         <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="relative w-80 h-80 max-w-[80vw] max-h-[80vw]">
-            <div className="absolute top-0 left-0 w-10 h-10 border-t-4 border-l-4 border-white/70 rounded-tl-xl" />
-            <div className="absolute top-0 right-0 w-10 h-10 border-t-4 border-r-4 border-white/70 rounded-tr-xl" />
-            <div className="absolute bottom-0 left-0 w-10 h-10 border-b-4 border-l-4 border-white/70 rounded-bl-xl" />
-            <div className="absolute bottom-0 right-0 w-10 h-10 border-b-4 border-r-4 border-white/70 rounded-br-xl" />
+          <div className="relative w-[min(90vw,90vh)] aspect-square max-w-[520px]">
+            <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-white/80 rounded-tl-xl" />
+            <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-white/80 rounded-tr-xl" />
+            <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-white/80 rounded-bl-xl" />
+            <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-white/80 rounded-br-xl" />
           </div>
         </div>
 

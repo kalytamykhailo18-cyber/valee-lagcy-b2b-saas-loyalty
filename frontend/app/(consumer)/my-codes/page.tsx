@@ -127,12 +127,17 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
   }
 
   useEffect(() => {
+    // Encode only the tokenId (36-char uuid) instead of the full signed
+    // payload. That drops the QR from version ~15 to ~3, producing modules
+    // 3-4x larger — dramatically easier for the cashier camera to lock
+    // onto on the first frame. The backend already accepts a bare uuid.
+    const qrValue = redemption.id || redemption.token
     import('qrcode').then(QRCode => {
-      QRCode.toDataURL(redemption.token, { width: 320, margin: 2, errorCorrectionLevel: 'M' })
+      QRCode.toDataURL(qrValue, { width: 320, margin: 2, errorCorrectionLevel: 'Q' })
         .then(url => setQrUrl(url))
         .catch(() => {})
     })
-  }, [redemption.token])
+  }, [redemption.id, redemption.token])
 
   useEffect(() => {
     const interval = setInterval(() => {

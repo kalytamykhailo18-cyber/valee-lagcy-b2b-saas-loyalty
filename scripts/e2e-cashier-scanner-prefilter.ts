@@ -23,7 +23,9 @@ import fs from 'fs/promises';
 // Mirror the helper defined at the top of the scanner page. If the
 // frontend implementation drifts, the file-content regression guard
 // below catches it.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function looksLikeRedemptionToken(token: string): boolean {
+  if (UUID_RE.test(token)) return true;
   if (/^\d{6}$/.test(token)) return true;
   try {
     const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf-8'));
@@ -50,6 +52,8 @@ async function main() {
   console.log('=== Scanner pre-filter E2E ===\n');
 
   // ── Valid inputs (must pass through) ──
+  await assert('bare UUID accepted',
+    looksLikeRedemptionToken('f512aa92-e606-4b62-a1c9-1ce55f590a9a'), 'ok');
   await assert('6-digit short code accepted', looksLikeRedemptionToken('123456'), 'ok');
   const validToken = Buffer.from(JSON.stringify({
     payload: {

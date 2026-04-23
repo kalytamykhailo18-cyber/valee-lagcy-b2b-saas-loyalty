@@ -250,11 +250,47 @@ export async function processRedemption(params: {
 
   const tokenStr = params.token?.trim() || '';
 
-  // If input is a 6-digit short code, look up the token directly from the DB.
-  // The DB lookup itself is the authenticity check — the code only exists if we
-  // created it during initiateRedemption. No signature verification needed.
+  // If input is a bare tokenId UUID, look up the token directly from the DB.
+  // Same safety argument as the 6-digit path: the uuid is only in the DB if we
+  // minted it during initiateRedemption, so the DB lookup IS the authenticity
+  // check. Eric flagged on 2026-04-23 that the camera struggles to capture the
+  // full signed payload on the first frame; dropping the QR content to just the
+  // 36-char uuid shrinks the QR from version ~15 to ~3, making it dramatically
+  // easier to read on a noisy or half-focused frame.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   let payload: RedemptionTokenPayload;
-  if (/^\d{6}$/.test(tokenStr)) {
+  if (UUID_RE.test(tokenStr)) {
+    const record = await prisma.redemptionToken.findFirst({
+      where: {
+        id: tokenStr,
+        tenantId: params.cashierTenantId,
+        status: 'pending',
+        expiresAt: { gt: new Date() },
+      },
+    });
+    if (!record) {
+      const usedOrExpired = await prisma.redemptionToken.findFirst({
+        where: { id: tokenStr, tenantId: params.cashierTenantId },
+      });
+      if (usedOrExpired?.status === 'used') {
+        return { success: false, message: 'Este codigo ya fue canjeado.' };
+      }
+      if (usedOrExpired?.status === 'expired') {
+        return { success: false, message: 'Este codigo ya expiro.' };
+      }
+      return { success: false, message: 'Codigo QR invalido.' };
+    }
+    payload = {
+      tokenId: record.id,
+      consumerAccountId: record.consumerAccountId,
+      productId: record.productId,
+      amount: record.amount.toString(),
+      tenantId: record.tenantId,
+      assetTypeId: record.assetTypeId,
+      createdAt: record.createdAt.toISOString(),
+      expiresAt: record.expiresAt.toISOString(),
+    };
+  } else if (/^\d{6}$/.test(tokenStr)) {
     const record = await prisma.redemptionToken.findFirst({
       where: {
         tenantId: params.cashierTenantId,

@@ -23,9 +23,12 @@ type InputMode = 'camera' | 'manual'
 // used to hit the backend and come back as "Codigo QR invalido" —
 // surfacing a red failure screen on the cashier. By filtering obvious
 // noise here we just keep scanning until we see a well-formed token.
-// Valid inputs: a 6-digit short code, OR a base64 string whose decoded
-// JSON has { payload: { tokenId: <uuid> }, signature: <string> }.
+// Valid inputs: a bare UUID (new QR format), a 6-digit short code, OR
+// a base64 string whose decoded JSON has { payload:{tokenId}, signature }
+// (legacy QR format, still accepted).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 function looksLikeRedemptionToken(token: string): boolean {
+  if (UUID_RE.test(token)) return true
   if (/^\d{6}$/.test(token)) return true
   try {
     const decoded = JSON.parse(atob(token))
@@ -169,7 +172,13 @@ export default function CashierScanner() {
         { facingMode: 'environment' },
         {
           fps: 10,
-          qrbox: { width: 260, height: 260 },
+          // Adapt the scan zone to ~90% of the shorter side of the actual
+          // video preview. Fixed 260x260 was too small on larger phones
+          // (Eric 2026-04-23: "el recuadro es muy pequeno").
+          qrbox: (vw: number, vh: number) => {
+            const side = Math.floor(Math.min(vw, vh) * 0.9)
+            return { width: side, height: side }
+          },
           aspectRatio: 1,
           disableFlip: false,
           // Continuous autofocus + higher target resolution so the camera

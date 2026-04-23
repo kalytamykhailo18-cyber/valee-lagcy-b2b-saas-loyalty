@@ -396,7 +396,7 @@ function QrRedemptionView({ redeemResult, onClear }: { redeemResult: any; onClea
       <div className="text-center animate-qr-build">
         <h2 className="text-xl font-bold text-indigo-600 mb-4">Tu codigo QR de canje</h2>
         <div className="bg-slate-100 rounded-2xl p-8 inline-block">
-          <QRDisplay value={redeemResult.token} />
+          <QRDisplay value={redeemResult.tokenId || redeemResult.token} />
         </div>
         {redeemResult.shortCode && (
           <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4">
@@ -429,7 +429,7 @@ function QRDisplay({ value }: { value: string }) {
 
   useEffect(() => {
     import('qrcode').then(QRCode => {
-      QRCode.toDataURL(value, { width: 280, margin: 2, errorCorrectionLevel: 'M' })
+      QRCode.toDataURL(value, { width: 280, margin: 2, errorCorrectionLevel: 'Q' })
         .then(url => setQrUrl(url))
         .catch(() => {})
     })
