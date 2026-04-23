@@ -1,0 +1,244 @@
+import type { FastifyInstance } from 'fastify';
+import prisma from '../../../db/client.js';
+import { requireStaffAuth, requireOwnerRole } from '../../middleware/auth.js';
+
+// Fields whose change counts against the 2-edit lifetime cap. Stock,
+// minLevel and the active toggle are operational, not identity, so
+// they're intentionally excluded (Eric's call — the card's historical
+// metric should remain tied to a fixed pizza/water/whatever identity).
+const IDENTITY_FIELDS = ['name', 'description', 'photoUrl', 'redemptionCost', 'cashPrice'] as const;
+const MAX_IDENTITY_EDITS = 2;
+
+export async function registerProductsRoutes(app: FastifyInstance): Promise<void> {
+  // ---- CATALOG MANAGEMENT (Owner only) ----
+  app.get('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const { archived } = request.query as { archived?: string };
+    // Default list hides archived cards; ?archived=true flips to the
+    // archived bin so the merchant can restore them from a dedicated
+    // section of the page.
+    const where: any = { tenantId };
+    if (archived === 'true') where.archivedAt = { not: null };
+    else where.archivedAt = null;
+    const products = await prisma.product.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+    });
+    return { products };
+  });
+
+  app.post('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel } = request.body as any;
+
+    if (!name || !redemptionCost || !assetTypeId) {
+      return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
+    }
+
+    // Plan limit check
+    const { enforceLimit } = await import('../../../services/plan-limits.js');
+    try { await enforceLimit(tenantId, 'products_in_catalog'); }
+    catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
+
+    const product = await prisma.product.create({
+      data: { tenantId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
+    });
+
+    // Audit
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'PRODUCT_CREATED', 'success',
+        ${JSON.stringify({ productId: product.id, name })}::jsonb, now())
+    `;
+
+    return { product };
+  });
+
+  app.put('/api/merchant/products/:id', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const data = request.body as any;
+
+    const product = await prisma.product.findFirst({ where: { id, tenantId } });
+    if (!product) return reply.status(404).send({ error: 'Product not found' });
+
+    if (product.archivedAt) {
+      return reply.status(409).send({
+        error: 'Esta tarjeta esta archivada. Restaurala primero para editarla.',
+      });
+    }
+
+    const current: Record<string, unknown> = {
+      name: product.name,
+      description: product.description ?? null,
+      photoUrl: product.photoUrl ?? null,
+      redemptionCost: product.redemptionCost.toString(),
+      cashPrice: product.cashPrice?.toString() ?? null,
+    };
+    const incoming: Record<string, unknown> = {
+      name: data.name ?? product.name,
+      description: data.description ?? product.description ?? null,
+      photoUrl: data.photoUrl ?? product.photoUrl ?? null,
+      redemptionCost: data.redemptionCost != null
+        ? data.redemptionCost.toString()
+        : product.redemptionCost.toString(),
+      cashPrice: data.cashPrice !== undefined
+        ? (data.cashPrice ? data.cashPrice.toString() : null)
+        : (product.cashPrice?.toString() ?? null),
+    };
+    const identityChanged = IDENTITY_FIELDS.some(f => current[f] !== incoming[f]);
+
+    if (identityChanged && product.identityEditCount >= MAX_IDENTITY_EDITS) {
+      return reply.status(403).send({
+        error: `Esta tarjeta ya alcanzo el maximo de ${MAX_IDENTITY_EDITS} ediciones. Archivala y crea una nueva para mantener la trazabilidad historica.`,
+        identityEditCount: product.identityEditCount,
+        maxEdits: MAX_IDENTITY_EDITS,
+      });
+    }
+
+    const newStock = data.stock != null ? parseInt(data.stock) : product.stock;
+
+    // Stock ↔ active coupling with owner-intent preservation:
+    //   * stock → 0: auto-disable and mark stockAutoDisabled so a later
+    //     restock can auto-re-enable.
+    //   * stock 0→>0 AND card was auto-disabled: auto-reactivate and
+    //     clear the flag.
+    //   * stock 0→>0 AND owner had explicitly turned it off: leave it
+    //     off (respect intent).
+    //   * Any explicit data.active in the body wins outright and is
+    //     treated as owner intent.
+    let nextActive: boolean = product.active;
+    let nextAutoDisabled: boolean = product.stockAutoDisabled;
+
+    if (newStock <= 0) {
+      // Losing stock always auto-disables. Mark flag only if we're
+      // flipping the state; otherwise keep whatever was there.
+      if (product.active) {
+        nextActive = false;
+        nextAutoDisabled = true;
+      }
+    } else if (product.stock <= 0 && newStock > 0 && product.stockAutoDisabled) {
+      nextActive = true;
+      nextAutoDisabled = false;
+    }
+
+    if (data.active !== undefined) {
+      nextActive = !!data.active;
+      nextAutoDisabled = false; // explicit owner choice clears the flag
+      if (nextActive && newStock <= 0) {
+        return reply.status(400).send({
+          error: 'No tienes stock — agrega stock para activar la tarjeta.',
+        });
+      }
+    }
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: {
+        name: incoming.name as string,
+        description: (incoming.description as string | null) ?? null,
+        photoUrl: (incoming.photoUrl as string | null) ?? null,
+        redemptionCost: incoming.redemptionCost as string,
+        cashPrice: incoming.cashPrice as string | null,
+        stock: newStock,
+        minLevel: data.minLevel != null ? parseInt(data.minLevel) : product.minLevel,
+        active: nextActive,
+        stockAutoDisabled: nextAutoDisabled,
+        identityEditCount: identityChanged ? product.identityEditCount + 1 : product.identityEditCount,
+      },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'PRODUCT_UPDATED', 'success',
+        ${JSON.stringify({ productId: id, identityChanged, editCount: updated.identityEditCount })}::jsonb, now())
+    `;
+
+    return { product: updated };
+  });
+
+  app.patch('/api/merchant/products/:id/toggle', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const product = await prisma.product.findFirst({ where: { id, tenantId } });
+    if (!product) return reply.status(404).send({ error: 'Product not found' });
+    if (product.archivedAt) {
+      return reply.status(409).send({ error: 'Esta tarjeta esta archivada. Restaurala primero.' });
+    }
+
+    const nextActive = !product.active;
+    if (nextActive && product.stock <= 0) {
+      return reply.status(400).send({
+        error: 'No tienes stock — agrega stock para activar la tarjeta.',
+      });
+    }
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: {
+        active: nextActive,
+        // Explicit owner toggle always overrides the auto-disabled flag
+        // so a later restock doesn't unexpectedly revive a card the
+        // owner meant to kill (or vice versa).
+        stockAutoDisabled: false,
+      },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'PRODUCT_TOGGLED', 'success',
+        ${JSON.stringify({ productId: id, active: updated.active })}::jsonb, now())
+    `;
+
+    return { product: updated };
+  });
+
+  // ---- ARCHIVE PRODUCT (Owner only) ----
+  // Hides the card from the catalog without deleting. Historical
+  // redemption tokens keep their FK intact. Does NOT consume an
+  // identity-edit slot.
+  app.patch('/api/merchant/products/:id/archive', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const product = await prisma.product.findFirst({ where: { id, tenantId } });
+    if (!product) return reply.status(404).send({ error: 'Product not found' });
+    if (product.archivedAt) return reply.status(400).send({ error: 'Ya esta archivada.' });
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: { archivedAt: new Date(), active: false, stockAutoDisabled: false },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'PRODUCT_UPDATED', 'success',
+        ${JSON.stringify({ productId: id, action: 'archived' })}::jsonb, now())
+    `;
+
+    return { product: updated };
+  });
+
+  app.patch('/api/merchant/products/:id/unarchive', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId, staffId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const product = await prisma.product.findFirst({ where: { id, tenantId } });
+    if (!product) return reply.status(404).send({ error: 'Product not found' });
+    if (!product.archivedAt) return reply.status(400).send({ error: 'No esta archivada.' });
+
+    const updated = await prisma.product.update({
+      where: { id },
+      data: { archivedAt: null },
+    });
+
+    await prisma.$executeRaw`
+      INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
+      VALUES (gen_random_uuid(), ${tenantId}::uuid, ${staffId}::uuid, 'staff', 'owner', 'PRODUCT_UPDATED', 'success',
+        ${JSON.stringify({ productId: id, action: 'unarchived' })}::jsonb, now())
+    `;
+
+    return { product: updated };
+  });
+}
