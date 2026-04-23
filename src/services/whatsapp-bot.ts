@@ -90,13 +90,16 @@ export function getStateGreeting(
 
   switch (state) {
     case 'first_time': {
+      // Eric (2026-04-23 Notion "Bot de WhatsApp"): lead with the welcome
+      // bonus in a single warm line that names the merchant — "ganaste
+      // X puntos de bienvenida, queremos verte en <comercio>". The
+      // previous copy split this across two stilted lines and buried
+      // the merchant name in a separate "Bienvenido a" greeting.
       const bonusAmount = welcomeBonusAmount || process.env.WELCOME_BONUS_AMOUNT || '50';
       return [
-        `¡Hola! 👋 Bienvenido a ${merchantLabel}.`,
-        `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida!`,
-        `Ahora puedes ganar más recompensas. Es muy fácil:`,
-        `📸 Envíanos una foto de tu factura y te cargaremos tus puntos automáticamente. ¡Así de simple!`,
-        `📱 Accede a tu cuenta aquí: ${pwaLink}`,
+        `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida, queremos verte en ${merchantLabel}!`,
+        `Envianos una foto de tu factura y te cargamos mas puntos automaticamente. 📸`,
+        `📱 Accede a tu cuenta aqui: ${pwaLink}`,
       ];
     }
 
@@ -481,9 +484,13 @@ export async function handleIncomingMessage(params: {
 
       const isPending = result.stage === 'pending';
       if (isPending) {
+        // Eric (2026-04-23 Notion "Bot de WhatsApp"): stop surfacing the
+        // technical term "(provisional)" to the customer — it reads as
+        // uncertainty. The follow-up line "Te confirmamos cuando se
+        // valide" already conveys the pending state without the jargon.
         return [
           `✅ Factura recibida y en verificacion.`,
-          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel} (provisional).`,
+          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
           `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
           `Te confirmamos en breve cuando se valide.`,
           `📱 Ver tu cuenta y canjear premios: ${pwaLink}`,

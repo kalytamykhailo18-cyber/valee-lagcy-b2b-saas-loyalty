@@ -16,6 +16,7 @@ const EVENT_LABELS: Record<string, string> = {
   ADJUSTMENT_MANUAL: 'Ajuste manual',
   PROVISIONAL: 'Provisional',
   WELCOME_BONUS: 'Puntos de Bienvenida',
+  REFERRAL_BONUS: 'Bono por Referido',
 }
 
 const EVENT_TYPES = [

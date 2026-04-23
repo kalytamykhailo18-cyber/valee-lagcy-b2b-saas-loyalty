@@ -164,5 +164,37 @@ export async function tryCreditReferral(params: {
     },
   });
 
+  // Notify the referrer via WhatsApp so they actually see the bonus
+  // land. Eric flagged this on 2026-04-23 ("no se ven en whatsapp ni
+  // en la pwa") — the credit was happening silently and neither the
+  // bot nor the PWA surfaced it. Best-effort: a failure here never
+  // rolls back the credit, it's a pure notification side-effect.
+  try {
+    const [referrer, tenantFull] = await Promise.all([
+      prisma.account.findUnique({
+        where: { id: pending.referrerAccountId },
+        select: { phoneNumber: true },
+      }),
+      prisma.tenant.findUnique({
+        where: { id: params.tenantId },
+        select: { name: true, slug: true },
+      }),
+    ]);
+    if (referrer?.phoneNumber && tenantFull) {
+      const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
+      const pwaLink = `${base}/consumer?tenant=${encodeURIComponent(tenantFull.slug)}`;
+      const bonusRound = Math.round(parseFloat(amount)).toLocaleString();
+      const lines = [
+        `🎉 ¡Ganaste ${bonusRound} puntos por tu referido en ${tenantFull.name}!`,
+        `Tu invitado hizo su primera compra y el bono ya esta en tu saldo.`,
+        `📱 Ver tu cuenta: ${pwaLink}`,
+      ];
+      const { sendWhatsAppMessage } = await import('./whatsapp.js');
+      await sendWhatsAppMessage(referrer.phoneNumber, lines.join('\n'));
+    }
+  } catch (err) {
+    console.error('[Referral] Failed to notify referrer via WhatsApp (non-fatal):', err);
+  }
+
   return { credited: true, amount, referrerAccountId: pending.referrerAccountId };
 }

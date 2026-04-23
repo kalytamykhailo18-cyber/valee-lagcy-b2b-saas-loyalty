@@ -273,12 +273,15 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
           // do the same here so the merchant dashboard labels them
           // 'Puntos de Bienvenida' instead of the generic 'Ajuste manual'
           // (Genesis L3).
-          let effectiveEventType: string =
-            e.event_type === 'ADJUSTMENT_MANUAL'
-            && (String(e.reference_id || '').startsWith('WELCOME-')
-                || meta?.type === 'welcome_bonus')
-              ? 'WELCOME_BONUS'
-              : e.event_type;
+          const refStr = String(e.reference_id || '');
+          let effectiveEventType: string = e.event_type;
+          if (e.event_type === 'ADJUSTMENT_MANUAL') {
+            if (refStr.startsWith('WELCOME-') || meta?.type === 'welcome_bonus') {
+              effectiveEventType = 'WELCOME_BONUS';
+            } else if (refStr.startsWith('REFERRAL-') || meta?.type === 'referral_bonus') {
+              effectiveEventType = 'REFERRAL_BONUS';
+            }
+          }
           // Relabel surviving PENDING to CONFIRMED when confirmation landed.
           if (tid && e.event_type === 'REDEMPTION_PENDING' && confirmedTokenIds.has(tid)) {
             effectiveEventType = 'REDEMPTION_CONFIRMED';

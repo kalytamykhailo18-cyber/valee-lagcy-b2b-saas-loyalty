@@ -225,14 +225,23 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         const tid = redemptionEventTypes.has(e.eventType) ? tokenIdByRef.get(e.referenceId) : undefined;
         const product = metaProduct || (tid ? productByTokenId.get(tid) : undefined);
 
-        // Welcome-bonus credits are written under ADJUSTMENT_MANUAL with a
-        // WELCOME- referenceId and metadata.type === 'welcome_bonus'. Emit a
-        // virtual event type so the consumer UI can label them correctly.
-        const effectiveEventType =
-          e.eventType === 'ADJUSTMENT_MANUAL'
-          && (e.referenceId?.startsWith('WELCOME-') || meta?.type === 'welcome_bonus')
-            ? 'WELCOME_BONUS'
-            : e.eventType;
+        // Welcome-bonus and referral-bonus credits are both written as
+        // ADJUSTMENT_MANUAL under the hood. We emit virtual event types
+        // so the consumer UI can label them correctly in the history:
+        //   WELCOME-<accountId>  → WELCOME_BONUS  (or meta.type === 'welcome_bonus')
+        //   REFERRAL-<referralId> → REFERRAL_BONUS (or meta.type === 'referral_bonus')
+        // Eric flagged on 2026-04-23 that referral bonuses were
+        // invisible in the PWA because they rendered as the generic
+        // ADJUSTMENT_MANUAL.
+        const refStr = e.referenceId || '';
+        let effectiveEventType: string = e.eventType;
+        if (e.eventType === 'ADJUSTMENT_MANUAL') {
+          if (refStr.startsWith('WELCOME-') || meta?.type === 'welcome_bonus') {
+            effectiveEventType = 'WELCOME_BONUS';
+          } else if (refStr.startsWith('REFERRAL-') || meta?.type === 'referral_bonus') {
+            effectiveEventType = 'REFERRAL_BONUS';
+          }
+        }
 
         // Effective status: if this is a provisional INVOICE_CLAIMED
         // whose invoice has been reconciled via CSV (invoice.status =

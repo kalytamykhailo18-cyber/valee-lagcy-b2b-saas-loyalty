@@ -49,6 +49,7 @@ const EVENT_LABELS: Record<string, string> = {
   ADJUSTMENT_MANUAL: 'Ajuste manual',
   TRANSFER_P2P: 'Transferencia',
   WELCOME_BONUS: 'Puntos de Bienvenida',
+  REFERRAL_BONUS: 'Bono por Referido',
 }
 
 function ConsumerApp() {
