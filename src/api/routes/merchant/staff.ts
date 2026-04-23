@@ -72,13 +72,19 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       return reply.status(400).send({ error: 'El cajero ya esta asignado a esa sucursal.' });
     }
 
-    const priorChanges = await prisma.auditLog.count({
-      where: {
-        tenantId,
-        actionType: 'STAFF_BRANCH_CHANGED',
-        metadata: { path: ['staffId'], equals: id },
-      },
-    });
+    // Raw SQL instead of prisma.auditLog.count with a metadata JSON filter:
+    // Prisma types the nullable-JSON path/equals filter loosely, which some
+    // IDE type-checkers flag as a mismatch even though tsc passes. The sibling
+    // GET /staff endpoint already reads this column with raw SQL — keep both
+    // lookups on the same primitive for consistency.
+    const [{ n: priorChangesBig }] = await prisma.$queryRaw<Array<{ n: bigint }>>`
+      SELECT COUNT(*)::bigint AS n
+      FROM audit_log
+      WHERE tenant_id = ${tenantId}::uuid
+        AND action_type = 'STAFF_BRANCH_CHANGED'
+        AND (metadata->>'staffId') = ${id}
+    `;
+    const priorChanges = Number(priorChangesBig);
     if (priorChanges >= 1) {
       return reply.status(403).send({
         error: 'La sucursal del cajero ya fue cambiada una vez. Para otro cambio, comunicate con soporte@valee.app.',
