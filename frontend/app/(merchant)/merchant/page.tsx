@@ -119,6 +119,17 @@ export default function MerchantDashboard() {
     }
   }, [role, txFilters, txOffset])
 
+  // If the merchant clears all unassigned data (or it never existed) but
+  // had previously selected '_unassigned', reset to "Todas las sucursales"
+  // so the UI doesn't get stuck filtering an empty bucket.
+  useEffect(() => {
+    const hasUnassigned = !!metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0
+    if (!hasUnassigned) {
+      if (selectedBranch === '_unassigned') setSelectedBranch('')
+      if (txFilters.branchId === '_unassigned') setTxFilters(f => ({ ...f, branchId: '' }))
+    }
+  }, [metrics?.valueIssuedUnassigned])
+
   async function loadAnalytics() {
     try { setAnalytics(await api.getAnalytics()) } catch {}
   }
@@ -244,8 +255,8 @@ export default function MerchantDashboard() {
         )}
 
         {/* Top row: Branch selector (if exists) + Multiplier card side by side */}
-        <div className={`grid gap-4 mt-4 lg:mt-0 ${branches.length > 0 ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
-          {branches.length > 0 && (
+        <div className={`grid gap-4 mt-4 lg:mt-0 ${branches.filter(b => b.active).length > 0 ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1'}`}>
+          {branches.filter(b => b.active).length > 0 && (
             <div className="bg-white rounded-xl p-5 shadow-sm border border-slate-100 lg:col-span-1">
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
               <select
@@ -254,10 +265,9 @@ export default function MerchantDashboard() {
                   const v = e.target.value
                   setSelectedBranch(v)
                   // Keep the transactions list in sync with the top selector.
-                  // '_unassigned' in the top selector maps to "sin sucursal"
-                  // for metrics but the transactions query only accepts real
-                  // branch ids or empty (= todas), so we clear in that case.
-                  setTxFilters(f => ({ ...f, branchId: v === '_unassigned' ? '' : v }))
+                  // '_unassigned' now propagates: the transactions endpoint
+                  // accepts it and filters to branch_id IS NULL rows.
+                  setTxFilters(f => ({ ...f, branchId: v }))
                 }}
                 className="aa-field aa-field-emerald w-full mt-2 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               >
@@ -265,53 +275,84 @@ export default function MerchantDashboard() {
                 {branches.filter(b => b.active).map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
-                {/* 'Sin sucursal asignada' was confusing — Genesis M7.
-                    When the merchant has no branches at all, just the
-                    tenant name reads better. When they DO have branches,
-                    show '<tenant> · sin sucursal' so it's still clear
-                    which bucket this is. */}
-                <option value="_unassigned">
-                  {branches.filter(b => b.active).length === 0
-                    ? (typeof window !== 'undefined' && localStorage.getItem('tenantName')) || 'Sin sucursal'
-                    : `${(typeof window !== 'undefined' && localStorage.getItem('tenantName')) || 'Comercio'} · sin sucursal especifica`}
-                </option>
+                {/* Eric 2026-04-25: when the comercio works with sucursales,
+                    the "sin sucursal" option must NEVER appear — every nuevo
+                    movimiento se atribuye a una. Solo aparece cuando el
+                    comercio NO tiene ninguna sucursal activa, en cuyo caso
+                    el merchant es una tienda unica. (El wrapper de afuera
+                    ya esconde el selector entero si no hay branches, asi que
+                    en la practica esta opcion ya no se renderiza nunca aqui.) */}
               </select>
-              {!selectedBranch && metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0 && (
-                <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                  De los puntos emitidos, <span className="font-semibold text-amber-600">{formatPoints(metrics.valueIssuedUnassigned)}</span> no estan asignados a ninguna sucursal (vienen de CSV, WhatsApp, transacciones sin sucursal). Por eso &ldquo;Todas las sucursales&rdquo; no es la suma directa de las sucursales individuales.
-                </p>
-              )}
             </div>
           )}
 
-          {multiplier && (
-            <div className={`bg-white rounded-xl p-5 shadow-sm border border-slate-100 ${branches.length > 0 ? 'lg:col-span-2' : ''}`}>
-              <div className="flex items-center justify-between flex-wrap gap-3">
-                <div>
-                  <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Multiplicador de puntos</p>
-                  <p className="text-4xl font-bold text-emerald-700 mt-1">{parseFloat(parseFloat(multiplier.currentRate).toFixed(2))}x</p>
+          {multiplier && (() => {
+            const rateNow = parseFloat(multiplier.currentRate) || 1
+            const previewRate = newMultiplier ? (parseFloat(newMultiplier) || rateNow) : rateNow
+            const sample = 10 // $10 sample purchase
+            // 1000 pts = $1 baseline redemption value, so cashback % = rate / 10.
+            const pct = (r: number) => `${(r / 10).toFixed(r % 10 === 0 ? 0 : 1)}%`
+            // Eric 2026-04-25: marketing-facing label adds a zero to the
+            // raw rate (50x → 500x) so it reads bigger to the merchant when
+            // they pick a tier. Underlying rate stored unchanged (still 50)
+            // so cashback math + the $10 example stay correct.
+            const labelX = (r: number) => `${(r * 10).toLocaleString('es-VE')}x`
+            const presets: Array<{ value: string; label: string }> = [
+              { value: '50',  label: '5%' },
+              { value: '100', label: '10%' },
+              { value: '150', label: '15%' },
+              { value: '200', label: '20%' },
+            ]
+            return (
+              <div className={`bg-white rounded-xl p-5 shadow-sm border border-slate-100 ${branches.filter(b => b.active).length > 0 ? 'lg:col-span-2' : ''}`}>
+                <div className="flex items-center justify-between flex-wrap gap-3">
+                  <div>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Multiplicador de puntos</p>
+                    <p className="text-4xl font-bold text-emerald-700 mt-1">{labelX(rateNow)}</p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Cada <span className="font-semibold">$10</span> gastados = <span className="font-semibold">{Math.round(rateNow * 10).toLocaleString('es-VE')}</span> puntos
+                      <span className="text-emerald-700"> ({pct(rateNow)} cashback)</span>
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2 items-center">
+                    {/* Eric 2026-04-24 (IMG_6760): presets 50/100/150/200, cada
+                        uno muestra el cashback equivalente para que el owner
+                        decida por impacto economico y no por un numero suelto.
+                        Eric 2026-04-25: label muestra 500x/1.000x/1.500x/2.000x
+                        (rate * 10) — solo cosmetico, el value enviado al backend
+                        sigue siendo 50/100/150/200. */}
+                    {presets.map(p => (
+                      <button key={p.value} onClick={() => setNewMultiplier(p.value)}
+                        className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight ${newMultiplier === p.value ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
+                        <span>{labelX(parseFloat(p.value))}</span>
+                        <span className={`text-[10px] ${newMultiplier === p.value ? 'text-emerald-100' : 'text-emerald-600/70'}`}>{p.label}</span>
+                      </button>
+                    ))}
+                    <input type="number" step="1" min="0.1" placeholder="Otro"
+                      value={newMultiplier}
+                      onChange={e => setNewMultiplier(e.target.value)}
+                      className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+                    {newMultiplier && (
+                      <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
+                        Aplicar
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2 items-center">
-                  {['10', '15', '20', '30'].map(m => (
-                    <button key={m} onClick={() => setNewMultiplier(m)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition ${newMultiplier === m ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
-                      {m}x
-                    </button>
-                  ))}
-                  <input type="number" step="0.1" min="0.1" placeholder="Otro"
-                    value={newMultiplier}
-                    onChange={e => setNewMultiplier(e.target.value)}
-                    className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
-                  {newMultiplier && (
-                    <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
-                      Aplicar
-                    </button>
-                  )}
+                {/* Live preview: make the math obvious so the owner can pick
+                    the scale that reads cleanly to their customers. */}
+                <div className="mt-3 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-xs text-emerald-800">
+                  Ejemplo: si un cliente gasta <span className="font-semibold">${sample}</span>, gana{' '}
+                  <span className="font-semibold">{Math.round(sample * previewRate).toLocaleString('es-VE')} puntos</span>
+                  <span className="text-emerald-700"> ({pct(previewRate)} cashback)</span>
+                  {newMultiplier && previewRate !== rateNow && (
+                    <span className="text-emerald-700/70"> (con el nuevo {labelX(previewRate)})</span>
+                  )}.
                 </div>
+                {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
               </div>
-              {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
-            </div>
-          )}
+            )
+          })()}
         </div>
 
         {/* Metrics Cards — 2 cols mobile, 3 cols tablet, 6 cols desktop */}
@@ -326,6 +367,7 @@ export default function MerchantDashboard() {
                 <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500 leading-tight">
                   <p className="flex justify-between gap-2"><span>Facturas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedInvoices || '0')}</span></p>
                   <p className="flex justify-between gap-2"><span>Bienvenidas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedWelcome || '0')}</span></p>
+                  <p className="flex justify-between gap-2"><span>Referidos</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedReferrals || '0')}</span></p>
                   <p className="flex justify-between gap-2"><span>Manuales</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedManual || '0')}</span></p>
                 </div>
               )}
@@ -532,7 +574,7 @@ export default function MerchantDashboard() {
                 </select>
               </div>
             </div>
-            {branches.length > 0 && (
+            {branches.filter(b => b.active).length > 0 && (
               <div>
                 <label className="text-xs text-slate-500">Sucursal</label>
                 <select value={txFilters.branchId}
@@ -542,6 +584,9 @@ export default function MerchantDashboard() {
                   {branches.filter(b => b.active).map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
+                  {/* "Sin sucursal" no se ofrece cuando hay sucursales (Eric
+                      2026-04-25). Si el comercio trabaja con sucursal, todo
+                      deberia estar atribuido a una. */}
                 </select>
               </div>
             )}
@@ -571,12 +616,20 @@ export default function MerchantDashboard() {
                           {tx.invoiceNumber && (
                             <p className="text-xs text-slate-500 font-mono truncate">Factura #{tx.invoiceNumber}</p>
                           )}
-                          <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                          <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2 items-center">
                             <span>{new Date(tx.createdAt).toLocaleString('es-VE')}</span>
                             {(tx.accountName || tx.accountPhone) && (
                               <span>· {tx.accountName || tx.accountPhone}</span>
                             )}
-                            {tx.branchName && <span>· {tx.branchName}</span>}
+                            {/* Eric 2026-04-25: cuando el comercio trabaja con
+                                sucursales, "Sin sucursal" no se debe mostrar
+                                en ningun lado. Solo renderizamos el badge
+                                cuando la fila tiene una sucursal real asignada. */}
+                            {branches.filter(b => b.active).length > 0 && tx.branchName && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-indigo-50 text-indigo-700">
+                                {tx.branchName}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

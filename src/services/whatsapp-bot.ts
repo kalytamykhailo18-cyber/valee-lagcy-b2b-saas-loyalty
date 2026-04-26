@@ -88,6 +88,7 @@ export function getStateGreeting(
   welcomeBonusAmount?: string,
   merchantSlug?: string,
   branchName?: string | null,
+  cashierSlug?: string | null,
 ): string[] {
   // Prefer the real tenant slug when available; the old fallback slugified
   // merchantName with spaces→dashes, which usually worked for "Valee Demo" but
@@ -95,7 +96,14 @@ export function getStateGreeting(
   // slug (e.g. "Café Juan Valdez" vs cafe-juan).
   const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
   const slug = (merchantSlug || merchantName.toLowerCase().replace(/\s+/g, '-')).toLowerCase();
-  const pwaLink = `${base}/consumer?tenant=${encodeURIComponent(slug)}`;
+  // Carry the cajero slug in the PWA link when the incoming QR identified a
+  // cashier. Genesis 2026-04-24: without it the user clicking the link from
+  // WhatsApp lands on the plain tenant view and the invoice they upload
+  // from the PWA loses the staff attribution. The PWA reads `cajero=` and
+  // registers a StaffScanSession so the attribution window carries across.
+  const pwaLink = cashierSlug
+    ? `${base}/consumer?tenant=${encodeURIComponent(slug)}&cajero=${encodeURIComponent(cashierSlug)}`
+    : `${base}/consumer?tenant=${encodeURIComponent(slug)}`;
   // Combine the merchant name with the branch the user just scanned so the
   // bot reply reflects where they actually are (Genesis L4: 'Acabas de
   // visitar Luxor Fitness' should say 'Luxor Fitness - Luxor Valencia').
@@ -110,9 +118,20 @@ export function getStateGreeting(
       // X puntos de bienvenida, queremos verte en <comercio>". The
       // previous copy split this across two stilted lines and buried
       // the merchant name in a separate "Bienvenido a" greeting.
-      const bonusAmount = welcomeBonusAmount || process.env.WELCOME_BONUS_AMOUNT || '50';
+      // When the merchant has the welcome bonus disabled or capped
+      // (welcomeBonusAmount === ''), drop the bonus line and lead with a
+      // clean welcome — never leak "te regalo 0 puntos" (Eric 2026-04-25).
+      // Eric 2026-04-26: format the bonus number with dot thousand
+      // separators (5000 → "5.000") to match how the merchant configured
+      // it in the panel. Locale 'es-VE' produces dot-as-thousands.
+      const bonusFormatted = welcomeBonusAmount
+        ? parseInt(welcomeBonusAmount).toLocaleString('es-VE')
+        : '';
+      const opener = welcomeBonusAmount && parseInt(welcomeBonusAmount) > 0
+        ? `🎉 ¡Ganaste ${bonusFormatted} puntos de bienvenida, queremos verte en ${merchantLabel}!`
+        : `👋 ¡Bienvenido a ${merchantLabel}!`;
       return [
-        `🎉 ¡Ganaste ${bonusAmount} puntos de bienvenida, queremos verte en ${merchantLabel}!`,
+        opener,
         `Envianos una foto de tu factura y te cargamos mas puntos automaticamente. 📸`,
         `📱 Accede a tu cuenta aqui: ${pwaLink}`,
       ];
@@ -120,7 +139,7 @@ export function getStateGreeting(
 
     case 'returning_with_history':
       return [
-        `¡Hola de nuevo! Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
+        `¡Hola de nuevo! Tu saldo actual es de ${Math.round(parseFloat(balance)).toLocaleString('es-VE')} puntos.`,
         `¿Tienes una nueva factura para escanear? 📸 Envíala aquí.`,
         `📱 Ver tu saldo y canjear: ${pwaLink}`,
       ];
@@ -128,7 +147,7 @@ export function getStateGreeting(
     case 'active_purchase':
       return [
         `¡Acabas de visitar ${merchantLabel}! No olvides enviar tu factura para ganar tus puntos. 📸`,
-        `Tu saldo actual: ${Math.round(parseFloat(balance)).toLocaleString()} puntos.`,
+        `Tu saldo actual: ${Math.round(parseFloat(balance)).toLocaleString('es-VE')} puntos.`,
         `📱 Ver tu cuenta: ${pwaLink}`,
       ];
 
@@ -202,7 +221,7 @@ export async function handleSupportIntent(
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { name: true } });
       const merchantName = tenant?.name || 'el comercio';
       const unitLabel = assetType?.unitLabel || 'puntos';
-      return [`Tu saldo en ${merchantName} es de ${Math.round(parseFloat(balance)).toLocaleString()} ${unitLabel}.`];
+      return [`Tu saldo en ${merchantName} es de ${Math.round(parseFloat(balance)).toLocaleString('es-VE')} ${unitLabel}.`];
     }
 
     case 'receipt_status': {
@@ -383,11 +402,19 @@ export async function handleIncomingMessage(params: {
   // Now ensure account exists
   const { account, created } = await findOrCreateConsumerAccount(tenantId, phoneNumber, params.senderProfileName);
 
-  // Grant welcome bonus on first contact
+  // Grant welcome bonus on first contact. When the user got here via a
+  // branch QR (Ref: slug/<branchId>), stamp that branch on the ledger
+  // entries so the transactions panel can attribute the row correctly.
+  // Track whether the bonus was actually granted so the greeting copy can
+  // skip the "te regalo X puntos" line when the merchant has the bonus
+  // turned off or capped (Eric 2026-04-25). Otherwise the bot was leaking
+  // "te regalo 0 puntos" / a fake-positive bonus mention to the consumer.
+  let welcomeBonusGranted = false;
   if (created) {
     const assetType = await prisma.assetType.findFirst();
     if (assetType) {
-      await grantWelcomeBonus(account.id, tenantId, assetType.id);
+      const result = await grantWelcomeBonus(account.id, tenantId, assetType.id, params.branchId || null);
+      welcomeBonusGranted = result.granted;
     }
   }
 
@@ -407,6 +434,25 @@ export async function handleIncomingMessage(params: {
     branchName = branch?.name || null;
   }
 
+  // Parse the Cjr: marker in the incoming text so the welcome / greeting
+  // links can carry the cashier slug forward. Silently tolerates a missing
+  // marker or stale/inactive cashier slug. When the marker is present the
+  // PWA link ends with &cajero=<slug> and the frontend registers the
+  // attribution session so the invoice the user uploads from the PWA still
+  // gets credited to that cashier.
+  let cashierSlug: string | null = null;
+  if (messageText) {
+    const cjrMatch = messageText.match(/Cjr:\s*([a-z0-9]{4,16})/i);
+    if (cjrMatch) {
+      const candidate = cjrMatch[1].toLowerCase();
+      const staffRow = await prisma.staff.findFirst({
+        where: { qrSlug: candidate, tenantId, active: true },
+        select: { qrSlug: true },
+      });
+      if (staffRow?.qrSlug) cashierSlug = staffRow.qrSlug;
+    }
+  }
+
   // Prefix line surfaced whenever the caller detected a re-used referral
   // code. Applies to greeting responses, support-intent responses AND the
   // first_time welcome path so the user always gets the feedback on a
@@ -416,24 +462,43 @@ export async function handleIncomingMessage(params: {
     ? ['Este codigo de referido ya lo usaste — solo funciona una vez por persona. Sigue enviando tus facturas para ganar puntos normalmente.']
     : [];
 
-  // If account was just created (first contact via QR), always send welcome greeting
-  if (created || state === 'first_time') {
-    const bonusAmt = tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50';
-    return [...referralPrefix, ...getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName)];
+  // If account was just created (first contact via QR), always send welcome greeting.
+  // BUT: if the very first interaction is an image (the user sent a photo of
+  // their factura as their opening message — Eric 2026-04-23 referral
+  // testing), we do NOT re-greet. The account is still first_time for up
+  // to 2h after the welcome bonus, and without this carve-out every image
+  // submitted in that window was bouncing back with the welcome copy
+  // instead of the validation result. Image messages always flow into the
+  // validation pipeline below.
+  if ((created || state === 'first_time') && messageType !== 'image') {
+    // Only mention the bonus amount when it was actually granted on this
+    // contact. Active=false / capped / amount=0 → pass empty string so the
+    // greeting falls back to a clean welcome without the bonus line.
+    const bonusAmt = welcomeBonusGranted
+      ? (tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50')
+      : '';
+    return [...referralPrefix, ...getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName, cashierSlug)];
   }
 
   // If it's the first message or a greeting, send state-based greeting
   if (messageType === 'text' && messageText) {
     const lower = messageText.toLowerCase().trim();
 
-    // Check if it's a merchant QR message (already handled by webhook for tenant routing)
-    if (/merchant:[a-z0-9\-]+/i.test(lower)) {
-      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName)];
+    // Is this the pre-filled QR body? Returning users were dropping into
+    // detectSupportIntent → "No entendi" whenever they rescanned a QR in
+    // the current "Valee Ref: <slug> Cjr: <qr>" format because the check
+    // below only recognized the legacy "MERCHANT:" tag. Accept every
+    // marker we emit today (Ref:, Cjr:, Ref2U:) plus the legacy one
+    // (MERCHANT:) so any QR scan lands on the state-based greeting.
+    const isQrRescan = /\b(?:ref|cjr|ref2u):\s*[a-z0-9\-\/]+/i.test(lower)
+      || /merchant:[a-z0-9\-]+/i.test(lower);
+    if (isQrRescan) {
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug)];
     }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {
-      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName)];
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug)];
     }
 
     // Check support intents
@@ -507,16 +572,16 @@ export async function handleIncomingMessage(params: {
         // valide" already conveys the pending state without the jargon.
         return [
           `✅ Factura recibida y en verificacion.`,
-          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
-          `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
+          `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString('es-VE')} ${assetType.unitLabel}.`,
+          `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString('es-VE')} ${assetType.unitLabel}.`,
           `Te confirmamos en breve cuando se valide.`,
           `📱 Ver tu cuenta y canjear premios: ${pwaLink}`,
         ];
       }
       return [
         `✅ Factura validada!`,
-        `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString()} ${assetType.unitLabel}.`,
-        `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString()} ${assetType.unitLabel}.`,
+        `Ganaste ${Math.round(parseFloat(result.valueAssigned!)).toLocaleString('es-VE')} ${assetType.unitLabel}.`,
+        `Tu saldo total: ${Math.round(parseFloat(result.newBalance!)).toLocaleString('es-VE')} ${assetType.unitLabel}.`,
         `📱 Ver tu cuenta y canjear premios: ${pwaLink}`,
       ];
     } else {
@@ -529,5 +594,5 @@ export async function handleIncomingMessage(params: {
   }
 
   // Default: state greeting
-  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName);
+  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug);
 }

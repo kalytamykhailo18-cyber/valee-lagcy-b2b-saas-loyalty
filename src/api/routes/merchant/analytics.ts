@@ -107,7 +107,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       params.push(status);
       paramIndex++;
     }
-    if (branchId) {
+    if (branchId === '_unassigned') {
+      conditions.push(`le.branch_id IS NULL`);
+    } else if (branchId) {
       conditions.push(`le.branch_id = $${paramIndex}::uuid`);
       params.push(branchId);
       paramIndex++;

@@ -58,6 +58,10 @@ function ConsumerApp() {
   // Accept both ?merchant= and ?tenant= for backwards compat with the home page
   // and external links/QRs that use either name.
   const merchantSlugFromUrl = searchParams.get('merchant') || searchParams.get('tenant') || ''
+  // Cajero slug comes from the WhatsApp greeting "Accede a tu cuenta" link
+  // when the user scanned a cashier QR. We record a StaffScanSession so the
+  // invoice they upload from the PWA still carries the attribution.
+  const cashierSlugFromUrl = searchParams.get('cajero') || ''
 
   // Always start with 'loading' to avoid login page flash during SSR hydration.
   // The useEffect below checks localStorage and sets the real screen.
@@ -77,6 +81,7 @@ function ConsumerApp() {
   const [account, setAccount] = useState<any>(null)
   const [products, setProducts] = useState<any[]>([])
   const [showWelcome, setShowWelcome] = useState(false)
+  const [attendedBy, setAttendedBy] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [activeCodesCount, setActiveCodesCount] = useState(0)
@@ -168,6 +173,31 @@ function ConsumerApp() {
     purgeExpiredActions()
     setPendingCount(getPendingCount())
   }, [merchantSlugFromUrl])
+
+  // One-shot: register the cashier attribution on this consumer's phone
+  // when the URL carries ?cajero=. We wait until `screen === 'main'` so
+  // the tenant context is already selected and the JWT has the phone.
+  // We also remove the param from the URL afterwards so a browser
+  // refresh doesn't keep re-recording the session forever.
+  useEffect(() => {
+    if (screen !== 'main') return
+    if (!cashierSlugFromUrl) return
+    const flagKey = `cajeroRecorded:${cashierSlugFromUrl}`
+    if (sessionStorage.getItem(flagKey)) return
+    ;(async () => {
+      try {
+        const res: any = await api.recordStaffAttribution(cashierSlugFromUrl)
+        if (res?.recorded && res?.staffName) setAttendedBy(res.staffName)
+        sessionStorage.setItem(flagKey, '1')
+        // Strip the cajero param from the URL so a reload won't keep
+        // re-recording (the attribution is valid for the configured
+        // STAFF_ATTRIBUTION_WINDOW_MIN on the server).
+        const u = new URL(window.location.href)
+        u.searchParams.delete('cajero')
+        window.history.replaceState({}, '', u.pathname + (u.search ? `?${u.searchParams.toString()}` : ''))
+      } catch {}
+    })()
+  }, [screen, cashierSlugFromUrl])
 
   async function loadData() {
     // Use allSettled so one failing call (e.g. /balance when the token is
@@ -474,16 +504,48 @@ function ConsumerApp() {
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32">
-      {/* Welcome Card */}
-      {showWelcome && (
-        <div className="aa-pop bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-6">
-          <h2 className="text-xl font-bold tracking-tight">Bienvenido a Valee!</h2>
-          <p className="mt-2 text-indigo-100 text-sm">Tu programa de recompensas. Escanea facturas, acumula puntos y canjealos por productos.</p>
-          <button onClick={dismissWelcome} className="aa-btn mt-4 bg-white text-indigo-600 px-4 py-2 rounded-lg font-medium text-sm">
-            <span className="relative z-10">Entendido</span>
-          </button>
-        </div>
-      )}
+      {/* Welcome Card — first visit only. Eric 2026-04-24: render a row of
+          real product photos from this merchant so the "how it works" copy
+          feels tangible and the user immediately sees what they can earn
+          toward. Falls back gracefully to text-only when the merchant has
+          no photos yet. */}
+      {showWelcome && (() => {
+        const previewPhotos = products
+          .filter((p: any) => p.active && p.photoUrl)
+          .slice(0, 4)
+        return (
+          <div className="aa-pop bg-gradient-to-r from-indigo-600 to-indigo-800 text-white p-6">
+            <h2 className="text-xl font-bold tracking-tight">
+              Bienvenido{account?.merchantName ? ` a ${account.merchantName}` : ' a Valee'}!
+            </h2>
+            <p className="mt-2 text-indigo-100 text-sm">
+              Escanea tus facturas, acumula puntos y canjealos por productos como estos:
+            </p>
+            {previewPhotos.length > 0 && (
+              <div className="mt-3 grid grid-cols-4 gap-2">
+                {previewPhotos.map((p: any) => (
+                  <div key={p.id} className="aspect-square rounded-lg overflow-hidden bg-white/10 border border-white/20">
+                    <img
+                      src={p.photoUrl}
+                      alt={p.name}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+            <ol className="mt-4 text-[13px] text-indigo-100 space-y-1">
+              <li>1. Haz tu compra en el comercio.</li>
+              <li>2. Envia la foto de la factura o escaneala aqui mismo.</li>
+              <li>3. Acumula puntos y canjealos por premios del catalogo.</li>
+            </ol>
+            <button onClick={dismissWelcome} className="aa-btn mt-4 bg-white text-indigo-600 px-4 py-2 rounded-lg font-medium text-sm">
+              <span className="relative z-10">Entendido</span>
+            </button>
+          </div>
+        )
+      })()}
 
       {/* Header: back to hub + merchant label + logout
           "Mis comercios" goes back to the multi-merchant hub at /consumer
@@ -521,6 +583,16 @@ function ConsumerApp() {
           >
             No soy yo
           </button>
+        </div>
+      )}
+
+      {/* Attended-by banner — appears when the user arrived from a cashier
+          QR and the PWA registered the attribution. Reinforces the link
+          between the person who handed them the QR and the points the
+          invoice will generate. */}
+      {attendedBy && (
+        <div className="bg-emerald-50 border-b border-emerald-100 px-4 py-2 text-xs text-emerald-800">
+          Atendido por <span className="font-semibold">{attendedBy}</span>. La factura que envies se le acredita.
         </div>
       )}
 
@@ -691,6 +763,30 @@ function ConsumerApp() {
                   <div className="mt-3">
                     <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
                     <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                    {/* Eric 2026-04-25: misma info que el catalogo full —
+                        stock + sucursal — asi el cliente sabe a primera vista
+                        si lo puede canjear y donde sin tener que abrir "Ver todo". */}
+                    {typeof p.stock === 'number' && (
+                      <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                    )}
+                    {(() => {
+                      const names = p.branchNames || []
+                      if (p.branchScope === 'branch' && p.branchName) {
+                        return (
+                          <p className="text-[11px] text-emerald-700 mt-0.5 truncate" title={p.branchName}>
+                            Solo en {p.branchName}
+                          </p>
+                        )
+                      }
+                      if (p.branchScope === 'tenant' && names.length > 0) {
+                        return (
+                          <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={names.join(', ')}>
+                            Todas las sucursales{names.length <= 3 ? `: ${names.join(', ')}` : ` (${names.length})`}
+                          </p>
+                        )
+                      }
+                      return null
+                    })()}
                   </div>
                 </Link>
               )
@@ -728,6 +824,27 @@ function ConsumerApp() {
                   <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
                   <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
                   <p className="text-xs text-amber-600 font-bold mt-0.5">+ ${formatCash(p.cashPrice)}</p>
+                  {typeof p.stock === 'number' && (
+                    <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                  )}
+                  {(() => {
+                    const names = p.branchNames || []
+                    if (p.branchScope === 'branch' && p.branchName) {
+                      return (
+                        <p className="text-[11px] text-emerald-700 mt-0.5 truncate" title={p.branchName}>
+                          Solo en {p.branchName}
+                        </p>
+                      )
+                    }
+                    if (p.branchScope === 'tenant' && names.length > 0) {
+                      return (
+                        <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={names.join(', ')}>
+                          Todas las sucursales{names.length <= 3 ? `: ${names.join(', ')}` : ` (${names.length})`}
+                        </p>
+                      )
+                    }
+                    return null
+                  })()}
                 </div>
               </Link>
             ))}
@@ -765,22 +882,29 @@ function ConsumerApp() {
         </div>
       </Link>
 
-      {/* Bottom Fixed Actions */}
-      <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg z-10 aa-rise-sm">
-        <Link
-          href="/scan"
-          className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700"
-        >
-          <MdCameraAlt className="w-5 h-5 relative z-10" />
-          <span className="relative z-10">Escanear factura</span>
-        </Link>
-        <Link
-          href="/catalog"
-          className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-emerald-700"
-        >
-          <MdCardGiftcard className="w-5 h-5 relative z-10" />
-          <span className="relative z-10">Canjear premios</span>
-        </Link>
+      {/* Bottom Fixed Actions — the consumer layout wraps the whole PWA in
+          a lg:max-w-md card centered on the page, so the action bar must
+          match that width instead of spanning the full viewport (it used to
+          stretch edge-to-edge on desktop/tablet, which looked awful next to
+          the narrow content column). The outer wrapper keeps the positioning
+          at the bottom of the viewport; the inner bar is capped + centered. */}
+      <div className="fixed bottom-0 inset-x-0 z-10 pointer-events-none">
+        <div className="lg:max-w-md lg:mx-auto pointer-events-auto bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg aa-rise-sm">
+          <Link
+            href="/scan"
+            className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700"
+          >
+            <MdCameraAlt className="w-5 h-5 relative z-10" />
+            <span className="relative z-10">Escanear factura</span>
+          </Link>
+          <Link
+            href="/catalog"
+            className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-emerald-700"
+          >
+            <MdCardGiftcard className="w-5 h-5 relative z-10" />
+            <span className="relative z-10">Canjear premios</span>
+          </Link>
+        </div>
       </div>
     </div>
   )

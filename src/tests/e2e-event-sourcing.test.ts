@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'; dotenv.config();
+import { assertTestDatabase } from './_test-guard.js';
 import prisma from '../db/client.js';
 import { writeDoubleEntry, getAccountBalance, getAccountBalanceAtTime, getAccountHistory } from '../services/ledger.js';
 import { createTenant } from '../services/tenants.js';
@@ -12,6 +13,7 @@ function assert(ok: boolean, msg: string) {
 }
 
 async function cleanAll() {
+  assertTestDatabase();
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_delete`;
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_truncate`;
   await prisma.$executeRaw`ALTER TABLE audit_log DISABLE TRIGGER trg_audit_no_delete`;

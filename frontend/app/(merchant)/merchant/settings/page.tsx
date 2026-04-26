@@ -4,8 +4,21 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 
+// Dot thousand separator for bonus point inputs (LATAM convention).
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 interface Settings {
   welcomeBonusAmount: number
+  welcomeBonusActive: boolean
+  welcomeBonusLimit: number | null
+  referralBonusAmount: number
+  referralBonusActive: boolean
+  referralBonusLimit: number | null
   rif: string | null
   name: string
   logoUrl: string | null
@@ -56,6 +69,11 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [welcomeBonus, setWelcomeBonus] = useState('')
+  const [welcomeActive, setWelcomeActive] = useState(true)
+  const [welcomeLimit, setWelcomeLimit] = useState('')
+  const [referralBonus, setReferralBonus] = useState('')
+  const [referralActive, setReferralActive] = useState(true)
+  const [referralLimit, setReferralLimit] = useState('')
   const [rif, setRif] = useState('')
   const [rifRaw, setRifRaw] = useState('')
   const [rifError, setRifError] = useState('')
@@ -86,6 +104,11 @@ export default function SettingsPage() {
       setRates(r.rates)
       setPlanUsage(pu)
       setWelcomeBonus(String(s.welcomeBonusAmount))
+      setWelcomeActive((s as any).welcomeBonusActive !== false)
+      setWelcomeLimit((s as any).welcomeBonusLimit != null ? String((s as any).welcomeBonusLimit) : '')
+      setReferralBonus(String((s as any).referralBonusAmount ?? ''))
+      setReferralActive((s as any).referralBonusActive !== false)
+      setReferralLimit((s as any).referralBonusLimit != null ? String((s as any).referralBonusLimit) : '')
       setRif(s.rif || '')
       // Collapse the stored canonical "J-12345678-9" into the single-input
       // form the UI now renders — letter + digits, no separators.
@@ -155,6 +178,11 @@ export default function SettingsPage() {
     try {
       const updated = await api.updateMerchantSettings({
         welcomeBonusAmount: Number(welcomeBonus),
+        welcomeBonusActive: welcomeActive,
+        welcomeBonusLimit: welcomeLimit.trim() ? Number(welcomeLimit) : null,
+        referralBonusAmount: Number(referralBonus || 0),
+        referralBonusActive: referralActive,
+        referralBonusLimit: referralLimit.trim() ? Number(referralLimit) : null,
         preferredExchangeSource: exchangeSource || null,
         referenceCurrency: refCurrency,
         logoUrl: logoUrl,
@@ -325,11 +353,65 @@ export default function SettingsPage() {
                   </div>
                   <p className="text-xs text-slate-400 mt-2">Formato recomendado: cuadrado, 400x400px, maximo 2MB. Se mostrara en el menu del dashboard.</p>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos de bienvenida</label>
-                  <input type="number" value={welcomeBonus} onChange={e => setWelcomeBonus(e.target.value)}
-                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm" min="0" />
-                  <p className="text-xs text-slate-400 mt-1">Cuantos puntos recibe cada cliente nuevo. 0 desactiva.</p>
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono de bienvenida</label>
+                    <button
+                      type="button"
+                      onClick={() => setWelcomeActive(!welcomeActive)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${welcomeActive ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                      aria-label="Activar/desactivar bono de bienvenida"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${welcomeActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <input type="text" inputMode="numeric"
+                    value={fmtThousands(welcomeBonus)}
+                    onChange={e => setWelcomeBonus(stripNonDigits(e.target.value))}
+                    disabled={!welcomeActive}
+                    placeholder="Cantidad de puntos"
+                    className="aa-field aa-field-emerald w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cupo (opcional)</label>
+                    <input type="text" inputMode="numeric"
+                      value={fmtThousands(welcomeLimit)}
+                      onChange={e => setWelcomeLimit(stripNonDigits(e.target.value))}
+                      disabled={!welcomeActive}
+                      placeholder="Sin limite"
+                      className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                    <p className="text-xs text-slate-400 mt-1">Limite de bonos a entregar (ej: 20 primeros clientes). Vacio = sin limite.</p>
+                  </div>
+                  <p className="text-xs text-slate-400">Cuando esta apagado o se llena el cupo, el bot deja de mencionarlo en el saludo.</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono por referido</label>
+                    <button
+                      type="button"
+                      onClick={() => setReferralActive(!referralActive)}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${referralActive ? 'bg-emerald-600' : 'bg-slate-300'}`}
+                      aria-label="Activar/desactivar bono por referido"
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition ${referralActive ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </button>
+                  </div>
+                  <input type="text" inputMode="numeric"
+                    value={fmtThousands(referralBonus)}
+                    onChange={e => setReferralBonus(stripNonDigits(e.target.value))}
+                    disabled={!referralActive}
+                    placeholder="Cantidad de puntos"
+                    className="aa-field aa-field-emerald w-full px-3 py-2.5 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                  <div>
+                    <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cupo (opcional)</label>
+                    <input type="text" inputMode="numeric"
+                      value={fmtThousands(referralLimit)}
+                      onChange={e => setReferralLimit(stripNonDigits(e.target.value))}
+                      disabled={!referralActive}
+                      placeholder="Sin limite"
+                      className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+                    <p className="text-xs text-slate-400 mt-1">Limite de bonos a entregar antes de pausar el programa. Vacio = sin limite.</p>
+                  </div>
+                  <p className="text-xs text-slate-400">Apaga el toggle o llena el cupo para detener nuevos pagos sin perder los referidos ya validados.</p>
                 </div>
 
                 {/* RIF — single input: letter + digits, no separators.

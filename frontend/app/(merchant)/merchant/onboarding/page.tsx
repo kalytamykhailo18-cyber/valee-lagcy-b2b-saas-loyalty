@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { MdQrCode2, MdStars, MdInventory2, MdCheckCircle, MdArrowForward, MdArrowBack, MdDownload, MdContentCopy } from 'react-icons/md'
+import { MdQrCode2, MdStars, MdInventory2, MdCheckCircle, MdArrowForward, MdArrowBack, MdDownload, MdContentCopy, MdStorefront } from 'react-icons/md'
 import { api } from '@/lib/api'
 
 interface Settings {
@@ -18,7 +18,17 @@ interface Settings {
   assetTypeId: string | null
 }
 
-type Step = 1 | 2 | 3 | 4
+type Step = 1 | 2 | 3 | 4 | 5
+type BranchModel = '' | 'single' | 'multi'
+
+// Display integer with dot thousand separator (LATAM convention).
+// Eric 2026-04-25: bonus inputs need '5.000' / '1.000' formatting.
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
 
 export default function OnboardingWizard() {
   const router = useRouter()
@@ -30,14 +40,27 @@ export default function OnboardingWizard() {
 
   // Step 2 form state — seeded from server values so re-entering the wizard
   // picks up where the merchant left off instead of silently overwriting.
-  const [welcomeBonus, setWelcomeBonus] = useState<string>('50')
-  const [referralBonus, setReferralBonus] = useState<string>('100')
+  // Defaults bumped to 5000 / 1000 (Eric 2026-04-25). Stored as raw digits;
+  // displayed with dot thousand separators in the inputs.
+  const [welcomeBonus, setWelcomeBonus] = useState<string>('5000')
+  const [referralBonus, setReferralBonus] = useState<string>('1000')
   const [currency, setCurrency] = useState<string>('usd')
 
-  // Step 3 form state
+  // Step 3 (Sucursales) state — Genesis 2026-04-24: owners need to
+  // declare early if they work with multiple branches, so the product
+  // step can ask which one. 'single' keeps the old flow untouched.
+  const [branchModel, setBranchModel] = useState<BranchModel>('')
+  const [firstBranchName, setFirstBranchName] = useState('')
+  const [firstBranchAddress, setFirstBranchAddress] = useState('')
+  const [createdBranchId, setCreatedBranchId] = useState<string | null>(null)
+
+  // Step 4 (Producto) form state
   const [productName, setProductName] = useState('')
   const [productCost, setProductCost] = useState('')
   const [productStock, setProductStock] = useState('10')
+  const [productBranchId, setProductBranchId] = useState('')
+  const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(null)
+  const [uploadingPhoto, setUploadingPhoto] = useState(false)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -51,8 +74,8 @@ export default function OnboardingWizard() {
       try {
         const s = await api.getMerchantSettings()
         setSettings(s)
-        setWelcomeBonus(String(s.welcomeBonusAmount ?? 50))
-        setReferralBonus(String(s.referralBonusAmount ?? 100))
+        setWelcomeBonus(String(s.welcomeBonusAmount ?? 5000))
+        setReferralBonus(String(s.referralBonusAmount ?? 1000))
         setCurrency(s.referenceCurrency || 'usd')
       } catch (e: any) {
         setError(e?.error || 'No se pudo cargar la configuracion')
@@ -79,7 +102,61 @@ export default function OnboardingWizard() {
     }
   }
 
-  async function saveStep3AndFinish() {
+  async function saveStep3AndNext() {
+    setError('')
+    if (!branchModel) {
+      setError('Elegi si tu comercio tiene una sola sede o trabaja con sucursales.')
+      return
+    }
+    setSaving(true)
+    try {
+      // If the owner picks "multi" and has not created a branch yet,
+      // create it now so step 4 (Producto) can pre-select it in the
+      // branch dropdown. Idempotent: if the user clicks Siguiente
+      // twice we don't create duplicate branches.
+      if (branchModel === 'multi' && !createdBranchId) {
+        if (!firstBranchName.trim()) {
+          setError('Ponle un nombre a tu primera sucursal (ej: Centro, Sede 1).')
+          setSaving(false)
+          return
+        }
+        const res: any = await api.createBranch({
+          name: firstBranchName.trim(),
+          address: firstBranchAddress.trim() || undefined,
+        })
+        const bid = res?.branch?.id || res?.id
+        if (bid) {
+          setCreatedBranchId(bid)
+          setProductBranchId(bid)
+        }
+      }
+      setStep(4)
+    } catch (e: any) {
+      setError(e?.error || 'No se pudo crear la sucursal')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleProductPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    if (file.size > 2 * 1024 * 1024) {
+      setError('La foto debe ser menor a 2MB')
+      return
+    }
+    setUploadingPhoto(true)
+    setError('')
+    try {
+      const result = await api.uploadProductImage(file)
+      setProductPhotoUrl(result.url)
+    } catch (err: any) {
+      setError(err?.error || err?.message || 'Error al subir la foto')
+    }
+    setUploadingPhoto(false)
+  }
+
+  async function saveStep4AndFinish() {
     setError('')
     setSaving(true)
     try {
@@ -97,9 +174,14 @@ export default function OnboardingWizard() {
           assetTypeId: settings.assetTypeId,
           stock,
           active: true,
+          photoUrl: productPhotoUrl || undefined,
+          // Attach the branch only when the merchant declared multi-branch
+          // on step 3. Single-sede merchants never see a branch selector
+          // and keep the tenant-wide product behavior they had before.
+          branchId: branchModel === 'multi' ? (productBranchId || createdBranchId || undefined) : undefined,
         })
       }
-      setStep(4)
+      setStep(5)
     } catch (e: any) {
       setError(e?.error || 'No se pudo crear el producto')
     } finally {
@@ -164,17 +246,18 @@ export default function OnboardingWizard() {
   }
 
   const steps: Array<{ n: Step; label: string; Icon: typeof MdQrCode2 }> = [
-    { n: 1, label: 'Tu QR',    Icon: MdQrCode2 },
-    { n: 2, label: 'Puntos',   Icon: MdStars },
-    { n: 3, label: 'Producto', Icon: MdInventory2 },
-    { n: 4, label: 'Listo',    Icon: MdCheckCircle },
+    { n: 1, label: 'Tu QR',      Icon: MdQrCode2 },
+    { n: 2, label: 'Puntos',     Icon: MdStars },
+    { n: 3, label: 'Sucursales', Icon: MdStorefront },
+    { n: 4, label: 'Producto',   Icon: MdInventory2 },
+    { n: 5, label: 'Listo',      Icon: MdCheckCircle },
   ]
 
   return (
     <div className="min-h-screen bg-emerald-50 pb-16">
       <header className="pt-8 pb-4 text-center aa-rise-sm">
         <h1 className="text-2xl font-bold text-emerald-800 tracking-tight">Bienvenido, {settings.name}</h1>
-        <p className="text-sm text-slate-500 mt-1">Vamos a configurar tu comercio en 3 pasos</p>
+        <p className="text-sm text-slate-500 mt-1">Vamos a configurar tu comercio en 4 pasos</p>
       </header>
 
       {/* Step indicator */}
@@ -268,9 +351,9 @@ export default function OnboardingWizard() {
             <div>
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono de bienvenida</label>
               <input
-                type="number" inputMode="numeric" min="0"
-                value={welcomeBonus}
-                onChange={e => setWelcomeBonus(e.target.value)}
+                type="text" inputMode="numeric"
+                value={fmtThousands(welcomeBonus)}
+                onChange={e => setWelcomeBonus(stripNonDigits(e.target.value))}
                 className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               />
               <p className="text-xs text-slate-400 mt-1">Puntos que recibe un cliente nuevo al escanear tu QR por primera vez</p>
@@ -278,9 +361,9 @@ export default function OnboardingWizard() {
             <div>
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono por referido</label>
               <input
-                type="number" inputMode="numeric" min="0"
-                value={referralBonus}
-                onChange={e => setReferralBonus(e.target.value)}
+                type="text" inputMode="numeric"
+                value={fmtThousands(referralBonus)}
+                onChange={e => setReferralBonus(stripNonDigits(e.target.value))}
                 className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               />
               <p className="text-xs text-slate-400 mt-1">Puntos que recibe un cliente cuando invita a otro que compra por primera vez</p>
@@ -315,6 +398,80 @@ export default function OnboardingWizard() {
 
         {step === 3 && (
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4 aa-rise">
+            <h2 className="text-lg font-bold text-slate-800">Como trabaja tu comercio?</h2>
+            <p className="text-sm text-slate-500">
+              Contanos si vas a manejar una sola sede o varias sucursales.
+              Esto cambia como se asignan tus productos y cajeros.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setBranchModel('single')}
+                className={`text-left p-4 rounded-xl border-2 transition ${branchModel === 'single' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'}`}
+              >
+                <p className="font-semibold text-slate-800">Comercio unico</p>
+                <p className="text-xs text-slate-500 mt-1">Tengo un solo local. Los productos y cajeros aplican en todo el comercio.</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => setBranchModel('multi')}
+                className={`text-left p-4 rounded-xl border-2 transition ${branchModel === 'multi' ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-slate-300'}`}
+              >
+                <p className="font-semibold text-slate-800">Tengo sucursales</p>
+                <p className="text-xs text-slate-500 mt-1">Trabajo con varias sedes. Voy a asignar productos y cajeros a cada una.</p>
+              </button>
+            </div>
+
+            {branchModel === 'multi' && !createdBranchId && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-3">
+                <p className="text-sm font-semibold text-emerald-800">Crea tu primera sucursal</p>
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nombre de la sucursal</label>
+                  <input
+                    type="text"
+                    placeholder="Ej: Centro, Sede Norte"
+                    value={firstBranchName}
+                    onChange={e => setFirstBranchName(e.target.value)}
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Direccion (opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Av. Bolivar, Valencia"
+                    value={firstBranchAddress}
+                    onChange={e => setFirstBranchAddress(e.target.value)}
+                    className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
+                  />
+                </div>
+                <p className="text-xs text-slate-500">Podes crear mas sucursales despues desde la seccion Sucursales.</p>
+              </div>
+            )}
+
+            {branchModel === 'multi' && createdBranchId && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800">
+                Sucursal &ldquo;{firstBranchName}&rdquo; lista. En el siguiente paso se asociara tu primer producto a esta sucursal.
+              </div>
+            )}
+
+            <div className="flex justify-between pt-2">
+              <button onClick={() => setStep(2)} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
+                <MdArrowBack className="w-4 h-4" />Atras
+              </button>
+              <button
+                onClick={saveStep3AndNext}
+                disabled={saving || !branchModel}
+                className="aa-btn aa-btn-emerald flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-semibold disabled:opacity-50 hover:bg-emerald-700"
+              >
+                {saving && <span className="aa-spinner" />}<span className="relative z-10">Siguiente</span><MdArrowForward className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 space-y-4 aa-rise">
             <h2 className="text-lg font-bold text-slate-800">Tu primer premio</h2>
             <p className="text-sm text-slate-500">
               Agrega un premio que los clientes puedan canjear. Podes saltar este paso y agregarlo despues.
@@ -334,13 +491,41 @@ export default function OnboardingWizard() {
                 className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
               />
             </div>
+            <div>
+              <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Foto del premio</label>
+              <div className="mt-1 flex items-center gap-3">
+                {productPhotoUrl ? (
+                  <img src={productPhotoUrl} alt="" className="w-16 h-16 rounded-lg object-cover border border-slate-200" />
+                ) : (
+                  <div className="w-16 h-16 rounded-lg border border-dashed border-slate-300 bg-slate-50 flex items-center justify-center text-xs text-slate-400">
+                    Sin foto
+                  </div>
+                )}
+                <div className="flex-1 space-y-1">
+                  <label className="inline-block cursor-pointer bg-emerald-600 text-white px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-emerald-700 transition disabled:opacity-50">
+                    {uploadingPhoto ? 'Subiendo...' : productPhotoUrl ? 'Cambiar foto' : 'Subir foto'}
+                    <input type="file" accept="image/*" onChange={handleProductPhotoUpload} disabled={uploadingPhoto} className="hidden" />
+                  </label>
+                  {productPhotoUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setProductPhotoUrl(null)}
+                      className="block text-xs text-red-600 hover:text-red-800 font-medium"
+                    >
+                      Quitar foto
+                    </button>
+                  )}
+                  <p className="text-xs text-slate-400">Recomendado: cuadrada, max 2MB. La foto se va a usar tambien en la tarjeta de bienvenida del PWA del cliente.</p>
+                </div>
+              </div>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (puntos)</label>
                 <input
-                  type="number" inputMode="numeric" min="1"
-                  value={productCost}
-                  onChange={e => setProductCost(e.target.value)}
+                  type="text" inputMode="numeric"
+                  value={fmtThousands(productCost)}
+                  onChange={e => setProductCost(stripNonDigits(e.target.value))}
                   placeholder="100"
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
@@ -348,23 +533,28 @@ export default function OnboardingWizard() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
                 <input
-                  type="number" inputMode="numeric" min="0"
-                  value={productStock}
-                  onChange={e => setProductStock(e.target.value)}
+                  type="text" inputMode="numeric"
+                  value={fmtThousands(productStock)}
+                  onChange={e => setProductStock(stripNonDigits(e.target.value))}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
+            {branchModel === 'multi' && createdBranchId && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-sm text-emerald-800">
+                Este primer premio se va a asociar a <span className="font-semibold">{firstBranchName}</span>. Podes cambiarlo o sumar mas sucursales en el catalogo mas tarde.
+              </div>
+            )}
             <div className="flex justify-between pt-2">
-              <button onClick={() => setStep(2)} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
+              <button onClick={() => setStep(3)} className="flex items-center gap-2 text-sm text-slate-500 hover:text-slate-700">
                 <MdArrowBack className="w-4 h-4" />Atras
               </button>
               <div className="flex items-center gap-3">
-                <button onClick={() => setStep(4)} className="text-sm text-slate-500 hover:text-slate-700">
+                <button onClick={() => setStep(5)} className="text-sm text-slate-500 hover:text-slate-700">
                   Saltar
                 </button>
                 <button
-                  onClick={saveStep3AndFinish}
+                  onClick={saveStep4AndFinish}
                   disabled={saving}
                   className="aa-btn aa-btn-emerald flex items-center gap-2 bg-emerald-600 text-white px-5 py-2.5 rounded-xl font-semibold disabled:opacity-50 hover:bg-emerald-700"
                 >
@@ -375,7 +565,7 @@ export default function OnboardingWizard() {
           </div>
         )}
 
-        {step === 4 && (
+        {step === 5 && (
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center space-y-4 aa-pop">
             <div className="w-16 h-16 mx-auto bg-emerald-100 rounded-full flex items-center justify-center">
               <MdCheckCircle className="w-10 h-10 text-emerald-600" />

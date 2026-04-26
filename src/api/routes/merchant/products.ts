@@ -24,16 +24,32 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
     const products = await prisma.product.findMany({
       where,
       orderBy: { createdAt: 'desc' },
+      include: { branch: { select: { id: true, name: true } } },
     });
-    return { products };
+    return {
+      products: products.map(p => ({
+        ...p,
+        branchName: p.branch?.name ?? null,
+      })),
+    };
   });
 
   app.post('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel } = request.body as any;
+    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel, branchId } = request.body as any;
 
     if (!name || !redemptionCost || !assetTypeId) {
       return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
+    }
+
+    // branchId is optional (null = tenant-wide). When set, verify it
+    // belongs to the caller's tenant so an owner can't stash a product
+    // under another tenant's branch by forging the UUID.
+    let resolvedBranchId: string | null = null;
+    if (branchId) {
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
+      if (!branch) return reply.status(400).send({ error: 'Sucursal no valida' });
+      resolvedBranchId = branch.id;
     }
 
     // Plan limit check
@@ -42,14 +58,14 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
     catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
 
     const product = await prisma.product.create({
-      data: { tenantId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
+      data: { tenantId, branchId: resolvedBranchId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
     });
 
     // Audit
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'PRODUCT_CREATED', 'success',
-        ${JSON.stringify({ productId: product.id, name })}::jsonb, now())
+        ${JSON.stringify({ productId: product.id, name, branchId: resolvedBranchId })}::jsonb, now())
     `;
 
     return { product };
@@ -125,6 +141,17 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
       }
     }
 
+    // branchId reassignment: accept `null` (explicit tenant-wide) or a
+    // valid tenant branch UUID. `undefined` means "don't touch it".
+    let nextBranchId: string | null | undefined = undefined;
+    if (data.branchId === null || data.branchId === '') {
+      nextBranchId = null;
+    } else if (typeof data.branchId === 'string') {
+      const branch = await prisma.branch.findFirst({ where: { id: data.branchId, tenantId } });
+      if (!branch) return reply.status(400).send({ error: 'Sucursal no valida' });
+      nextBranchId = branch.id;
+    }
+
     const updated = await prisma.product.update({
       where: { id },
       data: {
@@ -138,6 +165,7 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
         active: nextActive,
         stockAutoDisabled: nextAutoDisabled,
         identityEditCount: identityChanged ? product.identityEditCount + 1 : product.identityEditCount,
+        ...(nextBranchId !== undefined ? { branchId: nextBranchId } : {}),
       },
     });
 

@@ -25,11 +25,15 @@ interface Branch {
   createdAt: string
   cashierCount?: number
   cashiers?: CashierRef[]
+  productCount?: number
+  redemptionCount?: number
 }
 
 interface MainBranchSummary {
   cashierCount: number
   cashiers: CashierRef[]
+  productCount?: number
+  redemptionCount?: number
 }
 
 export default function BranchesPage() {
@@ -328,13 +332,23 @@ export default function BranchesPage() {
             {/* Sede principal virtual card — shows the cashiers attached
                  to the tenant itself (branchId=null). Always visible so
                  the owner sees where cajeros de "sede principal" end up. */}
-            {mainBranch.cashierCount > 0 && (
+            {(mainBranch.cashierCount > 0 || (mainBranch.productCount ?? 0) > 0) && (
               <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-5 mb-4">
                 <p className="text-[11px] font-semibold text-indigo-700 uppercase tracking-wide">Sede principal (tu local)</p>
-                <p className="text-sm text-indigo-900 mt-1">
+                <div className="grid grid-cols-2 gap-3 mt-2">
+                  <div>
+                    <p className="text-[11px] font-semibold text-indigo-700/80 uppercase tracking-wide">Productos tenant-wide</p>
+                    <p className="text-lg font-bold text-emerald-700 tabular-nums mt-0.5">{mainBranch.productCount ?? 0}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] font-semibold text-indigo-700/80 uppercase tracking-wide">Canjes sin sucursal</p>
+                    <p className="text-lg font-bold text-indigo-600 tabular-nums mt-0.5">{mainBranch.redemptionCount ?? 0}</p>
+                  </div>
+                </div>
+                <p className="text-sm text-indigo-900 mt-3">
                   Cajeros asignados a la sede principal ({mainBranch.cashierCount})
                 </p>
-                <ul className="text-xs text-indigo-900/80 mt-2 space-y-0.5">
+                <ul className="text-xs text-indigo-900/80 mt-1 space-y-0.5">
                   {mainBranch.cashiers.map(c => (
                     <li key={c.id} className="truncate">{c.name} <span className="text-indigo-700/60">· {c.email}</span></li>
                   ))}
@@ -379,9 +393,23 @@ export default function BranchesPage() {
                     </button>
                   </div>
 
+                  {/* Products + redemptions counters (Genesis 2026-04-24).
+                       Shown above cashiers so the owner can scan
+                       branch → productos → canjes in one glance. */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Productos asociados</p>
+                      <p className="text-lg font-bold text-emerald-700 tabular-nums mt-0.5">{b.productCount ?? 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Canjes en esta sucursal</p>
+                      <p className="text-lg font-bold text-indigo-600 tabular-nums mt-0.5">{b.redemptionCount ?? 0}</p>
+                    </div>
+                  </div>
+
                   {/* Cajeros asignados — hace visible la correlacion
                        sucursal → cajero que Eric marco el 2026-04-23. */}
-                  <div className="mt-4 pt-3 border-t border-slate-100">
+                  <div className="mt-3 pt-3 border-t border-slate-100">
                     <p className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide mb-1.5">
                       Cajeros asignados ({b.cashierCount || 0})
                     </p>

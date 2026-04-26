@@ -43,11 +43,16 @@ export default function StaffPage() {
   const [perf, setPerf] = useState<PerformanceRow[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [tenantName, setTenantName] = useState<string>('Sede principal')
+  const [tenantQrUrl, setTenantQrUrl] = useState<string | null>(null)
+  const [tenantSlug, setTenantSlug] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState<string | null>(null)
   const [qrPreview, setQrPreview] = useState<{ name: string; url: string } | null>(null)
   const [showAddForm, setShowAddForm] = useState(false)
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier' as 'cashier' | 'owner', branchId: '' })
+  // Eric 2026-04-26: este formulario solo crea cajeros — saque el dropdown
+  // de Rol porque "Owner" no era una opcion valida desde aqui (el owner es
+  // implicito por comercio). El backend tambien rechaza role !== 'cashier'.
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier' as const, branchId: '' })
   const [addError, setAddError] = useState('')
   const [addSubmitting, setAddSubmitting] = useState(false)
   const [branchEdit, setBranchEdit] = useState<{ staff: Staff; branchId: string } | null>(null)
@@ -72,8 +77,33 @@ export default function StaffPage() {
       // Parral" for the main local, "Kromi Manongo" for a sub-location).
       const name = (settings as any)?.name?.trim()
       if (name) setTenantName(name)
+      // Surface the main tenant QR (the one generated at signup) so the
+      // owner can find it again after finishing onboarding. Genesis
+      // 2026-04-23: she couldn't get back to the QR once she left the
+      // wizard — it lives on tenant.qrCodeUrl and is already returned by
+      // /api/merchant/settings, just nothing was rendering it.
+      setTenantQrUrl((settings as any)?.qrCodeUrl || null)
+      setTenantSlug((settings as any)?.slug || '')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function downloadTenantQr() {
+    if (!tenantQrUrl) return
+    try {
+      const res = await fetch(tenantQrUrl)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `qr-${tenantSlug || 'comercio'}.png`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      window.open(tenantQrUrl, '_blank', 'noopener')
     }
   }
 
@@ -159,8 +189,11 @@ export default function StaffPage() {
   }
 
   const perfById = Object.fromEntries(perf.map(p => [p.staffId, p]))
-  const activeStaff = staff.filter(s => s.active)
-  const inactiveStaff = staff.filter(s => !s.active)
+  // Owners don't appear in the cashier list — they manage the tenant QR via the
+  // top "QR del comercio" card. Eric 2026-04-25: the owner card was confusing
+  // and was eating one of the plan's staff slots for nothing.
+  const activeStaff = staff.filter(s => s.active && s.role !== 'owner')
+  const inactiveStaff = staff.filter(s => !s.active && s.role !== 'owner')
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -185,6 +218,48 @@ export default function StaffPage() {
           <div className="text-center py-12 text-slate-400">Cargando...</div>
         ) : (
           <>
+            {/* Tenant QR — the one generated at signup. Kept front-and-center
+                so the owner can always retrieve it (Genesis 2026-04-23). */}
+            {tenantQrUrl && (
+              <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
+                <div className="px-5 py-4 border-b border-slate-100 flex items-center gap-2">
+                  <MdQrCode2 className="w-5 h-5 text-emerald-600" />
+                  <h2 className="text-sm font-bold text-slate-800 uppercase tracking-wide">QR del comercio</h2>
+                </div>
+                <div className="p-5 flex flex-col sm:flex-row items-center gap-5">
+                  <button
+                    onClick={() => setQrPreview({ name: `${tenantName} — QR principal`, url: tenantQrUrl })}
+                    className="flex-shrink-0 block rounded-xl border border-slate-200 bg-slate-50 p-2 hover:border-emerald-400 hover:shadow-sm transition"
+                    title="Ver en grande"
+                  >
+                    <img src={tenantQrUrl} alt={`QR de ${tenantName}`} className="w-32 h-32 object-contain" />
+                  </button>
+                  <div className="flex-1 min-w-0 text-center sm:text-left">
+                    <p className="font-bold text-slate-800">{tenantName}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Es el QR principal que se creo al registrar el comercio. Imprimelo y ponlo en caja para que los clientes entren por WhatsApp.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-3 justify-center sm:justify-start">
+                      <button
+                        onClick={() => setQrPreview({ name: `${tenantName} — QR principal`, url: tenantQrUrl })}
+                        className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-emerald-100"
+                      >
+                        <MdQrCode2 className="w-4 h-4" />
+                        Ver QR
+                      </button>
+                      <button
+                        onClick={downloadTenantQr}
+                        className="inline-flex items-center gap-1.5 bg-white border border-slate-200 text-slate-700 px-3 py-2 rounded-lg text-xs font-semibold hover:bg-slate-50"
+                      >
+                        <MdDownload className="w-4 h-4" />
+                        Descargar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            )}
+
             {/* Performance Ranking */}
             {perf.length > 0 && (
               <section className="bg-white rounded-2xl border border-slate-100 shadow-sm">
@@ -297,7 +372,15 @@ export default function StaffPage() {
                           </div>
                         )}
 
-                        {s.qrCodeUrl ? (
+                        {s.role === 'owner' ? (
+                          // Owners don't process transactions, so a personal QR
+                          // makes no sense for them (Genesis 2026-04-24). The
+                          // tenant QR — visible up top in "QR del comercio" —
+                          // is what customers scan. This is just a reminder.
+                          <div className="bg-slate-50 border border-slate-100 rounded-xl px-3 py-2.5 text-xs text-slate-500 text-center">
+                            El QR del comercio se gestiona arriba. El owner no usa QR personal.
+                          </div>
+                        ) : s.qrCodeUrl ? (
                           <div className="flex gap-2">
                             <button
                               onClick={() => setQrPreview({ name: s.name, url: s.qrCodeUrl! })}
@@ -399,17 +482,6 @@ export default function StaffPage() {
                   placeholder="min. 6 caracteres"
                 />
                 <p className="text-[11px] text-slate-500 mt-1">El cajero podra cambiarla despues desde su propio panel.</p>
-              </div>
-              <div>
-                <label className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Rol</label>
-                <select
-                  value={form.role}
-                  onChange={e => setForm({ ...form, role: e.target.value as any })}
-                  className="w-full mt-1 px-3 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                >
-                  <option value="cashier">Cajero</option>
-                  <option value="owner">Owner</option>
-                </select>
               </div>
               {form.role === 'cashier' && (
                 <div>

@@ -33,12 +33,22 @@ const ANIMATION_STEPS: Array<{ label: string; Icon: ComponentType<{ className?: 
   { label: 'Agregando tus puntos...', Icon: MdStars, duration: 500 },
 ]
 
+// Dual-scan / QR confirm: same 1.5s cadence but labels that match the
+// "scanning a cashier code" UX instead of the invoice photo path.
+const QR_ANIMATION_STEPS: Array<{ label: string; Icon: ComponentType<{ className?: string }>; duration: number }> = [
+  { label: 'Leyendo el codigo...', Icon: MdDescription, duration: 500 },
+  { label: 'Verificando con el comercio...', Icon: MdVerifiedUser, duration: 500 },
+  { label: 'Agregando tus puntos...', Icon: MdStars, duration: 500 },
+]
+
 const SCANNER_ID = 'scan-unified-camera'
 
 export default function ScanPage() {
   const router = useRouter()
   const [stage, setStage] = useState<Stage>('idle')
   const [animStep, setAnimStep] = useState(0)
+  const [animMode, setAnimMode] = useState<'invoice' | 'qr'>('invoice')
+  const activeSteps = animMode === 'qr' ? QR_ANIMATION_STEPS : ANIMATION_STEPS
   const [result, setResult] = useState<any>(null)
   const [error, setError] = useState('')
   const [cameraError, setCameraError] = useState<string | null>(null)
@@ -108,6 +118,7 @@ export default function ScanPage() {
   }, [])
 
   const processInvoiceImage = useCallback(async (file: File) => {
+    setAnimMode('invoice')
     setStage('processing')
     setAnimStep(0)
     setError('')
@@ -161,16 +172,34 @@ export default function ScanPage() {
       return
     }
 
+    setAnimMode('qr')
     setStage('processing')
-    setAnimStep(ANIMATION_STEPS.length)
+    setAnimStep(0)
     await stopScanner()
 
-    try {
-      const res: any = await api.confirmDualScan(token)
-      setResult({ kind: 'qr', success: true, ...res })
-    } catch (e: any) {
-      setResult({ kind: 'qr', success: false, message: e.error || 'No se pudo procesar el QR' })
-    }
+    // Play the 3-step / 1.5s animation in parallel with the API call so
+    // it's always visible even when the backend responds instantly
+    // (Genesis 2026-04-24: "ya veo el QR nuevo pero ahora no sale la
+    // animacion"). Previously we jumped animStep to the last index and
+    // immediately awaited the API, skipping the progression entirely.
+    const animPromise = new Promise<void>(resolve => {
+      let step = 0
+      const interval = setInterval(() => {
+        step++
+        setAnimStep(step)
+        if (step >= QR_ANIMATION_STEPS.length) {
+          clearInterval(interval)
+          resolve()
+        }
+      }, 500)
+    })
+
+    const apiPromise = api.confirmDualScan(token)
+      .then((res: any) => ({ kind: 'qr' as const, success: true, ...res }))
+      .catch((e: any) => ({ kind: 'qr' as const, success: false, message: e.error || 'No se pudo procesar el QR' }))
+
+    const [, apiResult] = await Promise.all([animPromise, apiPromise])
+    setResult(apiResult)
     setStage('result')
   }, [stopScanner, router])
 
@@ -202,14 +231,12 @@ export default function ScanPage() {
         { facingMode: 'environment' },
         {
           fps: 10,
-          // Adapt the scan zone to ~90% of the shorter side of whatever the
-          // browser hands us. A fixed 320x320 left a lot of dead space on
-          // phones (Eric 2026-04-23: "el recuadro es muy pequeno"), and kept
-          // the detector blind to QRs that extended beyond the box.
-          qrbox: (vw: number, vh: number) => {
-            const side = Math.floor(Math.min(vw, vh) * 0.9)
-            return { width: side, height: side }
-          },
+          // Scan the entire visible frame instead of a cropped square.
+          // Genesis 2026-04-23: "favor de agrandar mas el recuadro del
+          // escaneo, toda la pantalla si es posible". Using the full
+          // viewfinder dimensions as qrbox means the detector sees
+          // everything the user sees — no hidden dead zone.
+          qrbox: (vw: number, vh: number) => ({ width: vw, height: vh }),
           disableFlip: false,
           // Request continuous autofocus so the camera keeps receipts sharp
           // as the user moves the phone. Most browsers silently ignore unknown
@@ -278,7 +305,7 @@ export default function ScanPage() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-indigo-600">
         <div className="text-center text-white space-y-4">
-          {ANIMATION_STEPS.map((step, i) => (
+          {activeSteps.map((step, i) => (
             <div key={i} className={`transition-opacity duration-300 ${i <= animStep ? 'opacity-100' : 'opacity-20'}`}>
               <step.Icon className="w-8 h-8 mx-auto" />
               <p className="text-lg mt-1">{step.label}</p>
@@ -346,17 +373,15 @@ export default function ScanPage() {
       <div className="flex-1 relative bg-black overflow-hidden">
         <div id={SCANNER_ID} className="w-full h-full" />
 
-        {/* Corner brackets to signal the capture area + hint. Sized to match
-            the ~90% scan zone so what the user frames is what the detector
-            sees (Eric flagged on 2026-04-23 that the old 80vw box looked
-            cramped and did not match the actual preview square). */}
-        <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
-          <div className="relative w-[min(90vw,90vh)] aspect-square max-w-[520px]">
-            <div className="absolute top-0 left-0 w-12 h-12 border-t-4 border-l-4 border-white/80 rounded-tl-xl" />
-            <div className="absolute top-0 right-0 w-12 h-12 border-t-4 border-r-4 border-white/80 rounded-tr-xl" />
-            <div className="absolute bottom-0 left-0 w-12 h-12 border-b-4 border-l-4 border-white/80 rounded-bl-xl" />
-            <div className="absolute bottom-0 right-0 w-12 h-12 border-b-4 border-r-4 border-white/80 rounded-br-xl" />
-          </div>
+        {/* Corner brackets hug the edges of the video container so the
+            capture area == the whole frame (Genesis 2026-04-23: "toda la
+            pantalla si es posible"). Small inset keeps the strokes from
+            bleeding into the absolute edges of the screen. */}
+        <div className="absolute inset-3 sm:inset-5 pointer-events-none">
+          <div className="absolute top-0 left-0 w-14 h-14 border-t-4 border-l-4 border-white/85 rounded-tl-xl" />
+          <div className="absolute top-0 right-0 w-14 h-14 border-t-4 border-r-4 border-white/85 rounded-tr-xl" />
+          <div className="absolute bottom-0 left-0 w-14 h-14 border-b-4 border-l-4 border-white/85 rounded-bl-xl" />
+          <div className="absolute bottom-0 right-0 w-14 h-14 border-b-4 border-r-4 border-white/85 rounded-br-xl" />
         </div>
 
         {cameraError && (

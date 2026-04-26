@@ -6,6 +6,13 @@ import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints } from '@/lib/format'
 
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 interface Product {
   id: string
   name: string
@@ -16,10 +23,13 @@ interface Product {
   stock: number
   active: boolean
   minLevel: number
+  branchId?: string | null
+  branchName?: string | null
 }
 
 export default function HybridDealsPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; active: boolean }>>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState({
@@ -31,6 +41,7 @@ export default function HybridDealsPage() {
     stock: '0',
     assetTypeId: '',
     minLevel: '1',
+    branchId: '',
   })
   const [editForm, setEditForm] = useState({
     name: '',
@@ -40,6 +51,7 @@ export default function HybridDealsPage() {
     redemptionCost: '',
     stock: '',
     minLevel: '',
+    branchId: '',
   })
   const [loading, setLoading] = useState(false)
   const [createMessage, setCreateMessage] = useState('')
@@ -48,7 +60,12 @@ export default function HybridDealsPage() {
   const [editUploading, setEditUploading] = useState(false)
   const [assetTypeId, setAssetTypeId] = useState('')
 
-  useEffect(() => { loadProducts() }, [])
+  useEffect(() => {
+    loadProducts()
+    api.getBranches().then((data: any) => {
+      setBranches((data.branches || []).filter((b: any) => b.active))
+    }).catch(() => {})
+  }, [])
 
   async function loadProducts() {
     try {
@@ -94,9 +111,10 @@ export default function HybridDealsPage() {
         stock: parseInt(form.stock) || 0,
         assetTypeId: assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
+        branchId: form.branchId || undefined,
       })
       setShowForm(false)
-      setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1' })
+      setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1', branchId: '' })
       setCreateMessage('Promocion creada')
       setTimeout(() => setCreateMessage(''), 2500)
       loadProducts()
@@ -123,6 +141,7 @@ export default function HybridDealsPage() {
       redemptionCost: p.redemptionCost || '',
       stock: p.stock?.toString() || '0',
       minLevel: p.minLevel?.toString() || '1',
+      branchId: p.branchId || '',
     })
   }
 
@@ -137,6 +156,9 @@ export default function HybridDealsPage() {
         redemptionCost: editForm.redemptionCost,
         stock: parseInt(editForm.stock),
         minLevel: parseInt(editForm.minLevel) || 1,
+        // Null (not undefined) so picking "Todas" actually clears an
+        // existing scope — same contract as the catalog page.
+        branchId: editForm.branchId ? editForm.branchId : null,
       })
       setEditingId(null)
       loadProducts()
@@ -244,10 +266,11 @@ export default function HybridDealsPage() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Parte en puntos</label>
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
                   placeholder="800"
-                  value={form.redemptionCost}
-                  onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
+                  value={fmtThousands(form.redemptionCost)}
+                  onChange={e => setForm({ ...form, redemptionCost: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
                 <p className="text-xs text-slate-400 mt-1">Lo que descuenta del saldo del cliente</p>
@@ -258,22 +281,41 @@ export default function HybridDealsPage() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
                 <input
-                  type="number"
-                  value={form.stock}
-                  onChange={e => setForm({ ...form, stock: e.target.value })}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.stock)}
+                  onChange={e => setForm({ ...form, stock: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min.</label>
                 <input
-                  type="number"
-                  value={form.minLevel}
-                  onChange={e => setForm({ ...form, minLevel: e.target.value })}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.minLevel)}
+                  onChange={e => setForm({ ...form, minLevel: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
+
+            {branches.length > 0 && (
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
+                <select
+                  value={form.branchId}
+                  onChange={e => setForm({ ...form, branchId: e.target.value })}
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
+                >
+                  <option value="">Todas las sucursales</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Dejalo en &ldquo;Todas&rdquo; si la promocion aplica en todo el comercio.</p>
+              </div>
+            )}
 
             <button
               onClick={handleCreate}
@@ -352,19 +394,34 @@ export default function HybridDealsPage() {
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
-                        <input type="number" placeholder="0" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="0" value={fmtThousands(editForm.redemptionCost)} onChange={e => setEditForm({ ...editForm, redemptionCost: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
-                        <input type="number" placeholder="0" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="0" value={fmtThousands(editForm.stock)} onChange={e => setEditForm({ ...editForm, stock: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel minimo</label>
-                        <input type="number" placeholder="1" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="1" value={fmtThousands(editForm.minLevel)} onChange={e => setEditForm({ ...editForm, minLevel: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                     </div>
+                    {branches.length > 0 && (
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
+                        <select
+                          value={editForm.branchId}
+                          onChange={e => setEditForm({ ...editForm, branchId: e.target.value })}
+                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm"
+                        >
+                          <option value="">Todas las sucursales</option>
+                          {branches.map(b => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={() => setEditingId(null)} className="flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200 transition">Cancelar</button>
                       <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700">
@@ -388,9 +445,16 @@ export default function HybridDealsPage() {
                       ) : (
                         <MdLocalOffer className="w-16 h-16 text-amber-400" />
                       )}
-                      {/* Hybrid badge */}
-                      <div className="absolute top-3 left-3 bg-amber-500 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">
-                        HIBRIDA
+                      {/* Hybrid badge + optional branch chip */}
+                      <div className="absolute top-3 left-3 flex gap-2 items-center">
+                        <span className="bg-amber-500 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">
+                          HIBRIDA
+                        </span>
+                        {branches.length > 0 && (
+                          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm shadow-sm ${p.branchId ? 'bg-indigo-600/90 text-white' : 'bg-slate-800/70 text-white'}`}>
+                            {p.branchName || 'Todas'}
+                          </span>
+                        )}
                       </div>
                       <button
                         onClick={() => handleToggle(p.id)}

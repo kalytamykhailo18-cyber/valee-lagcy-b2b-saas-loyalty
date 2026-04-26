@@ -150,7 +150,7 @@ export const api = {
   getBalance: () => request('/api/consumer/balance'),
   getHistory: (limit = 50, offset = 0) => request(`/api/consumer/history?limit=${limit}&offset=${offset}`),
   getAccount: () => request('/api/consumer/account'),
-  getCatalog: (limit = 20, offset = 0) => request(`/api/consumer/catalog?limit=${limit}&offset=${offset}`),
+  getCatalog: (limit = 20, offset = 0, branchId?: string) => request(`/api/consumer/catalog?limit=${limit}&offset=${offset}${branchId ? `&branchId=${encodeURIComponent(branchId)}` : ''}`),
 
   // Consumer Actions
   validateInvoice: (data: any) =>
@@ -178,8 +178,11 @@ export const api = {
     if (!res.ok) throw { status: res.status, ...data };
     return data;
   },
-  redeemProduct: (productId: string, assetTypeId: string) =>
-    request('/api/consumer/redeem', { method: 'POST', body: JSON.stringify({ productId, assetTypeId }) }),
+  redeemProduct: (productId: string, assetTypeId: string, branchId?: string | null) =>
+    request('/api/consumer/redeem', {
+      method: 'POST',
+      body: JSON.stringify(branchId ? { productId, assetTypeId, branchId } : { productId, assetTypeId }),
+    }),
   getActiveRedemptions: () => request('/api/consumer/active-redemptions'),
 
   // Referrals — consumer invites friends, earns tenant-configured bonus on friend's first claim
@@ -251,8 +254,11 @@ export const api = {
     request(`/api/merchant/products/${id}/archive`, { method: 'PATCH' }),
   unarchiveProduct: (id: string) =>
     request(`/api/merchant/products/${id}/unarchive`, { method: 'PATCH' }),
-  scanRedemption: (token: string) =>
-    request('/api/merchant/scan-redemption', { method: 'POST', body: JSON.stringify({ token }) }),
+  scanRedemption: (token: string, branchId?: string) =>
+    request('/api/merchant/scan-redemption', {
+      method: 'POST',
+      body: JSON.stringify(branchId ? { token, branchId } : { token }),
+    }),
   merchantSignup: (data: {
     businessName: string;
     slug?: string;
@@ -279,6 +285,11 @@ export const api = {
   updateCustomer: (id: string, data: { displayName?: string | null; cedula?: string | null }) =>
     request(`/api/merchant/customers/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(data) }),
   getAllAccounts: () => request('/api/consumer/all-accounts'),
+  recordStaffAttribution: (cashierSlug: string) =>
+    request('/api/consumer/staff-attribution', {
+      method: 'POST',
+      body: JSON.stringify({ cashierSlug }),
+    }),
   getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
   initiateDualScan: (amount: string, branchId?: string) =>
     request('/api/merchant/dual-scan/initiate', { method: 'POST', body: JSON.stringify({ amount, branchId }) }),
@@ -288,6 +299,7 @@ export const api = {
     request('/api/consumer/dual-scan/confirm', { method: 'POST', body: JSON.stringify({ token }) }),
   getPlanUsage: () => request('/api/merchant/plan-usage'),
   getMerchantSettings: () => request('/api/merchant/settings'),
+  getMerchantTenantInfo: () => request('/api/merchant/tenant-info'),
   changeStaffPassword: (currentPassword: string, newPassword: string) =>
     request('/api/merchant/auth/change-password', {
       method: 'POST',
@@ -295,7 +307,11 @@ export const api = {
     }),
   updateMerchantSettings: (data: {
     welcomeBonusAmount?: number;
+    welcomeBonusActive?: boolean;
+    welcomeBonusLimit?: number | null;
     referralBonusAmount?: number;
+    referralBonusActive?: boolean;
+    referralBonusLimit?: number | null;
     rif?: string;
     preferredExchangeSource?: string | null;
     referenceCurrency?: string;
@@ -319,6 +335,7 @@ export const api = {
   },
   getProductPerformance: () => request('/api/merchant/product-performance'),
   getReferralMetrics: () => request('/api/merchant/referrals/metrics'),
+  getWelcomeBonusMetrics: () => request('/api/merchant/welcome-bonus/metrics'),
   getTransactions: (params?: Record<string, string>) => {
     const qs = params ? '?' + new URLSearchParams(params).toString() : '';
     return request(`/api/merchant/transactions${qs}`);
@@ -338,6 +355,8 @@ export const api = {
     request(`/api/merchant/recurrence-rules/${id}`, { method: 'DELETE' }),
   getRecurrenceEligible: (id: string) =>
     request(`/api/merchant/recurrence-rules/${id}/eligible`),
+  testRecurrenceRule: (id: string) =>
+    request(`/api/merchant/recurrence-rules/${id}/test-now`, { method: 'POST' }),
   getRecurrenceNotifications: (limit = 50, offset = 0) =>
     request(`/api/merchant/recurrence-notifications?limit=${limit}&offset=${offset}`),
   getMultiplier: () => request('/api/merchant/multiplier'),

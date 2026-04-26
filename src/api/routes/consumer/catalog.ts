@@ -44,23 +44,63 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
 
   app.get('/api/consumer/catalog', { preHandler: [requireConsumerAuth] }, async (request) => {
     const { accountId, tenantId } = request.consumer!;
-    const { limit = '20', offset = '0' } = request.query as { limit?: string; offset?: string };
+    const { limit = '20', offset = '0', branchId } = request.query as { limit?: string; offset?: string; branchId?: string };
 
     // Get consumer's level for reward filtering
     const account = await prisma.account.findUnique({ where: { id: accountId } });
     const consumerLevel = account?.level || 1;
 
-    const where = { tenantId, active: true, archivedAt: null, stock: { gt: 0 } as any, minLevel: { lte: consumerLevel } };
+    // Branch scope. Genesis 2026-04-24: the consumer must see EVERY
+    // product the merchant publishes (tenant-wide + branch-scoped),
+    // each tagged with its branch so the customer knows where to pick
+    // it up. Hiding branch-scoped products when the consumer has no
+    // scan context made the catalog go empty for merchants who scoped
+    // all their items to a branch. We keep the optional `branchId`
+    // query parameter to let a branch-specific PWA view narrow the
+    // list, but with no context we return everything.
+    let branchClause: any = {};
+    if (branchId && branchId !== 'all') {
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
+      if (branch) {
+        branchClause = { OR: [{ branchId: branch.id }, { branchId: null }] };
+      }
+      // invalid id → fall through, same as no filter
+    }
 
-    // Paginated product list for infinite scroll
+    const where = {
+      tenantId,
+      active: true,
+      archivedAt: null,
+      stock: { gt: 0 } as any,
+      minLevel: { lte: consumerLevel },
+      ...branchClause,
+    };
+
+    // Paginated product list for infinite scroll, with the branch name
+    // joined so the card can render "Sucursal Centro" or "Todas las
+    // sucursales".
     const products = await prisma.product.findMany({
       where,
       orderBy: { name: 'asc' },
       take: parseInt(limit),
       skip: parseInt(offset),
+      include: { branch: { select: { id: true, name: true } } },
     });
 
     const total = await prisma.product.count({ where });
+
+    // For tenant-wide products (branchId=null), collect the list of
+    // active branches so the consumer can see "Disponible en Centro,
+    // Norte, Sur". Only fetched once — any product with branchId=null
+    // gets the same list. If the tenant has no branches at all, skip.
+    const anyWide = products.some(p => p.branchId === null);
+    const tenantBranches = anyWide
+      ? await prisma.branch.findMany({
+          where: { tenantId, active: true },
+          orderBy: { name: 'asc' },
+          select: { name: true },
+        })
+      : [];
 
     // Get consumer balance — split into confirmed (spendable) and provisional (in verification, not yet spendable).
     // Affordability is computed on confirmed points only — provisional points cannot be redeemed
@@ -83,6 +123,17 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
         stock: p.stock,
         minLevel: p.minLevel,
         canAfford: confirmedBalance >= Number(p.redemptionCost),
+        // Branch locator (Genesis 2026-04-24): branch-scoped products
+        // carry the branch name; tenant-wide products carry the full
+        // list of active branches so the consumer sees where it's
+        // honored. Empty branchNames + scope='tenant' means the tenant
+        // has no branches configured (single-point operation).
+        branchId: p.branchId,
+        branchName: p.branch?.name ?? null,
+        branchScope: p.branchId ? 'branch' : 'tenant',
+        branchNames: p.branchId
+          ? [p.branch?.name || '']
+          : tenantBranches.map(b => b.name),
       })),
       total,
       balance: breakdown.total,

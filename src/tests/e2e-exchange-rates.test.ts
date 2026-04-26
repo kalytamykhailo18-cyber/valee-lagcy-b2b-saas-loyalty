@@ -11,6 +11,7 @@
  */
 
 import dotenv from 'dotenv';
+import { assertTestDatabase } from './_test-guard.js';
 dotenv.config();
 
 const TENANT_ID = 'cccccccc-cccc-cccc-cccc-cccccccccc01';

@@ -21,6 +21,8 @@ interface Invoice {
   id: string
   invoiceNumber: string
   amount: string
+  amountInReference: string | null
+  currencySymbol: string
   transactionDate: string | null
   customerPhone: string | null
   status: string
@@ -308,9 +310,16 @@ export default function CsvUploadPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="font-bold text-slate-800 tabular-nums">
-                      Bs {formatCash(inv.amount)}
-                    </span>
+                    <div className="text-right">
+                      <span className="block font-bold text-slate-800 tabular-nums">
+                        Bs {formatCash(inv.amount)}
+                      </span>
+                      {inv.amountInReference && inv.currencySymbol !== 'Bs' && (
+                        <span className="block text-xs text-slate-500 tabular-nums">
+                          ≈ {inv.currencySymbol} {formatCash(inv.amountInReference)}
+                        </span>
+                      )}
+                    </div>
                     <span className={`text-[11px] font-semibold px-2 py-1 rounded-full ${STATUS_STYLE[inv.status] || 'bg-slate-100 text-slate-600'}`}>
                       {STATUS_LABEL[inv.status] || inv.status}
                     </span>

@@ -96,7 +96,7 @@ export async function registerScanRoutes(app: FastifyInstance): Promise<void> {
   // ---- CASHIER QR SCANNER ----
   app.post('/api/merchant/scan-redemption', { preHandler: [requireStaffAuth] }, async (request, reply) => {
     const { staffId, tenantId } = request.staff!;
-    const { token, requestId } = request.body as { token: string; requestId?: string };
+    const { token, requestId, branchId } = request.body as { token: string; requestId?: string; branchId?: string };
 
     if (!token) return reply.status(400).send({ error: 'token is required' });
 
@@ -111,10 +111,18 @@ export async function registerScanRoutes(app: FastifyInstance): Promise<void> {
       if (cached) return cached;
     }
 
+    // Validate branchId belongs to this tenant before passing through.
+    let scopedBranchId: string | undefined;
+    if (branchId) {
+      const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId }, select: { id: true } });
+      if (branch) scopedBranchId = branch.id;
+    }
+
     const result = await processRedemption({
       token,
       cashierStaffId: staffId,
       cashierTenantId: tenantId,
+      branchId: scopedBranchId,
     });
 
     if (requestId) {

@@ -233,7 +233,7 @@ export default async function webhookRoutes(app: FastifyInstance) {
                 ? await p.assetType.findUnique({ where: { id: cfg.assetTypeId } })
                 : await p.assetType.findFirst();
               if (assetType) {
-                await grantWelcomeBonus(referee.id, tenantId, assetType.id);
+                await grantWelcomeBonus(referee.id, tenantId, assetType.id, branchId || null);
               }
             } finally {
               await p.$disconnect();

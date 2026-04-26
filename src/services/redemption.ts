@@ -373,12 +373,13 @@ export async function processRedemption(params: {
     return { success: false, message: 'Tenant mismatch — this QR belongs to a different merchant.' };
   }
 
-  // Derive the effective branch id: the caller may pass one explicitly
-  // (e.g. a cashier terminal that's locked to a specific branch), but if
-  // they don't we auto-fill from the cashier's staff.branchId. That gives
-  // the redemption traceability to the branch the cashier actually works
-  // at — Eric's requirement: if Pedro Perez at "Sucursal de la Viña"
-  // scans the QR, the canje gets stamped with that branch automatically.
+  // Derive the effective branch id with a 3-layer fallback:
+  //   1. params.branchId — explicit (scanner UI selector for multi-branch owners)
+  //   2. cashier.staff.branchId — cashier locked to a single branch
+  //   3. PENDING entry's branchId — origin branch where the redemption began
+  // Eric 2026-04-25: owners (no staff.branchId) scanning at a specific branch
+  // were producing REDEMPTION_CONFIRMED rows with null branchId, which made the
+  // transactions panel show "Sin sucursal" and the per-branch filter return 0.
   let effectiveBranchId: string | null = params.branchId || null;
   if (!effectiveBranchId && params.cashierStaffId) {
     const cashier = await prisma.staff.findUnique({
@@ -386,6 +387,13 @@ export async function processRedemption(params: {
       select: { branchId: true },
     });
     if (cashier?.branchId) effectiveBranchId = cashier.branchId;
+  }
+  if (!effectiveBranchId && tokenRecord?.ledgerPendingEntryId) {
+    const pendingEntry = await prisma.ledgerEntry.findUnique({
+      where: { id: tokenRecord.ledgerPendingEntryId },
+      select: { branchId: true },
+    });
+    if (pendingEntry?.branchId) effectiveBranchId = pendingEntry.branchId;
   }
 
   // 5b. Cross-branch policy (Genesis H11). When the tenant turned off

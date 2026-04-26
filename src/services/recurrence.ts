@@ -19,12 +19,25 @@ export interface RecurrenceResult {
   skipped: number;
 }
 
+export interface RecurrenceRunOptions {
+  /** Restrict the run to a single rule (used by the merchant "Probar" button). */
+  ruleId?: string;
+  /**
+   * Threshold unit. Default 'days' is the production scheduler.
+   * 'minutes' is for the merchant test affordance — interprets the rule's
+   * intervalDays + graceDays as MINUTES, so Eric can verify the message
+   * arrives without waiting a full day.
+   */
+  thresholdUnit?: 'days' | 'minutes';
+}
+
 /**
  * Run the recurrence engine for all active tenants and rules.
  */
-export async function runRecurrenceEngine(): Promise<RecurrenceResult> {
+export async function runRecurrenceEngine(opts: RecurrenceRunOptions = {}): Promise<RecurrenceResult> {
+  const { ruleId, thresholdUnit = 'days' } = opts;
   const rules = await prisma.recurrenceRule.findMany({
-    where: { active: true },
+    where: { active: true, ...(ruleId ? { id: ruleId } : {}) },
     include: { tenant: true },
   });
 
@@ -32,11 +45,13 @@ export async function runRecurrenceEngine(): Promise<RecurrenceResult> {
   let bonusesGranted = 0;
   let skipped = 0;
 
+  const unitMs = thresholdUnit === 'minutes' ? 60 * 1000 : 24 * 60 * 60 * 1000;
+
   for (const rule of rules) {
     if (rule.tenant.status !== 'active') continue;
 
-    const thresholdDays = rule.intervalDays + rule.graceDays;
-    const cutoffDate = new Date(Date.now() - thresholdDays * 24 * 60 * 60 * 1000);
+    const thresholdUnits = rule.intervalDays + rule.graceDays;
+    const cutoffDate = new Date(Date.now() - thresholdUnits * unitMs);
 
     // Find consumers whose last INVOICE_CLAIMED was before the cutoff
     let lapsedConsumers = await prisma.$queryRaw<Array<{

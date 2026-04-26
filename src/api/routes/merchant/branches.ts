@@ -26,9 +26,47 @@ export async function registerBranchesRoutes(app: FastifyInstance): Promise<void
       cashiersByBranch.get(key)!.push({ id: c.id, name: c.name, email: c.email });
     }
 
+    // Per-branch product counts. Genesis 2026-04-24 wanted the branch
+    // card to read "Productos Asociados: N" right above "Cajeros
+    // asignados". Include archived=null + active=true so the number
+    // matches what the consumer actually sees in the catalog. We query
+    // once with groupBy so an owner with many branches doesn't get
+    // N round-trips.
+    const productRows = await prisma.product.groupBy({
+      by: ['branchId'],
+      where: { tenantId, active: true, archivedAt: null },
+      _count: { _all: true },
+    });
+    const productsByBranch = new Map<string | null, number>();
+    for (const row of productRows) {
+      productsByBranch.set(row.branchId, row._count._all);
+    }
+
+    // Per-branch redemption counts (REDEMPTION_CONFIRMED CREDIT rows
+    // stamped with branch_id). Mirrors the metrics.ts convention.
+    const redemptionRows = await prisma.ledgerEntry.groupBy({
+      by: ['branchId'],
+      where: {
+        tenantId,
+        eventType: 'REDEMPTION_CONFIRMED',
+        entryType: 'CREDIT',
+      },
+      _count: { _all: true },
+    });
+    const redemptionsByBranch = new Map<string | null, number>();
+    for (const row of redemptionRows) {
+      redemptionsByBranch.set(row.branchId, row._count._all);
+    }
+
     const enriched = branches.map(b => {
       const list = cashiersByBranch.get(b.id) || [];
-      return { ...b, cashierCount: list.length, cashiers: list };
+      return {
+        ...b,
+        cashierCount: list.length,
+        cashiers: list,
+        productCount: productsByBranch.get(b.id) || 0,
+        redemptionCount: redemptionsByBranch.get(b.id) || 0,
+      };
     });
 
     // Also surface cashiers attached to the "sede principal" (branchId=null)
@@ -40,6 +78,8 @@ export async function registerBranchesRoutes(app: FastifyInstance): Promise<void
       mainBranch: {
         cashierCount: mainCashiers.length,
         cashiers: mainCashiers,
+        productCount: productsByBranch.get(null) || 0,
+        redemptionCount: redemptionsByBranch.get(null) || 0,
       },
     };
   });

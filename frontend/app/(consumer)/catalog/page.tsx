@@ -25,6 +25,10 @@ interface Product {
   redemptionCost: string
   stock: number
   canAfford: boolean
+  branchId?: string | null
+  branchName?: string | null
+  branchScope?: 'branch' | 'tenant'
+  branchNames?: string[]
 }
 
 export default function Catalog() {
@@ -49,7 +53,7 @@ export default function Catalog() {
     try {
       await syncPendingActions(async (action: QueuedAction) => {
         if (action.type === 'redeem_product') {
-          return await api.redeemProduct(action.payload.productId, action.payload.assetTypeId)
+          return await api.redeemProduct(action.payload.productId, action.payload.assetTypeId, action.payload.branchId || null)
         }
         throw new Error('Unknown action type')
       })
@@ -160,7 +164,7 @@ export default function Catalog() {
     const assetTypeId = localStorage.getItem('assetTypeId') || ''
 
     try {
-      const result = await api.redeemProduct(selectedProduct.id, assetTypeId)
+      const result = await api.redeemProduct(selectedProduct.id, assetTypeId, selectedProduct.branchId || null)
       setRedeemResult(result)
     } catch (e: any) {
       // Check if it's a network error (not a server validation error)
@@ -172,7 +176,7 @@ export default function Catalog() {
         enqueueAction(
           actionId,
           'redeem_product',
-          { productId: selectedProduct.id, assetTypeId },
+          { productId: selectedProduct.id, assetTypeId, branchId: selectedProduct.branchId || null },
           parseFloat(selectedProduct.redemptionCost)
         )
         setPendingCount(getPendingCount())
@@ -319,6 +323,24 @@ export default function Catalog() {
                 <p className="font-medium text-sm truncate">{product.name}</p>
                 <p className="text-indigo-600 font-bold text-sm">{formatPoints(product.redemptionCost)} pts</p>
                 <p className="text-xs text-slate-400">{product.stock} disponibles</p>
+                {(() => {
+                  const names = product.branchNames || []
+                  if (product.branchScope === 'branch' && product.branchName) {
+                    return (
+                      <p className="text-[11px] text-emerald-700 mt-1 truncate" title={product.branchName}>
+                        Solo en {product.branchName}
+                      </p>
+                    )
+                  }
+                  if (product.branchScope === 'tenant' && names.length > 0) {
+                    return (
+                      <p className="text-[11px] text-slate-500 mt-1 truncate" title={names.join(', ')}>
+                        Todas las sucursales{names.length <= 3 ? `: ${names.join(', ')}` : ` (${names.length})`}
+                      </p>
+                    )
+                  }
+                  return null
+                })()}
                 {canAfford ? (
                   <button className="aa-btn aa-btn-primary w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
                     <span className="relative z-10">Canjear</span>

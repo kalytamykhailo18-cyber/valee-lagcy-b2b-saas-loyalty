@@ -62,9 +62,38 @@ export default function CashierScanner() {
   const [cameraError, setCameraError] = useState<string | null>(null)
   const [pendingCount, setPendingCount] = useState(0)
   const [syncing, setSyncing] = useState(false)
+  // Branch context for the canje (Eric 2026-04-25): owners aren't tied to
+  // a single branch, so without a selector the REDEMPTION_CONFIRMED entry
+  // had no branchId and the transactions panel showed "Sin sucursal".
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; active: boolean }>>([])
+  const [branchId, setBranchId] = useState<string>('')
   const scannerRef = useRef<any>(null)
   const scannerContainerId = 'qr-reader'
   const isProcessingRef = useRef(false)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data: any = await api.getBranches()
+        const active = (data.branches || []).filter((b: any) => b.active)
+        setBranches(active)
+        const stored = typeof window !== 'undefined' ? localStorage.getItem('scannerBranchId') : null
+        if (stored && active.find((b: any) => b.id === stored)) {
+          setBranchId(stored)
+        } else if (active.length === 1) {
+          setBranchId(active[0].id)
+        }
+      } catch {}
+    })()
+  }, [])
+
+  function selectBranch(id: string) {
+    setBranchId(id)
+    if (typeof window !== 'undefined') {
+      if (id) localStorage.setItem('scannerBranchId', id)
+      else localStorage.removeItem('scannerBranchId')
+    }
+  }
 
   const handleSync = useCallback(async () => {
     const count = getPendingCount()
@@ -73,7 +102,7 @@ export default function CashierScanner() {
     try {
       await syncPendingActions(async (action: QueuedAction) => {
         if (action.type === 'scan_redemption') {
-          return await api.scanRedemption(action.payload.token)
+          return await api.scanRedemption(action.payload.token, action.payload.branchId)
         }
         throw new Error('Unknown action type')
       })
@@ -106,6 +135,25 @@ export default function CashierScanner() {
 
   const processToken = useCallback(async (token: string) => {
     if (isProcessingRef.current) return
+    // Hard guard: a multi-sucursal merchant must pick a sucursal BEFORE
+    // any canje is processed. Eric 2026-04-25: without this, scanning was
+    // creating "Sin sucursal" rows in transactions even after we added the
+    // selector on top. Apply to camera + manual paths.
+    const requiresBranch = branches.filter(b => b.active).length >= 2
+    if (requiresBranch && !branchId) {
+      setResult({
+        success: false,
+        message: 'Antes de escanear, elige la sucursal donde estas atendiendo.',
+      })
+      setState('failure')
+      setTimeout(() => {
+        setState('scanning')
+        setTokenInput('')
+        setResult(null)
+        isProcessingRef.current = false
+      }, 3500)
+      return
+    }
     isProcessingRef.current = true
 
     await stopScanner()
@@ -114,14 +162,14 @@ export default function CashierScanner() {
     const actionId = generateActionId()
 
     try {
-      const apiPromise = api.scanRedemption(token)
+      const apiPromise = api.scanRedemption(token, branchId || undefined)
         .catch((e: any) => {
           // Check if it's a network error (no status means no response reached us)
           const isNetworkError = !e?.status && (e?.message === 'Failed to fetch' || e?.name === 'TypeError')
 
           if (isNetworkError) {
             // Queue for later
-            enqueueAction(actionId, 'scan_redemption', { token })
+            enqueueAction(actionId, 'scan_redemption', { token, branchId: branchId || null })
             setPendingCount(getPendingCount())
             return { success: false, queued: true, message: 'Sin conexion. El canje se procesara cuando vuelvas a estar en linea.' }
           }
@@ -139,7 +187,7 @@ export default function CashierScanner() {
       }
     } catch {
       // Fallback: queue
-      enqueueAction(actionId, 'scan_redemption', { token })
+      enqueueAction(actionId, 'scan_redemption', { token, branchId: branchId || null })
       setPendingCount(getPendingCount())
       setResult({ success: false, queued: true, message: 'Sin conexion. Canje guardado localmente.' })
       setState('queued')
@@ -152,7 +200,7 @@ export default function CashierScanner() {
       setResult(null)
       isProcessingRef.current = false
     }, 5000)
-  }, [stopScanner])
+  }, [stopScanner, branchId, branches])
 
   const startScanner = useCallback(async () => {
     setCameraError(null)
@@ -172,13 +220,10 @@ export default function CashierScanner() {
         { facingMode: 'environment' },
         {
           fps: 10,
-          // Adapt the scan zone to ~90% of the shorter side of the actual
-          // video preview. Fixed 260x260 was too small on larger phones
-          // (Eric 2026-04-23: "el recuadro es muy pequeno").
-          qrbox: (vw: number, vh: number) => {
-            const side = Math.floor(Math.min(vw, vh) * 0.9)
-            return { width: side, height: side }
-          },
+          // Full-frame detection — qrbox matches the whole viewfinder so the
+          // cashier can frame the QR anywhere on screen (Genesis 2026-04-23:
+          // "toda la pantalla si es posible").
+          qrbox: (vw: number, vh: number) => ({ width: vw, height: vh }),
           aspectRatio: 1,
           disableFlip: false,
           // Continuous autofocus + higher target resolution so the camera
@@ -228,11 +273,17 @@ export default function CashierScanner() {
   }, [stopScanner, processToken])
 
   useEffect(() => {
-    if (state === 'scanning' && inputMode === 'camera') {
+    // Don't start the camera if a multi-sucursal merchant hasn't picked a
+    // sucursal yet — even if the camera caught a QR by accident, processToken
+    // would block the scan, but we save battery + permissions until the
+    // staff actually picks the branch.
+    const requiresBranch = branches.filter(b => b.active).length >= 2
+    const blocked = requiresBranch && !branchId
+    if (state === 'scanning' && inputMode === 'camera' && !blocked) {
       startScanner()
     }
     return () => { stopScanner() }
-  }, [state, inputMode, startScanner, stopScanner])
+  }, [state, inputMode, startScanner, stopScanner, branches, branchId])
 
   function handleManualScan() {
     if (!tokenInput.trim()) return
@@ -356,6 +407,33 @@ export default function CashierScanner() {
         </div>
       )}
 
+      {/* Branch selector — only when the merchant has 2+ branches.
+          When no sucursal is selected we BLOCK the scan entirely (camera
+          and manual). Eric 2026-04-25: scanning without sucursal was
+          producing "Sin sucursal" rows in the transactions panel. */}
+      {branches.length >= 2 && (
+        <div className={`rounded-xl p-3 mb-4 shadow-sm aa-rise-sm border-2 ${!branchId ? 'bg-amber-50 border-amber-400' : 'bg-white border-transparent'}`}>
+          <label className={`text-xs font-semibold uppercase tracking-wide ${!branchId ? 'text-amber-800' : 'text-slate-500'}`}>
+            {!branchId ? 'Paso 1: Elige la sucursal' : 'Sucursal del canje'}
+          </label>
+          <select
+            value={branchId}
+            onChange={e => selectBranch(e.target.value)}
+            className={`aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border text-sm bg-white ${!branchId ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200'}`}
+          >
+            <option value="">Seleccionar sucursal...</option>
+            {branches.map(b => (
+              <option key={b.id} value={b.id}>{b.name}</option>
+            ))}
+          </select>
+          {!branchId && (
+            <p className="text-xs text-amber-800 mt-2 font-medium">
+              Tenes que elegir la sucursal antes de poder escanear o ingresar un codigo. Es el primer paso del canje.
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Toggle between camera and manual */}
       <div className="flex bg-white rounded-xl p-1 mb-4 shadow-sm">
         <button
@@ -380,7 +458,7 @@ export default function CashierScanner() {
         </button>
       </div>
 
-      <div className="bg-white rounded-2xl p-6 shadow-sm aa-rise" style={{ animationDelay: '120ms' }}>
+      <div className={`bg-white rounded-2xl p-6 shadow-sm aa-rise ${branches.length >= 2 && !branchId ? 'opacity-60 pointer-events-none' : ''}`} style={{ animationDelay: '120ms' }}>
         {inputMode === 'camera' ? (
           <>
             {cameraError ? (
@@ -399,7 +477,9 @@ export default function CashierScanner() {
               <div id={scannerContainerId} className="w-full" />
             </div>
             <p className="text-center text-sm text-slate-500 mt-3">
-              Apunta la camara al codigo QR del cliente
+              {branches.length >= 2 && !branchId
+                ? 'Elige primero la sucursal para activar el escaner.'
+                : 'Apunta la camara al codigo QR del cliente'}
             </p>
           </>
         ) : (
@@ -414,12 +494,17 @@ export default function CashierScanner() {
               onChange={e => setTokenInput(e.target.value.replace(/\D/g, '').slice(0, 6))}
               onKeyDown={e => e.key === 'Enter' && tokenInput.length === 6 && handleManualScan()}
               placeholder="000000"
-              className="aa-field aa-field-emerald w-full px-4 py-4 rounded-xl border-2 border-slate-200 focus:border-emerald-500 text-center text-3xl tracking-widest font-mono"
+              disabled={branches.length >= 2 && !branchId}
+              className="aa-field aa-field-emerald w-full px-4 py-4 rounded-xl border-2 border-slate-200 focus:border-emerald-500 text-center text-3xl tracking-widest font-mono disabled:bg-slate-50 disabled:text-slate-300"
               autoFocus
             />
-            <button onClick={handleManualScan} disabled={tokenInput.length !== 6}
+            <button onClick={handleManualScan} disabled={tokenInput.length !== 6 || (branches.length >= 2 && !branchId)}
               className="aa-btn aa-btn-emerald w-full mt-4 bg-emerald-600 text-white py-3 rounded-xl font-medium hover:bg-emerald-700 disabled:opacity-50">
-              <span className="relative z-10">{tokenInput.length === 6 ? 'Procesar canje' : `Ingresa ${6 - tokenInput.length} digito${6 - tokenInput.length === 1 ? '' : 's'} mas`}</span>
+              <span className="relative z-10">
+                {branches.length >= 2 && !branchId
+                  ? 'Elige una sucursal arriba'
+                  : (tokenInput.length === 6 ? 'Procesar canje' : `Ingresa ${6 - tokenInput.length} digito${6 - tokenInput.length === 1 ? '' : 's'} mas`)}
+              </span>
             </button>
           </>
         )}

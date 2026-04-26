@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'; dotenv.config();
+import { assertTestDatabase } from './_test-guard.js';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import cookie from '@fastify/cookie';
@@ -25,6 +26,7 @@ function assert(ok: boolean, msg: string) {
 }
 
 async function cleanAll() {
+  assertTestDatabase();
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_delete`;
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_truncate`;
   await prisma.$executeRaw`ALTER TABLE audit_log DISABLE TRIGGER trg_audit_no_delete`;

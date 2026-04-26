@@ -3,10 +3,13 @@ import prisma from '../db/client.js';
 export interface MerchantMetrics {
   valueIssued: string;
   // Breakdown of valueIssued by source — invoices vs welcome bonuses vs
-  // manual admin adjustments. Sum equals valueIssued (modulo rounding).
-  // Exposed so the merchant sees WHERE emitted points came from.
+  // referral bonuses vs manual admin adjustments. Sum equals valueIssued
+  // (modulo rounding). Exposed so the merchant sees WHERE emitted points
+  // came from. Eric 2026-04-26: surfaced "Referidos" alongside the
+  // existing three buckets.
   valueIssuedInvoices: string;
   valueIssuedWelcome: string;
+  valueIssuedReferrals: string;
   valueIssuedManual: string;
   valueRedeemed: string;
   netCirculation: string;
@@ -62,7 +65,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
     // Welcome: ADJUSTMENT_MANUAL credits with reference_id starting 'WELCOME-'.
     // Manual: ADJUSTMENT_MANUAL credits to consumer accounts (shadow/verified)
     // that are NOT welcome bonuses — admin manual +adjustments and referrals.
-    const [vi] = await prisma.$queryRaw<[{ invoices: string; welcome: string; manual: string }]>`
+    const [vi] = await prisma.$queryRaw<[{ invoices: string; welcome: string; referrals: string; manual: string }]>`
       SELECT
         COALESCE(SUM(CASE
           WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
@@ -74,15 +77,20 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
           THEN amount ELSE 0
         END), 0)::text AS welcome,
         COALESCE(SUM(CASE
+          WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT' AND reference_id LIKE 'REFERRAL-%'
+          THEN amount ELSE 0
+        END), 0)::text AS referrals,
+        COALESCE(SUM(CASE
           WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT'
             AND reference_id NOT LIKE 'WELCOME-%'
+            AND reference_id NOT LIKE 'REFERRAL-%'
             AND account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow','verified'))
           THEN amount ELSE 0
         END), 0)::text AS manual
       FROM ledger_entries
       WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed' AND branch_id IS NULL
     `;
-    const viTotal = (parseFloat(vi.invoices) + parseFloat(vi.welcome) + parseFloat(vi.manual)).toFixed(8);
+    const viTotal = (parseFloat(vi.invoices) + parseFloat(vi.welcome) + parseFloat(vi.referrals) + parseFloat(vi.manual)).toFixed(8);
     const [vr] = await prisma.$queryRaw<[{ total: string }]>`
       SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
       WHERE tenant_id = ${tenantId}::uuid AND event_type = 'REDEMPTION_CONFIRMED'
@@ -106,6 +114,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
       valueIssued: viTotal,
       valueIssuedInvoices: vi.invoices,
       valueIssuedWelcome: vi.welcome,
+      valueIssuedReferrals: vi.referrals,
       valueIssuedManual: vi.manual,
       valueRedeemed: vr.total,
       netCirculation: await globalNetCirculation(),
@@ -118,7 +127,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
   // When a branchId is selected, filter all queries to that branch only.
   // branch_id is nullable — entries without a branch are excluded when filtering.
   if (branchId) {
-    const [valueIssued] = await prisma.$queryRaw<[{ invoices: string; welcome: string; manual: string }]>`
+    const [valueIssued] = await prisma.$queryRaw<[{ invoices: string; welcome: string; referrals: string; manual: string }]>`
       SELECT
         COALESCE(SUM(CASE
           WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
@@ -130,8 +139,13 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
           THEN amount ELSE 0
         END), 0)::text AS welcome,
         COALESCE(SUM(CASE
+          WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT' AND reference_id LIKE 'REFERRAL-%'
+          THEN amount ELSE 0
+        END), 0)::text AS referrals,
+        COALESCE(SUM(CASE
           WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT'
             AND reference_id NOT LIKE 'WELCOME-%'
+            AND reference_id NOT LIKE 'REFERRAL-%'
             AND account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow','verified'))
           THEN amount ELSE 0
         END), 0)::text AS manual
@@ -139,7 +153,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
       WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
         AND branch_id = ${branchId}::uuid
     `;
-    const valueIssuedTotal = (parseFloat(valueIssued.invoices) + parseFloat(valueIssued.welcome) + parseFloat(valueIssued.manual)).toFixed(8);
+    const valueIssuedTotal = (parseFloat(valueIssued.invoices) + parseFloat(valueIssued.welcome) + parseFloat(valueIssued.referrals) + parseFloat(valueIssued.manual)).toFixed(8);
 
     const [valueRedeemed] = await prisma.$queryRaw<[{ total: string }]>`
       SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
@@ -168,6 +182,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
       valueIssued: valueIssuedTotal,
       valueIssuedInvoices: valueIssued.invoices,
       valueIssuedWelcome: valueIssued.welcome,
+      valueIssuedReferrals: valueIssued.referrals,
       valueIssuedManual: valueIssued.manual,
       valueRedeemed: valueRedeemed.total,
       netCirculation: await globalNetCirculation(),
@@ -178,7 +193,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
   }
 
   // No branch filter — aggregate all branches
-  const [valueIssued] = await prisma.$queryRaw<[{ invoices: string; welcome: string; manual: string }]>`
+  const [valueIssued] = await prisma.$queryRaw<[{ invoices: string; welcome: string; referrals: string; manual: string }]>`
     SELECT
       COALESCE(SUM(CASE
         WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
@@ -190,15 +205,20 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
         THEN amount ELSE 0
       END), 0)::text AS welcome,
       COALESCE(SUM(CASE
+        WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT' AND reference_id LIKE 'REFERRAL-%'
+        THEN amount ELSE 0
+      END), 0)::text AS referrals,
+      COALESCE(SUM(CASE
         WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT'
           AND reference_id NOT LIKE 'WELCOME-%'
+          AND reference_id NOT LIKE 'REFERRAL-%'
           AND account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow','verified'))
         THEN amount ELSE 0
       END), 0)::text AS manual
     FROM ledger_entries
     WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed'
   `;
-  const valueIssuedTotal = (parseFloat(valueIssued.invoices) + parseFloat(valueIssued.welcome) + parseFloat(valueIssued.manual)).toFixed(8);
+  const valueIssuedTotal = (parseFloat(valueIssued.invoices) + parseFloat(valueIssued.welcome) + parseFloat(valueIssued.referrals) + parseFloat(valueIssued.manual)).toFixed(8);
 
   const [valueRedeemed] = await prisma.$queryRaw<[{ total: string }]>`
     SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
@@ -222,7 +242,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
 
   // Also compute the unassigned slice so the dashboard can render it as its
   // own chip. valueIssuedUnassigned + sum(branch.valueIssued) === valueIssued.
-  const [valueIssuedUnassignedRow] = await prisma.$queryRaw<[{ invoices: string; welcome: string; manual: string }]>`
+  const [valueIssuedUnassignedRow] = await prisma.$queryRaw<[{ invoices: string; welcome: string; referrals: string; manual: string }]>`
     SELECT
       COALESCE(SUM(CASE
         WHEN event_type = 'INVOICE_CLAIMED' AND entry_type = 'CREDIT' THEN amount
@@ -234,15 +254,20 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
         THEN amount ELSE 0
       END), 0)::text AS welcome,
       COALESCE(SUM(CASE
+        WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT' AND reference_id LIKE 'REFERRAL-%'
+        THEN amount ELSE 0
+      END), 0)::text AS referrals,
+      COALESCE(SUM(CASE
         WHEN event_type = 'ADJUSTMENT_MANUAL' AND entry_type = 'CREDIT'
           AND reference_id NOT LIKE 'WELCOME-%'
+          AND reference_id NOT LIKE 'REFERRAL-%'
           AND account_id IN (SELECT id FROM accounts WHERE tenant_id = ${tenantId}::uuid AND account_type IN ('shadow','verified'))
         THEN amount ELSE 0
       END), 0)::text AS manual
     FROM ledger_entries
     WHERE tenant_id = ${tenantId}::uuid AND status != 'reversed' AND branch_id IS NULL
   `;
-  const valueIssuedUnassignedTotal = (parseFloat(valueIssuedUnassignedRow.invoices) + parseFloat(valueIssuedUnassignedRow.welcome) + parseFloat(valueIssuedUnassignedRow.manual)).toFixed(8);
+  const valueIssuedUnassignedTotal = (parseFloat(valueIssuedUnassignedRow.invoices) + parseFloat(valueIssuedUnassignedRow.welcome) + parseFloat(valueIssuedUnassignedRow.referrals) + parseFloat(valueIssuedUnassignedRow.manual)).toFixed(8);
   const [valueRedeemedUnassigned] = await prisma.$queryRaw<[{ total: string }]>`
     SELECT COALESCE(SUM(amount), 0)::text AS total FROM ledger_entries
     WHERE tenant_id = ${tenantId}::uuid AND event_type = 'REDEMPTION_CONFIRMED'
@@ -253,6 +278,7 @@ export async function getMerchantMetrics(tenantId: string, branchId?: string): P
     valueIssued: valueIssuedTotal,
     valueIssuedInvoices: valueIssued.invoices,
     valueIssuedWelcome: valueIssued.welcome,
+    valueIssuedReferrals: valueIssued.referrals,
     valueIssuedManual: valueIssued.manual,
     valueRedeemed: valueRedeemed.total,
     netCirculation: (parseFloat(valueIssuedTotal) - parseFloat(valueRedeemed.total)).toFixed(8),

@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react'
 import { MdShare, MdQrCode2, MdCheckCircle, MdPaid } from 'react-icons/md'
 import { api } from '@/lib/api'
 
+// Eric 2026-04-25: every points/cap field must reject decimal separators —
+// "1.500" should mean fifteen hundred, never one-point-five.
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 interface Summary {
   codesIssued: number
   codesScanned: number
@@ -70,13 +79,32 @@ export default function ReferralsPage() {
   const [data, setData] = useState<MetricsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  // Owner-visible config: bonus amount is shared with /merchant/settings —
+  // editing here saves to the same tenant field so both screens stay
+  // consistent. Empty string until settings resolves.
+  const [bonusDraft, setBonusDraft] = useState('')
+  const [bonusSaved, setBonusSaved] = useState<number | null>(null)
+  const [bonusMsg, setBonusMsg] = useState('')
+  const [bonusSaving, setBonusSaving] = useState(false)
+  const [activeDraft, setActiveDraft] = useState(true)
+  const [limitDraft, setLimitDraft] = useState('')
 
   useEffect(() => {
     let cancelled = false
     ;(async () => {
       try {
-        const res = await api.getReferralMetrics()
-        if (!cancelled) setData(res)
+        const [res, s] = await Promise.all([
+          api.getReferralMetrics(),
+          api.getMerchantSettings().catch(() => null),
+        ])
+        if (cancelled) return
+        setData(res)
+        if (s && typeof (s as any).referralBonusAmount === 'number') {
+          setBonusDraft(String((s as any).referralBonusAmount))
+          setBonusSaved((s as any).referralBonusAmount)
+          setActiveDraft((s as any).referralBonusActive !== false)
+          setLimitDraft((s as any).referralBonusLimit != null ? String((s as any).referralBonusLimit) : '')
+        }
       } catch (e: any) {
         if (!cancelled) setError(e?.message || 'No se pudieron cargar las metricas')
       } finally {
@@ -85,6 +113,30 @@ export default function ReferralsPage() {
     })()
     return () => { cancelled = true }
   }, [])
+
+  async function saveBonus() {
+    const n = Number(bonusDraft)
+    if (!Number.isFinite(n) || n < 0) {
+      setBonusMsg('Debe ser un numero mayor o igual a 0')
+      return
+    }
+    setBonusSaving(true)
+    setBonusMsg('')
+    try {
+      await api.updateMerchantSettings({
+        referralBonusAmount: n,
+        referralBonusActive: activeDraft,
+        referralBonusLimit: limitDraft.trim() ? Number(limitDraft) : null,
+      })
+      setBonusSaved(n)
+      setBonusMsg('Guardado')
+      setTimeout(() => setBonusMsg(''), 2500)
+    } catch (e: any) {
+      setBonusMsg('Error: ' + (e?.error || 'no se pudo guardar'))
+    } finally {
+      setBonusSaving(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -117,6 +169,64 @@ export default function ReferralsPage() {
           Cuantos codigos se repartieron, cuantos se usaron y cuanto pagaste en bonos.
         </p>
       </header>
+
+      <section className="bg-white border border-slate-200 rounded-xl p-4 mb-6 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-slate-800">Estado del programa</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Cuando esta apagado o se llena el cupo, no se acreditan nuevos bonos por referido.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActiveDraft(!activeDraft)}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${activeDraft ? 'bg-emerald-600' : 'bg-slate-300'}`}
+          >
+            <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${activeDraft ? 'translate-x-6' : 'translate-x-1'}`} />
+          </button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos por referido</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={fmtThousands(bonusDraft)}
+              onChange={e => setBonusDraft(stripNonDigits(e.target.value))}
+              disabled={!activeDraft}
+              className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cupo (opcional)</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={fmtThousands(limitDraft)}
+              onChange={e => setLimitDraft(stripNonDigits(e.target.value))}
+              disabled={!activeDraft}
+              placeholder="Sin limite"
+              className="w-full mt-1 px-3 py-2 rounded-lg border border-slate-200 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+            />
+            <p className="text-xs text-slate-400 mt-1">Limite de bonos a entregar antes de pausar.</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 justify-end">
+          {bonusMsg && (
+            <span className={`text-xs ${bonusMsg.startsWith('Error') ? 'text-rose-600' : 'text-emerald-600'}`}>
+              {bonusMsg}
+            </span>
+          )}
+          <button
+            onClick={saveBonus}
+            disabled={bonusSaving || bonusDraft === ''}
+            className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 hover:bg-emerald-700"
+          >
+            {bonusSaving ? 'Guardando...' : 'Guardar'}
+          </button>
+        </div>
+      </section>
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
         <Card

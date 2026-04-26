@@ -398,8 +398,17 @@ export async function processCSV(
               }
             }
           }
+          // The CSV row resolved a pending submission into a confirmed claim —
+          // that's the upload doing its job, not a duplicate. Eric flagged
+          // (2026-04-25) that counting these as "Duplicadas" was misleading.
+          rowsLoaded++;
+        } else {
+          rowsErrored++;
+          errorDetails.push({
+            row: i + 1,
+            reason: `Invoice ${invoiceNumber} amount mismatch: CSV ${amount} vs pending submission ${existingPending.amount.toString()}`,
+          });
         }
-        rowsSkipped++; // Still count as skipped (no new record created)
         continue;
       }
 

@@ -27,6 +27,24 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
   });
 
   // ---- TENANT SETTINGS (Owner only) ----
+  // Lightweight tenant header info that BOTH owner and cashier can read.
+  // The layout sidebar needs the merchant name + logo to render the card
+  // for every staff session. /settings itself stays owner-only so cashiers
+  // can't read or change the business config, but a cashier in the panel
+  // deserves to see which store they're logged into (Eric 2026-04-24).
+  app.get('/api/merchant/tenant-info', { preHandler: [requireStaffAuth] }, async (request) => {
+    const { tenantId } = request.staff!;
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { name: true, slug: true, logoUrl: true },
+    });
+    return {
+      name: tenant?.name || '',
+      slug: tenant?.slug || '',
+      logoUrl: tenant?.logoUrl || null,
+    };
+  });
+
   app.get('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
     const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
@@ -40,7 +58,11 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
     const slug = tenant?.slug || '';
     return {
       welcomeBonusAmount: tenant?.welcomeBonusAmount ?? 50,
+      welcomeBonusActive: tenant?.welcomeBonusActive ?? true,
+      welcomeBonusLimit: tenant?.welcomeBonusLimit ?? null,
       referralBonusAmount: tenant?.referralBonusAmount ?? 100,
+      referralBonusActive: tenant?.referralBonusActive ?? true,
+      referralBonusLimit: tenant?.referralBonusLimit ?? null,
       rif: tenant?.rif || null,
       crossBranchRedemption: tenant?.crossBranchRedemption ?? true,
       slug,
@@ -66,11 +88,17 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
   app.put('/api/merchant/settings', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
     const {
-      welcomeBonusAmount, referralBonusAmount, rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
+      welcomeBonusAmount, welcomeBonusActive, welcomeBonusLimit,
+      referralBonusAmount, referralBonusActive, referralBonusLimit,
+      rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
       name, address, contactPhone, contactEmail, website, description, instagramHandle, crossBranchRedemption,
     } = request.body as {
       welcomeBonusAmount?: number;
+      welcomeBonusActive?: boolean;
+      welcomeBonusLimit?: number | null;
       referralBonusAmount?: number;
+      referralBonusActive?: boolean;
+      referralBonusLimit?: number | null;
       rif?: string;
       preferredExchangeSource?: string | null;
       referenceCurrency?: string;
@@ -102,6 +130,30 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         return reply.status(400).send({ error: 'referralBonusAmount must be a non-negative number' });
       }
       data.referralBonusAmount = referralBonusAmount;
+    }
+    if (welcomeBonusActive !== undefined) {
+      if (typeof welcomeBonusActive !== 'boolean') {
+        return reply.status(400).send({ error: 'welcomeBonusActive must be boolean' });
+      }
+      data.welcomeBonusActive = welcomeBonusActive;
+    }
+    if (welcomeBonusLimit !== undefined) {
+      if (welcomeBonusLimit !== null && (typeof welcomeBonusLimit !== 'number' || welcomeBonusLimit < 1 || !Number.isInteger(welcomeBonusLimit))) {
+        return reply.status(400).send({ error: 'welcomeBonusLimit must be a positive integer or null' });
+      }
+      data.welcomeBonusLimit = welcomeBonusLimit;
+    }
+    if (referralBonusActive !== undefined) {
+      if (typeof referralBonusActive !== 'boolean') {
+        return reply.status(400).send({ error: 'referralBonusActive must be boolean' });
+      }
+      data.referralBonusActive = referralBonusActive;
+    }
+    if (referralBonusLimit !== undefined) {
+      if (referralBonusLimit !== null && (typeof referralBonusLimit !== 'number' || referralBonusLimit < 1 || !Number.isInteger(referralBonusLimit))) {
+        return reply.status(400).send({ error: 'referralBonusLimit must be a positive integer or null' });
+      }
+      data.referralBonusLimit = referralBonusLimit;
     }
     if (rif !== undefined) {
       // RIF is required once a tenant has it, and must be set on every PUT
@@ -274,8 +326,11 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
     }
 
     return {
-      currentRate: config?.conversionRate?.toString() || assetType?.defaultConversionRate?.toString() || '1',
-      defaultRate: assetType?.defaultConversionRate?.toString() || '1',
+      // Default 100x = 10% cashback (Eric 2026-04-25). Was "1" which was
+      // unhelpful — first-time merchants saw "0.1% cashback" and thought
+      // the platform did nothing.
+      currentRate: config?.conversionRate?.toString() || assetType?.defaultConversionRate?.toString() || '100',
+      defaultRate: assetType?.defaultConversionRate?.toString() || '100',
       assetTypeId: assetType?.id || null,
       preferredExchangeSource: tenant?.preferredExchangeSource || null,
       referenceCurrency: tenant?.referenceCurrency || null,

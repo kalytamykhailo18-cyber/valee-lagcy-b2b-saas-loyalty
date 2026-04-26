@@ -95,20 +95,28 @@ export async function initiateDualScan(params: {
     return { success: false, error: 'Monto invalido' };
   }
 
-  const expiresAt = Date.now() + ttlSeconds * 1000;
+  const expiresAtMs = Date.now() + ttlSeconds * 1000;
   const nonce = crypto.randomBytes(8).toString('hex');
-  const payload: DualScanPayload = {
-    tenantId: params.tenantId,
-    branchId: params.branchId,
-    cashierId: params.cashierId,
-    amount: params.amount,
-    assetTypeId: params.assetTypeId,
-    expiresAt,
-    nonce,
-  };
 
-  const token = signPayload(payload);
-  return { success: true, token, expiresAt };
+  // Persist the session. The QR now carries only the nonce — a ~16
+  // char string that drops the QR from version 14 (dense, ~500 char
+  // base64 HMAC payload) down to version 3-4 (sparse, scanner-friendly).
+  // The HMAC path is still accepted by confirmDualScan as a fallback
+  // for tokens in flight during the deploy window.
+  await prisma.dualScanSession.create({
+    data: {
+      tenantId: params.tenantId,
+      branchId: params.branchId,
+      cashierId: params.cashierId,
+      amount: params.amount,
+      assetTypeId: params.assetTypeId,
+      nonce,
+      status: 'pending',
+      expiresAt: new Date(expiresAtMs),
+    },
+  });
+
+  return { success: true, token: nonce, expiresAt: expiresAtMs };
 }
 
 /**
@@ -126,12 +134,38 @@ export async function confirmDualScan(params: {
   newBalance?: string;
   branchId?: string | null;
 }> {
-  const verification = verifyToken(params.token);
-  if (!verification.valid || !verification.payload) {
-    return { success: false, message: verification.error || 'Token invalido' };
+  // Resolve the token to a session payload. Two shapes accepted:
+  //   (a) New short nonce (16 hex chars) → DB lookup in dual_scan_sessions.
+  //   (b) Legacy base64 HMAC-signed JSON → in-memory verification, kept
+  //       as a fallback so QRs generated pre-deploy (up to ttlSeconds
+  //       old) still confirm cleanly.
+  let payload: DualScanPayload | null = null;
+
+  const isShortNonce = /^[0-9a-f]{8,32}$/i.test(params.token);
+  if (isShortNonce) {
+    const session = await prisma.dualScanSession.findUnique({
+      where: { nonce: params.token },
+    });
+    if (!session)                        return { success: false, message: 'QR invalido' };
+    if (session.status !== 'pending')    return { success: false, message: 'Este QR ya fue usado' };
+    if (session.expiresAt.getTime() < Date.now()) return { success: false, message: 'QR expirado' };
+    payload = {
+      tenantId: session.tenantId,
+      branchId: session.branchId,
+      cashierId: session.cashierId,
+      amount: session.amount.toString(),
+      assetTypeId: session.assetTypeId,
+      expiresAt: session.expiresAt.getTime(),
+      nonce: session.nonce,
+    };
+  } else {
+    const verification = verifyToken(params.token);
+    if (!verification.valid || !verification.payload) {
+      return { success: false, message: verification.error || 'Token invalido' };
+    }
+    payload = verification.payload;
   }
 
-  const payload = verification.payload;
   const tenant = await prisma.tenant.findUnique({ where: { id: payload.tenantId } });
   if (!tenant) return { success: false, message: 'Comercio no encontrado' };
 
@@ -188,9 +222,17 @@ export async function confirmDualScan(params: {
     metadata: {
       source: 'dual_scan',
       cashierId: payload.cashierId,
+      staffId: payload.cashierId,
       originalAmount: payload.amount,
       nonce: payload.nonce,
     },
+  });
+
+  // Mark the session used so re-scan hits "Este QR ya fue usado" fast
+  // without touching the ledger. Safe no-op for the legacy HMAC path.
+  await prisma.dualScanSession.updateMany({
+    where: { nonce: payload.nonce, status: 'pending' },
+    data: { status: 'used' },
   });
 
   const newBalance = await getAccountBalance(consumerAccount.id, payload.assetTypeId, payload.tenantId);

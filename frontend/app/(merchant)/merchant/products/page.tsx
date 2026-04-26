@@ -6,14 +6,26 @@ import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints, formatCash } from '@/lib/format'
 
+// Eric 2026-04-25: merchants typing "1.500" got 1.5 points because the input
+// was raw <input type="number">. Strip everything but digits on input and
+// re-format with dot thousand separators on display, so the merchant cannot
+// accidentally enter a decimal separator that the system reads as fraction.
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 export default function ProductManagement() {
   const [products, setProducts] = useState<any[]>([])
   const [archivedProducts, setArchivedProducts] = useState<any[]>([])
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; active: boolean }>>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1' })
-  const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '' })
+  const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1', branchId: '' })
+  const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '', branchId: '' })
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
@@ -52,6 +64,11 @@ export default function ProductManagement() {
     api.getMerchantSettings().then((s: any) => {
       if (s.assetTypeId) setForm(prev => prev.assetTypeId ? prev : { ...prev, assetTypeId: s.assetTypeId })
     }).catch(() => {})
+    // Branches for the per-product scope selector. Empty list means the
+    // tenant hasn't created any branch yet, so we hide the selector.
+    api.getBranches().then((data: any) => {
+      setBranches((data.branches || []).filter((b: any) => b.active))
+    }).catch(() => {})
   }, [])
 
   async function loadProducts() {
@@ -79,6 +96,7 @@ export default function ProductManagement() {
         stock: parseInt(form.stock) || 0,
         assetTypeId: form.assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
+        branchId: form.branchId || undefined,
       })
       // Reset the form but PRESERVE assetTypeId — it's a tenant-level config
       // and is required on every create. Clearing it broke the back-to-back
@@ -87,7 +105,7 @@ export default function ProductManagement() {
       // error so the page looked frozen.
       setForm(prev => ({
         name: '', description: '', photoUrl: '', redemptionCost: '',
-        cashPrice: '', stock: '0', minLevel: '1',
+        cashPrice: '', stock: '0', minLevel: '1', branchId: '',
         assetTypeId: prev.assetTypeId,
       }))
       setShowForm(false)
@@ -132,6 +150,7 @@ export default function ProductManagement() {
       redemptionCost: p.redemptionCost?.toString() || '',
       stock: p.stock?.toString() || '0',
       minLevel: p.minLevel?.toString() || '1',
+      branchId: p.branchId || '',
     })
   }
 
@@ -146,6 +165,9 @@ export default function ProductManagement() {
         redemptionCost: editForm.redemptionCost,
         stock: parseInt(editForm.stock),
         minLevel: parseInt(editForm.minLevel) || 1,
+        // Send null (not undefined) when the owner picked "Todas las
+        // sucursales" so the backend actually clears an existing scope.
+        branchId: editForm.branchId ? editForm.branchId : null,
       })
       setEditingId(null)
       loadProducts()
@@ -248,9 +270,10 @@ export default function ProductManagement() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
                 <input
-                  type="number"
-                  value={form.redemptionCost}
-                  onChange={e => setForm({ ...form, redemptionCost: e.target.value })}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.redemptionCost)}
+                  onChange={e => setForm({ ...form, redemptionCost: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
@@ -268,22 +291,41 @@ export default function ProductManagement() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
                 <input
-                  type="number"
-                  value={form.stock}
-                  onChange={e => setForm({ ...form, stock: e.target.value })}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.stock)}
+                  onChange={e => setForm({ ...form, stock: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min.</label>
                 <input
-                  type="number"
-                  value={form.minLevel}
-                  onChange={e => setForm({ ...form, minLevel: e.target.value })}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.minLevel)}
+                  onChange={e => setForm({ ...form, minLevel: stripNonDigits(e.target.value) })}
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
             </div>
+
+            {branches.length > 0 && (
+              <div>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
+                <select
+                  value={form.branchId}
+                  onChange={e => setForm({ ...form, branchId: e.target.value })}
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
+                >
+                  <option value="">Todas las sucursales</option>
+                  {branches.map(b => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <p className="text-xs text-slate-400 mt-1">Dejalo en &ldquo;Todas&rdquo; si el producto aplica en todo el comercio.</p>
+              </div>
+            )}
 
             <button
               onClick={handleCreate}
@@ -347,17 +389,32 @@ export default function ProductManagement() {
                     <div className="grid grid-cols-3 gap-2">
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Costo (pts)</label>
-                        <input type="number" placeholder="0" value={editForm.redemptionCost} onChange={e => setEditForm({ ...editForm, redemptionCost: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="0" value={fmtThousands(editForm.redemptionCost)} onChange={e => setEditForm({ ...editForm, redemptionCost: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Stock</label>
-                        <input type="number" placeholder="0" value={editForm.stock} onChange={e => setEditForm({ ...editForm, stock: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="0" value={fmtThousands(editForm.stock)} onChange={e => setEditForm({ ...editForm, stock: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min</label>
-                        <input type="number" placeholder="1" value={editForm.minLevel} onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <input type="text" inputMode="numeric" placeholder="1" value={fmtThousands(editForm.minLevel)} onChange={e => setEditForm({ ...editForm, minLevel: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
                       </div>
                     </div>
+                    {branches.length > 0 && (
+                      <div>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
+                        <select
+                          value={editForm.branchId}
+                          onChange={e => setEditForm({ ...editForm, branchId: e.target.value })}
+                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm"
+                        >
+                          <option value="">Todas las sucursales</option>
+                          {branches.map(b => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     <div className="flex gap-2">
                       <button onClick={() => setEditingId(null)} className="aa-btn flex-1 bg-slate-100 py-2 rounded-lg text-sm hover:bg-slate-200"><span className="relative z-10">Cancelar</span></button>
                       <button onClick={() => handleSaveEdit(p.id)} disabled={loading} className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center">
@@ -380,6 +437,11 @@ export default function ProductManagement() {
                         </button>
                       ) : (
                         <MdCardGiftcard className="w-12 h-12 text-slate-400" />
+                      )}
+                      {branches.length > 0 && (
+                        <span className={`absolute top-2 left-2 text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm ${p.branchId ? 'bg-indigo-600/90 text-white' : 'bg-slate-800/70 text-white'}`}>
+                          {p.branchName || 'Todas las sucursales'}
+                        </span>
                       )}
                     </div>
 

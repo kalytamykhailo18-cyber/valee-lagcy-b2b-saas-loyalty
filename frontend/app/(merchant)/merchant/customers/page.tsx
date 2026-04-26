@@ -342,7 +342,7 @@ export default function CustomersPage() {
                             <p className="text-sm text-slate-700 font-mono truncate">{inv.invoiceNumber}</p>
                             <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
                               {inv.uploadedAt && <span>Subida: {new Date(inv.uploadedAt).toLocaleDateString('es-VE')}</span>}
-                              {inv.branch?.name ? <span>· {inv.branch.name}</span> : <span>· Sin sucursal</span>}
+                              {inv.branch?.name && <span>· {inv.branch.name}</span>}
                             </div>
                           </div>
                           <div className="text-right flex-shrink-0">

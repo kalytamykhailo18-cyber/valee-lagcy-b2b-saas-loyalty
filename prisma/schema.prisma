@@ -190,8 +190,21 @@ model Tenant {
   website          String?      @db.VarChar(500)
   description      String?      @db.VarChar(1000)
   instagramHandle  String?      @map("instagram_handle") @db.VarChar(100)
-  welcomeBonusAmount Int        @default(50) @map("welcome_bonus_amount")
-  referralBonusAmount Int       @default(100) @map("referral_bonus_amount")
+  /// Default 5000 (Eric 2026-04-25). Was 50 — too small to feel meaningful
+  /// for first-time merchants. The onboarding shows it formatted as "5.000".
+  welcomeBonusAmount Int        @default(5000) @map("welcome_bonus_amount")
+  /// When false, no welcome bonus is issued AND the bot stops mentioning it.
+  /// Eric 2026-04-25: setting amount to 0 used to leak "te regalo 0 puntos" to
+  /// the consumer; this is the clean ON/OFF the merchant pauses with.
+  welcomeBonusActive Boolean    @default(true) @map("welcome_bonus_active")
+  /// Optional cap on number of welcome bonuses issued per tenant. Once reached,
+  /// new consumers do not receive the bonus and the bot does not mention it.
+  /// Null = no cap.
+  welcomeBonusLimit  Int?       @map("welcome_bonus_limit")
+  /// Default 1000 (Eric 2026-04-25). Was 100.
+  referralBonusAmount Int       @default(1000) @map("referral_bonus_amount")
+  referralBonusActive Boolean   @default(true) @map("referral_bonus_active")
+  referralBonusLimit  Int?      @map("referral_bonus_limit")
   rif              String?      @db.VarChar(50)
   preferredExchangeSource ExchangeSource? @map("preferred_exchange_source")
   referenceCurrency       ReferenceCurrency @default(usd) @map("reference_currency")
@@ -229,6 +242,7 @@ model Tenant {
   otpSessions            OtpSession[]
   recurrenceRules        RecurrenceRule[]
   recurrenceNotifications RecurrenceNotification[]
+  dualScanSessions       DualScanSession[]
 
   @@map("tenants")
 }
@@ -253,6 +267,8 @@ model Branch {
   invoices         Invoice[]
   redemptionTokens RedemptionToken[]
   staff            Staff[]
+  products         Product[]
+  dualScanSessions DualScanSession[]
 
   @@index([tenantId])
   @@index([tenantId, active])
@@ -274,6 +290,7 @@ model AssetType {
   ledgerEntries      LedgerEntry[]
   products           Product[]
   redemptionTokens   RedemptionToken[]
+  dualScanSessions   DualScanSession[]
 
   @@map("asset_types")
 }
@@ -348,17 +365,20 @@ model Referral {
   tenantId          String          @map("tenant_id") @db.Uuid
   referrerAccountId String          @map("referrer_account_id") @db.Uuid
   refereeAccountId  String          @map("referee_account_id") @db.Uuid
+  originStaffId     String?         @map("origin_staff_id") @db.Uuid
   status            ReferralStatus  @default(pending)
   bonusAmount       Decimal?        @map("bonus_amount") @db.Decimal(18, 8)
   bonusLedgerId     String?         @map("bonus_ledger_id") @db.Uuid
   createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz
   creditedAt        DateTime?       @map("credited_at") @db.Timestamptz
 
-  referrer Account @relation("Referrer", fields: [referrerAccountId], references: [id])
-  referee  Account @relation("Referee",  fields: [refereeAccountId],  references: [id])
+  referrer    Account @relation("Referrer", fields: [referrerAccountId], references: [id])
+  referee     Account @relation("Referee",  fields: [refereeAccountId],  references: [id])
+  originStaff Staff?  @relation(fields: [originStaffId], references: [id])
 
   @@unique([tenantId, refereeAccountId]) // one referral slot per referee per tenant
   @@index([tenantId, referrerAccountId])
+  @@index([tenantId, originStaffId, status])
   @@index([status, createdAt])
   @@map("referrals")
 }
@@ -519,6 +539,7 @@ model RedemptionToken {
 model Product {
   id                  String    @id @default(uuid()) @db.Uuid
   tenantId            String    @map("tenant_id") @db.Uuid
+  branchId            String?   @map("branch_id") @db.Uuid
   name                String    @db.VarChar(255)
   description         String?
   photoUrl            String?   @map("photo_url")
@@ -535,18 +556,42 @@ model Product {
   updatedAt           DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
 
   tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  branch           Branch?           @relation(fields: [branchId], references: [id])
   assetType        AssetType         @relation(fields: [assetTypeId], references: [id])
   redemptionTokens RedemptionToken[]
 
   @@index([tenantId, active])
   @@index([tenantId, active, stock])
   @@index([tenantId, archivedAt])
+  @@index([tenantId, branchId, active])
   @@map("products")
 }
 
 // ============================================================
 // 11. STAFF
 // ============================================================
+
+model DualScanSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @map("tenant_id") @db.Uuid
+  branchId    String?  @map("branch_id") @db.Uuid
+  cashierId   String   @map("cashier_id") @db.Uuid
+  amount      Decimal  @db.Decimal(18, 8)
+  assetTypeId String   @map("asset_type_id") @db.Uuid
+  nonce       String   @unique @db.VarChar(32)
+  status      String   @default("pending") @db.VarChar(16)
+  expiresAt   DateTime @map("expires_at") @db.Timestamptz
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  branch    Branch?   @relation(fields: [branchId], references: [id])
+  cashier   Staff     @relation(fields: [cashierId], references: [id])
+  assetType AssetType @relation(fields: [assetTypeId], references: [id])
+
+  @@index([tenantId, cashierId, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
+  @@map("dual_scan_sessions")
+}
 
 model Staff {
   id             String    @id @default(uuid()) @db.Uuid
@@ -570,6 +615,8 @@ model Staff {
   redemptions    RedemptionToken[]   @relation("RedemptionUsedBy")
   scanSessions   StaffScanSession[]
   passwordResetTokens PasswordResetToken[]
+  originReferrals Referral[]
+  dualScanSessions DualScanSession[]
 
   @@unique([tenantId, email])
   @@map("staff")

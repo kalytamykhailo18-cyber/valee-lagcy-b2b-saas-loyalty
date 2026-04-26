@@ -106,17 +106,43 @@ export async function registerCsvRoutes(app: FastifyInstance): Promise<void> {
     const counts: Record<string, number> = { available: 0, claimed: 0, pending_validation: 0, rejected: 0 };
     for (const row of statusCounts) counts[row.status] = row._count._all;
 
-    return {
-      invoices: invoices.map(i => ({
+    // Eric 2026-04-25: surface the $/€ equivalent next to each Bs amount,
+    // same pattern the customers panel already uses, so the merchant doesn't
+    // have to mentally convert every row.
+    const tenantForCurrency = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { preferredExchangeSource: true, referenceCurrency: true },
+    });
+    const refCurrency = tenantForCurrency?.referenceCurrency || 'usd';
+    const currencySymbol = refCurrency === 'eur' ? '€' : refCurrency === 'bs' ? 'Bs' : '$';
+    const exchangeSource = tenantForCurrency?.preferredExchangeSource || null;
+    const { getRateAtDate } = await import('../../../services/exchange-rates.js');
+
+    const invoicesOut = await Promise.all(invoices.map(async (i) => {
+      let amountInReference: string | null = null;
+      if (exchangeSource && refCurrency && refCurrency !== 'bs') {
+        const date = i.transactionDate || i.createdAt;
+        const rate = await getRateAtDate(exchangeSource as any, refCurrency as any, date);
+        if (rate && rate.rateBs > 0) {
+          amountInReference = (Number(i.amount) / rate.rateBs).toFixed(2);
+        }
+      }
+      return {
         id: i.id,
         invoiceNumber: i.invoiceNumber,
         amount: i.amount.toString(),
+        amountInReference,
+        currencySymbol,
         transactionDate: i.transactionDate,
         customerPhone: i.customerPhone,
         status: i.status,
         uploadBatchId: i.uploadBatchId,
         createdAt: i.createdAt,
-      })),
+      };
+    }));
+
+    return {
+      invoices: invoicesOut,
       total,
       counts,
     };

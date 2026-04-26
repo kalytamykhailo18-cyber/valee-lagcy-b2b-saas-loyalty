@@ -19,14 +19,13 @@ import QRCode from 'qrcode';
  */
 export async function generateWhatsAppDeepLink(merchantSlug: string, merchantName?: string): Promise<string> {
   const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  let name = merchantName;
-  if (!name) {
-    const tenant = await prisma.tenant.findUnique({ where: { slug: merchantSlug }, select: { name: true } });
-    name = tenant?.name || merchantSlug;
-  }
-  // Pre-filled text the customer sees when they scan the QR. Framed as a
-  // referral code so the slug looks intentional, not like a technical tag.
-  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${name} ✨ Ref: ${merchantSlug}`);
+  // Eric 2026-04-25: restore the persuasive prefix the prefilled message used
+  // to carry. The user reads "Hola! Quiero ganar puntos en <Comercio> " and
+  // the technical "Valee Ref:" marker stays at the end so the bot still parses
+  // it. The previous Notion item complaint was: the bare "Valee Ref: kozmo"
+  // looked like a system glitch from the customer's POV.
+  const greet = merchantName ? `Hola! Quiero ganar puntos en ${merchantName} ` : 'Hola! Quiero ganar puntos ';
+  const text = encodeURIComponent(`${greet}Valee Ref: ${merchantSlug}`);
   return `https://wa.me/${botPhone}?text=${text}`;
 }
 
@@ -85,7 +84,7 @@ export async function generateMerchantQR(tenantId: string): Promise<{
  * the staff's ID to the conversation so any invoice submitted in that session
  * is credited to that staff for performance tracking.
  */
-export async function generateStaffQR(staffId: string): Promise<{
+export async function generateStaffQR(staffId: string, options: { rotate?: boolean } = {}): Promise<{
   deepLink: string;
   qrCodeUrl: string | null;
   qrSlug: string;
@@ -96,13 +95,19 @@ export async function generateStaffQR(staffId: string): Promise<{
   });
   if (!staff) throw new Error('Staff not found');
 
-  // Short, random, URL-safe slug (8 chars of base36). Uniqueness enforced at DB level.
-  // If a slug already exists for this staff we reuse it so the printed QR can be reprinted
-  // without invalidating posters already in the wild.
-  let qrSlug = staff.qrSlug;
+  // Short, random, URL-safe slug (8 chars of base36). Uniqueness enforced
+  // at DB level.
+  //
+  // First generation reuses any existing slug so reprinting an intact QR
+  // is idempotent. An explicit rotate=true (Genesis 2026-04-24: the
+  // "Regenerar QR" button) forces a fresh slug so the old printed QR is
+  // invalidated — exactly the semantics an owner needs when a cashier
+  // leaves or the poster was compromised.
+  let qrSlug = options.rotate ? null : staff.qrSlug;
   if (!qrSlug) {
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidate = Math.random().toString(36).slice(2, 10);
+      if (candidate === staff.qrSlug) continue; // cosmetic: never regen to the same string
       const collision = await prisma.staff.findFirst({ where: { qrSlug: candidate }, select: { id: true } });
       if (!collision) { qrSlug = candidate; break; }
     }
@@ -110,8 +115,13 @@ export async function generateStaffQR(staffId: string): Promise<{
   }
 
   const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  // Persuasive prefix restored (Eric 2026-04-25). "Hola! Quiero ganar puntos
+  // en <Comercio> con <Cajero> " reads like a real intent message from the
+  // user, not a system marker. The Ref/Cjr tags stay at the tail so the bot
+  // still resolves tenant + staff attribution.
+  const greet = `Hola! Quiero ganar puntos en ${staff.tenant.name}${staff.name ? ` con ${staff.name}` : ''} `;
   const text = encodeURIComponent(
-    `Hola! Quiero ganar puntos en ${staff.tenant.name} con ${staff.name} ✨ Ref: ${staff.tenant.slug} Cjr: ${qrSlug}`
+    `${greet}Valee Ref: ${staff.tenant.slug} Cjr: ${qrSlug}`
   );
   const deepLink = `https://wa.me/${botPhone}?text=${text}`;
 
@@ -140,8 +150,11 @@ export async function generateReferralQR(params: {
   referralSlug: string;
 }): Promise<{ deepLink: string; qrPngBase64: string }> {
   const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
+  // Persuasive prefix restored (Eric 2026-04-25). The bare Ref/Ref2U markers
+  // looked like a system glitch from the consumer's POV.
+  const greet = `Hola! Quiero ganar puntos en ${params.merchantName} `;
   const text = encodeURIComponent(
-    `Hola! Me invitaron a ${params.merchantName} en Valee ✨ Ref: ${params.merchantSlug} Ref2U: ${params.referralSlug}`
+    `${greet}Valee Ref: ${params.merchantSlug} Ref2U: ${params.referralSlug}`
   );
   const deepLink = `https://wa.me/${botPhone}?text=${text}`;
   const qrBuffer = await generateQRImage(deepLink);
@@ -161,9 +174,13 @@ export async function generateBranchQR(branchId: string): Promise<{
   });
   if (!branch) throw new Error('Branch not found');
 
-  // Branch QR includes both tenant slug and branch ID
+  // Branch QR includes both tenant slug and branch ID. Persuasive prefix
+  // restored (Eric 2026-04-25); names the branch so a customer scanning
+  // a specific sucursal sees "Hola! Quiero ganar puntos en Kromi - Parral ".
   const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  const text = encodeURIComponent(`Hola! Quiero ganar puntos en ${branch.tenant.name} - ${branch.name} ✨ Ref: ${branch.tenant.slug}/${branch.id}`);
+  const label = branch.name ? `${branch.tenant.name} - ${branch.name}` : branch.tenant.name;
+  const greet = `Hola! Quiero ganar puntos en ${label} `;
+  const text = encodeURIComponent(`${greet}Valee Ref: ${branch.tenant.slug}/${branch.id}`);
   const deepLink = `https://wa.me/${botPhone}?text=${text}`;
 
   const qrBuffer = await generateQRImage(deepLink);

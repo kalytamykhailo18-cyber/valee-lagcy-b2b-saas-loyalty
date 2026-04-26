@@ -501,4 +501,41 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       merchants,
     };
   });
+
+  // ---- STAFF ATTRIBUTION via PWA ----
+  // When a consumer clicks the WhatsApp greeting's "Accede a tu cuenta"
+  // link and lands on the PWA with ?cajero=<qrSlug>, we need the same
+  // attribution window that the WhatsApp image upload gets. Genesis
+  // 2026-04-24: without this, uploading the factura from the PWA loses
+  // the cashier the user just scanned. We resolve the slug inside the
+  // consumer's current tenant and register a StaffScanSession keyed on
+  // their phone — the exact same row validateInvoice already consults.
+  app.post('/api/consumer/staff-attribution', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { tenantId, phoneNumber } = request.consumer!;
+    if (!tenantId || !phoneNumber) {
+      return reply.status(409).send({ error: 'No merchant selected' });
+    }
+    const { cashierSlug } = (request.body || {}) as { cashierSlug?: string };
+    if (!cashierSlug || typeof cashierSlug !== 'string') {
+      return reply.status(400).send({ error: 'cashierSlug required' });
+    }
+    const clean = cashierSlug.trim().toLowerCase();
+    if (!/^[a-z0-9]{4,16}$/.test(clean)) {
+      return reply.status(400).send({ error: 'Invalid cashierSlug format' });
+    }
+    const staff = await prisma.staff.findFirst({
+      where: { tenantId, qrSlug: clean, active: true },
+      select: { id: true, name: true },
+    });
+    if (!staff) {
+      // Unknown or inactive cashier — silently no-op so a shared URL with a
+      // stale slug doesn't 404 the PWA, but signal it so the client can
+      // skip the optimistic "atendido por" banner.
+      return { recorded: false, reason: 'cashier_not_found' };
+    }
+    await prisma.staffScanSession.create({
+      data: { tenantId, staffId: staff.id, consumerPhone: phoneNumber },
+    });
+    return { recorded: true, staffName: staff.name };
+  });
 }

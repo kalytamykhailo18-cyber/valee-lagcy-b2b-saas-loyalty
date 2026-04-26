@@ -3,6 +3,13 @@
 import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 export default function RecurrencePage() {
   const [rules, setRules] = useState<any[]>([])
   const [notifications, setNotifications] = useState<any[]>([])
@@ -156,6 +163,31 @@ export default function RecurrencePage() {
     try { await api.toggleRecurrenceRule(id); loadData() } catch {}
   }
 
+  const [testingId, setTestingId] = useState<string | null>(null)
+  async function handleTest(id: string, name: string, intervalDays: number, graceDays: number) {
+    const minutes = intervalDays + graceDays
+    const ok = confirm(
+      `Probar la regla "${name}" en modo minutos.\n\n` +
+      `Para esta prueba, ${intervalDays} dias + ${graceDays} de gracia se interpretan como ${minutes} minutos.\n\n` +
+      `Cualquier cliente que no haya validado una factura en los ultimos ${minutes} minutos recibira el mensaje ahora.\n\n` +
+      `Continuar?`
+    )
+    if (!ok) return
+    setTestingId(id)
+    try {
+      const r: any = await api.testRecurrenceRule(id)
+      alert(`Prueba ejecutada:\n\n` +
+        `Notificados: ${r.notified}\n` +
+        `Bonos otorgados: ${r.bonusesGranted}\n` +
+        `Saltados (ya notificados): ${r.skipped}\n\n` +
+        `Si "Notificados" es 0, no hay clientes que cumplan el umbral de ${r.thresholdMinutes} minutos.`)
+      loadData()
+    } catch (e: any) {
+      alert(e?.error || e?.message || 'Error al ejecutar la prueba')
+    }
+    setTestingId(null)
+  }
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
@@ -206,11 +238,10 @@ export default function RecurrencePage() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Intervalo (dias) <span className="text-red-500">*</span></label>
                 <input
-                  type="number"
-                  min={1}
-                  max={365}
-                  value={form.intervalDays}
-                  onChange={e => { setForm({ ...form, intervalDays: e.target.value }); if (errors.intervalDays) setErrors({ ...errors, intervalDays: '' }) }}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.intervalDays)}
+                  onChange={e => { setForm({ ...form, intervalDays: stripNonDigits(e.target.value) }); if (errors.intervalDays) setErrors({ ...errors, intervalDays: '' }) }}
                   className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.intervalDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
                 <p className="text-[11px] text-slate-400 mt-1">Cada cuantos dias esperas que el cliente regrese.</p>
@@ -219,11 +250,10 @@ export default function RecurrencePage() {
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Gracia (dias) <span className="text-red-500">*</span></label>
                 <input
-                  type="number"
-                  min={0}
-                  max={90}
-                  value={form.graceDays}
-                  onChange={e => { setForm({ ...form, graceDays: e.target.value }); if (errors.graceDays) setErrors({ ...errors, graceDays: '' }) }}
+                  type="text"
+                  inputMode="numeric"
+                  value={fmtThousands(form.graceDays)}
+                  onChange={e => { setForm({ ...form, graceDays: stripNonDigits(e.target.value) }); if (errors.graceDays) setErrors({ ...errors, graceDays: '' }) }}
                   className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.graceDays ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
                 />
                 <p className="text-[11px] text-slate-400 mt-1">Dias extra antes de mandar el recordatorio. Se suma al intervalo.</p>
@@ -258,11 +288,11 @@ export default function RecurrencePage() {
             <div>
               <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Puntos de bono (opcional)</label>
               <input
-                type="number"
-                min={1}
+                type="text"
+                inputMode="numeric"
                 placeholder="50"
-                value={form.bonusAmount}
-                onChange={e => { setForm({ ...form, bonusAmount: e.target.value }); if (errors.bonusAmount) setErrors({ ...errors, bonusAmount: '' }) }}
+                value={fmtThousands(form.bonusAmount)}
+                onChange={e => { setForm({ ...form, bonusAmount: stripNonDigits(e.target.value) }); if (errors.bonusAmount) setErrors({ ...errors, bonusAmount: '' }) }}
                 className={`w-full mt-1 px-3 py-2.5 rounded-lg border text-sm focus:outline-none focus:ring-2 ${errors.bonusAmount ? 'border-red-300 focus:ring-red-400' : 'aa-field aa-field-emerald border-slate-200'}`}
               />
               {errors.bonusAmount && <p className="text-red-500 text-xs mt-1">{errors.bonusAmount}</p>}
@@ -358,6 +388,14 @@ export default function RecurrencePage() {
                           Editar
                         </button>
                         <button
+                          onClick={() => handleTest(r.id, r.name, r.intervalDays, r.graceDays)}
+                          disabled={testingId === r.id || !r.active}
+                          className="text-sm text-amber-600 hover:text-amber-800 font-semibold disabled:opacity-50"
+                          title={!r.active ? 'Activa la regla antes de probar' : `Probar interpretando ${r.intervalDays + r.graceDays} dias como minutos`}
+                        >
+                          {testingId === r.id ? 'Enviando...' : 'Probar (min)'}
+                        </button>
+                        <button
                           onClick={() => handleDelete(r.id, r.name)}
                           className="text-sm text-red-600 hover:text-red-800 font-semibold"
                         >
@@ -389,28 +427,46 @@ export default function RecurrencePage() {
                             </div>
 
                             {eligible.consumers.length === 0 ? (
-                              <p className="text-sm text-slate-400 text-center py-4">Ningun cliente califica por ahora</p>
+                              <p className="text-sm text-slate-400 text-center py-4">
+                                {eligible.hasTargetList
+                                  ? 'La regla no tiene numeros cargados en el grupo.'
+                                  : 'Ningun cliente califica por ahora'}
+                              </p>
                             ) : (
                               <div className="bg-white rounded-lg border border-slate-200 max-h-64 overflow-y-auto">
-                                {eligible.consumers.map((c: any) => (
-                                  <div key={c.accountId} className="flex items-center justify-between p-3 border-b border-slate-100 last:border-0">
-                                    <div className="flex-1 min-w-0">
-                                      <p className="text-sm font-medium text-slate-800 truncate">
-                                        {c.phoneNumber}
-                                        {c.displayName && <span className="text-slate-500"> - {c.displayName}</span>}
-                                      </p>
-                                      <p className="text-xs text-slate-400 mt-0.5">
-                                        {c.daysSince} dias sin visitar
-                                        {c.cedula && ` - ${c.cedula}`}
-                                      </p>
+                                {eligible.consumers.map((c: any, i: number) => {
+                                  const status = c.status || (c.qualifies ? 'califica_ahora' : 'en_periodo')
+                                  const statusChip = (() => {
+                                    if (c.alreadyNotified) return { label: 'Enviado', cls: 'bg-emerald-100 text-emerald-700' }
+                                    if (status === 'califica_ahora') return { label: 'Pendiente', cls: 'bg-amber-100 text-amber-700' }
+                                    if (status === 'en_periodo') return { label: `En ${c.daysUntilQualifies}d`, cls: 'bg-slate-100 text-slate-600' }
+                                    if (status === 'sin_historial') return { label: 'Sin historial', cls: 'bg-slate-100 text-slate-500' }
+                                    return { label: 'Sin cuenta', cls: 'bg-rose-50 text-rose-600' }
+                                  })()
+                                  const subtitle = (() => {
+                                    if (status === 'sin_cuenta') return 'Aun no se registro en el comercio'
+                                    if (status === 'sin_historial') return 'Registrado, aun sin primera compra'
+                                    if (status === 'en_periodo') return `Visito hace ${c.daysSince} dias - califica en ${c.daysUntilQualifies}`
+                                    return `${c.daysSince} dias sin visitar`
+                                  })()
+                                  return (
+                                    <div key={c.accountId || `t-${i}`} className="flex items-center justify-between p-3 border-b border-slate-100 last:border-0">
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-medium text-slate-800 truncate">
+                                          {c.phoneNumber}
+                                          {c.displayName && <span className="text-slate-500"> - {c.displayName}</span>}
+                                        </p>
+                                        <p className="text-xs text-slate-400 mt-0.5">
+                                          {subtitle}
+                                          {c.cedula && ` - ${c.cedula}`}
+                                        </p>
+                                      </div>
+                                      <span className={`px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ml-2 ${statusChip.cls}`}>
+                                        {statusChip.label}
+                                      </span>
                                     </div>
-                                    {c.alreadyNotified ? (
-                                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-medium flex-shrink-0 ml-2">Enviado</span>
-                                    ) : (
-                                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-medium flex-shrink-0 ml-2">Pendiente</span>
-                                    )}
-                                  </div>
-                                ))}
+                                  )
+                                })}
                               </div>
                             )}
                           </>

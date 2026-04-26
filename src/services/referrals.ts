@@ -97,11 +97,43 @@ export async function recordPendingReferral(params: {
   });
   if (priorActivity) return { recorded: false, reason: 'referee_has_activity' };
 
+  // Chain-referral attribution: if the referrer reached this merchant via
+  // a cashier's QR, that cashier should get credit when this referral
+  // credits. Priority:
+  //   (1) most recent StaffScanSession for the referrer's phone (any age,
+  //       we don't time-gate the chain — Genesis test case spanned days).
+  //   (2) fallback to the most recent staff-attributed ledger row.
+  let originStaffId: string | null = null;
+  const refPhone = referrer.phoneNumber;
+  if (refPhone) {
+    const recentScan = await prisma.staffScanSession.findFirst({
+      where: { tenantId: params.tenantId, consumerPhone: refPhone },
+      orderBy: { scannedAt: 'desc' },
+      select: { staffId: true },
+    });
+    originStaffId = recentScan?.staffId || null;
+  }
+  if (!originStaffId) {
+    const lastAttributed = await prisma.ledgerEntry.findFirst({
+      where: {
+        tenantId: params.tenantId,
+        accountId: params.referrerAccountId,
+        entryType: 'CREDIT',
+        eventType: { in: ['INVOICE_CLAIMED', 'PRESENCE_VALIDATED'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { metadata: true },
+    });
+    const meta = (lastAttributed?.metadata as any) || null;
+    if (meta?.staffId) originStaffId = String(meta.staffId);
+  }
+
   await prisma.referral.create({
     data: {
       tenantId: params.tenantId,
       referrerAccountId: params.referrerAccountId,
       refereeAccountId: params.refereeAccountId,
+      originStaffId,
       status: 'pending',
     },
   });
@@ -127,10 +159,18 @@ export async function tryCreditReferral(params: {
 
   const tenant = await prisma.tenant.findUnique({
     where: { id: params.tenantId },
-    select: { referralBonusAmount: true },
+    select: { referralBonusAmount: true, referralBonusActive: true, referralBonusLimit: true },
   });
-  const bonusInt = Number(tenant?.referralBonusAmount ?? parseInt(process.env.REFERRAL_BONUS_AMOUNT || '100'));
+  if (!tenant || tenant.referralBonusActive === false) return { credited: false };
+  const bonusInt = Number(tenant.referralBonusAmount ?? parseInt(process.env.REFERRAL_BONUS_AMOUNT || '100'));
   if (!Number.isFinite(bonusInt) || bonusInt <= 0) return { credited: false };
+
+  if (tenant.referralBonusLimit != null) {
+    const credited = await prisma.referral.count({
+      where: { tenantId: params.tenantId, status: 'credited' },
+    });
+    if (credited >= tenant.referralBonusLimit) return { credited: false };
+  }
 
   const pool = await getSystemAccount(params.tenantId, 'issued_value_pool');
   if (!pool) return { credited: false };
@@ -138,6 +178,10 @@ export async function tryCreditReferral(params: {
   const amount = bonusInt.toFixed(8);
   const referenceId = `REFERRAL-${pending.id}`;
 
+  // Chain attribution: the cashier who brought the REFERRER in should
+  // get credit for this referral in staff-performance. We stamped it on
+  // the Referral row at record time; carry it through to the ledger row
+  // metadata so the performance query can find it without extra joins.
   const ledger = await writeDoubleEntry({
     tenantId: params.tenantId,
     eventType: 'ADJUSTMENT_MANUAL',
@@ -151,6 +195,7 @@ export async function tryCreditReferral(params: {
       type: 'referral_bonus',
       referralId: pending.id,
       refereeAccountId: params.refereeAccountId,
+      ...(pending.originStaffId ? { staffId: pending.originStaffId } : {}),
     },
   });
 

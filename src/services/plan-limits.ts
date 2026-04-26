@@ -34,7 +34,9 @@ const PLAN_LIMITS: Record<PlanTier, PlanConfig> = {
     flash_offers: 5,
     whatsapp_messages: 200,
     products_in_catalog: 20,
-    staff_members: 3,
+    // Eric 2026-04-25: bumped 3 → 10 so a small comercio with multiple
+    // sucursales can fit its cashiers without immediately needing to upgrade.
+    staff_members: 10,
     csv_uploads: 30,
   },
   pro: {
@@ -90,8 +92,10 @@ export async function getUsage(tenantId: string, action: LimitedAction): Promise
     }
 
     case 'staff_members': {
-      // Total active staff; the limit is on roster size, not hires this month
-      const r = await prisma.staff.count({ where: { tenantId, active: true } });
+      // Total active CASHIERS; owners aren't counted toward the plan cap
+      // (Eric 2026-04-25). The owner is implicit per tenant; consuming a
+      // staff slot for them was inflating usage by 1 on every comercio.
+      const r = await prisma.staff.count({ where: { tenantId, active: true, role: { not: 'owner' } } });
       return r;
     }
 

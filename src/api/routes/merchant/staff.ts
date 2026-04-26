@@ -7,10 +7,19 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
   // ---- STAFF MANAGEMENT (Owner only) ----
   app.post('/api/merchant/staff', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, email, password, role, branchId } = request.body as any;
+    const { name, email, password, role: incomingRole, branchId } = request.body as any;
 
-    if (!name || !email || !password || !role) {
-      return reply.status(400).send({ error: 'name, email, password, and role are required' });
+    if (!name || !email || !password) {
+      return reply.status(400).send({ error: 'name, email and password are required' });
+    }
+
+    // Eric 2026-04-26: this endpoint only creates CAJEROS. The owner role is
+    // reserved for the original tenant signup (and admin-initiated transfers,
+    // which use a different code path). Reject any attempt to elevate via
+    // this form, even if the frontend somehow sent role=owner.
+    const role = 'cashier';
+    if (incomingRole && incomingRole !== 'cashier') {
+      return reply.status(400).send({ error: 'Solo se pueden crear cajeros desde este formulario.' });
     }
 
     // branchId is optional. A null branchId means the cashier is attached
@@ -119,8 +128,12 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
   // ---- LIST STAFF (Owner only) ----
   app.get('/api/merchant/staff', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request) => {
     const { tenantId } = request.staff!;
+    // Eric 2026-04-26: this endpoint feeds the "Cajeros y QR personales"
+    // page; owners belong on the QR-del-comercio card, not in the cashier
+    // list. Filter at the API level so even a stale browser bundle that
+    // forgets the frontend filter never sees the owner row here.
     const staffList = await prisma.staff.findMany({
-      where: { tenantId },
+      where: { tenantId, role: { not: 'owner' } },
       orderBy: { createdAt: 'desc' },
       select: {
         id: true, name: true, email: true, role: true, active: true, branchId: true, createdAt: true,
@@ -182,6 +195,16 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     const target = await prisma.staff.findFirst({ where: { id, tenantId } });
     if (!target) return reply.status(404).send({ error: 'Staff member not found' });
 
+    // Owners don't process transactions, so a personal attribution QR is
+    // meaningless for them (Genesis 2026-04-24). Defense-in-depth: the UI
+    // hides the Generar QR button for owner rows, and if a stale client
+    // somehow still POSTs here we reject at the edge.
+    if (target.role === 'owner') {
+      return reply.status(400).send({
+        error: 'El owner no usa QR personal. El QR del comercio se administra en la seccion "QR del comercio".',
+      });
+    }
+
     const isRegen = !!target.qrCodeUrl;
     if (isRegen) {
       if (!reason || reason.trim().length < 3) {
@@ -206,12 +229,16 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const { generateStaffQR } = await import('../../../services/merchant-qr.js');
-    const result = await generateStaffQR(id);
+    // Regenerate MUST rotate the slug — otherwise the WhatsApp text
+    // that carries Cjr: never changes and any compromised / lost poster
+    // stays live. First-time generation reuses any existing slug for
+    // idempotent reprints.
+    const result = await generateStaffQR(id, { rotate: isRegen });
 
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${actorId}::uuid, 'staff', 'owner', 'STAFF_QR_GENERATED', 'success',
-        ${JSON.stringify({ staffId: id, staffName: target.name, qrSlug: result.qrSlug, isRegen, reason: reason?.trim() || null })}::jsonb, now())
+        ${JSON.stringify({ staffId: id, staffName: target.name, qrSlug: result.qrSlug, priorSlug: target.qrSlug, isRegen, reason: reason?.trim() || null })}::jsonb, now())
     `;
 
     return result;
@@ -226,6 +253,16 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
     const { days = '30' } = request.query as { days?: string };
     const since = new Date(Date.now() - Math.max(1, parseInt(days)) * 24 * 60 * 60 * 1000);
 
+    // Staff attribution covers three sources in a single UNION:
+    //   (a) Direct INVOICE_CLAIMED / PRESENCE_VALIDATED rows where the
+    //       cashier was attributed at write time (metadata.staffId).
+    //   (b) REFERRAL_BONUS rows stamped at write time with
+    //       metadata.staffId (new referrals after 2026-04-24 carry
+    //       origin-cashier attribution).
+    //   (c) REFERRAL_BONUS rows WITHOUT metadata.staffId (historic,
+    //       pre-migration) that we can retroactively attribute via the
+    //       referrals.origin_staff_id column populated by the migration
+    //       backfill.
     const rows = await prisma.$queryRaw<Array<{
       staff_id: string;
       staff_name: string;
@@ -234,20 +271,65 @@ export async function registerStaffRoutes(app: FastifyInstance): Promise<void> {
       unique_consumers: bigint;
       value_issued: string;
     }>>`
+      WITH attributed AS (
+        -- (a) direct invoice / presence attribution
+        SELECT
+          (le.metadata->>'staffId')::uuid AS staff_uuid,
+          le.account_id,
+          le.amount
+        FROM ledger_entries le
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.entry_type = 'CREDIT'
+          AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
+          AND le.created_at >= ${since}::timestamptz
+          AND le.metadata->>'staffId' IS NOT NULL
+
+        UNION ALL
+
+        -- (b) referral bonus stamped at write time
+        SELECT
+          (le.metadata->>'staffId')::uuid AS staff_uuid,
+          le.account_id,
+          le.amount
+        FROM ledger_entries le
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.entry_type = 'CREDIT'
+          AND le.event_type = 'ADJUSTMENT_MANUAL'
+          AND le.created_at >= ${since}::timestamptz
+          AND le.metadata->>'type' = 'referral_bonus'
+          AND le.metadata->>'staffId' IS NOT NULL
+
+        UNION ALL
+
+        -- (c) historic referral bonus retroactively attributed via
+        --     referrals.origin_staff_id. Guard against double-counting
+        --     (b) by requiring NO metadata.staffId.
+        SELECT
+          r.origin_staff_id AS staff_uuid,
+          le.account_id,
+          le.amount
+        FROM ledger_entries le
+        JOIN referrals r
+          ON le.reference_id = 'REFERRAL-' || r.id::text
+         AND r.tenant_id = le.tenant_id
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.entry_type = 'CREDIT'
+          AND le.event_type = 'ADJUSTMENT_MANUAL'
+          AND le.created_at >= ${since}::timestamptz
+          AND le.metadata->>'type' = 'referral_bonus'
+          AND (le.metadata->>'staffId') IS NULL
+          AND r.origin_staff_id IS NOT NULL
+      )
       SELECT
         s.id::text AS staff_id,
         s.name AS staff_name,
         s.role::text AS staff_role,
         COUNT(*)::bigint AS transactions,
-        COUNT(DISTINCT le.account_id)::bigint AS unique_consumers,
-        COALESCE(SUM(le.amount), 0)::text AS value_issued
-      FROM ledger_entries le
-      JOIN staff s ON s.id = (le.metadata->>'staffId')::uuid
-      WHERE le.tenant_id = ${tenantId}::uuid
-        AND le.entry_type = 'CREDIT'
-        AND le.event_type IN ('INVOICE_CLAIMED', 'PRESENCE_VALIDATED')
-        AND le.created_at >= ${since}::timestamptz
-        AND le.metadata->>'staffId' IS NOT NULL
+        COUNT(DISTINCT a.account_id)::bigint AS unique_consumers,
+        COALESCE(SUM(a.amount), 0)::text AS value_issued
+      FROM attributed a
+      JOIN staff s ON s.id = a.staff_uuid
+      WHERE s.tenant_id = ${tenantId}::uuid
       GROUP BY s.id, s.name, s.role
       ORDER BY transactions DESC
     `;

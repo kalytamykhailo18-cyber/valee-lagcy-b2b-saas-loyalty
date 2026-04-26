@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { assertTestDatabase } from './_test-guard.js';
 dotenv.config();
 
 import bcrypt from 'bcryptjs';
@@ -22,6 +23,7 @@ function assert(condition: boolean, message: string) {
 }
 
 async function cleanAll() {
+  assertTestDatabase();
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_delete`;
   await prisma.$executeRaw`ALTER TABLE ledger_entries DISABLE TRIGGER trg_ledger_no_update`;
   await prisma.$executeRaw`ALTER TABLE audit_log DISABLE TRIGGER trg_audit_no_delete`;

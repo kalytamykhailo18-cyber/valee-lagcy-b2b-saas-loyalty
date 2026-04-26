@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import prisma from '../../../db/client.js';
 import { normalizeVenezuelanPhone } from '../../../services/accounts.js';
 import { requireStaffAuth, requireOwnerRole } from '../../middleware/auth.js';
+import { runRecurrenceEngine } from '../../../services/recurrence.js';
 
 export async function registerRecurrenceRoutes(app: FastifyInstance): Promise<void> {
   // ---- RECURRENCE RULES (Owner only) ----
@@ -161,48 +162,183 @@ export async function registerRecurrenceRoutes(app: FastifyInstance): Promise<vo
       ORDER BY sub.last_visit ASC
     `;
 
-    // If the rule has a targetPhones list, restrict to those (compare last 10 digits)
-    if (rule.targetPhones && rule.targetPhones.length > 0) {
-      const targetTails = new Set(rule.targetPhones.map(p => p.replace(/\D/g, '').slice(-10)));
-      lapsed = lapsed.filter(c => targetTails.has(c.phone_number.replace(/\D/g, '').slice(-10)));
+    // If the rule has a targetPhones list, surface EVERY targeted number
+    // with its current status — not just the lapsed subset. Eric 2026-04-24
+    // complained that a rule with a specific list still showed "total 0 /
+    // ningun cliente califica" with no way to see whether the number was in
+    // the list at all. Now the preview returns every targeted phone with
+    // the reason why it qualifies / doesn't (califica_ahora, en_periodo,
+    // sin_historial, o sin_cuenta).
+    const targetPhones = rule.targetPhones || [];
+    const hasTargetList = targetPhones.length > 0;
+
+    let consumers: Array<{
+      accountId: string | null;
+      phoneNumber: string;
+      displayName: string | null;
+      cedula: string | null;
+      lastVisit: string | null;
+      daysSince: number | null;
+      qualifies: boolean;
+      status: 'califica_ahora' | 'en_periodo' | 'sin_historial' | 'sin_cuenta';
+      daysUntilQualifies: number | null;
+      alreadyNotified: boolean;
+      notifiedAt: string | null;
+    }>;
+
+    if (hasTargetList) {
+      // Look up each targeted phone against the accounts table by last-10-digit tail.
+      const targetTails = targetPhones.map(p => ({ raw: p, tail: p.replace(/\D/g, '').slice(-10) }));
+      const accountsRaw = await prisma.$queryRaw<Array<{
+        account_id: string;
+        phone_number: string;
+        display_name: string | null;
+        cedula: string | null;
+        last_visit: Date | null;
+      }>>`
+        SELECT a.id AS account_id, a.phone_number, a.display_name, a.cedula, sub.last_visit
+        FROM accounts a
+        LEFT JOIN (
+          SELECT account_id, MAX(created_at) AS last_visit
+          FROM ledger_entries
+          WHERE tenant_id = ${tenantId}::uuid
+            AND event_type = 'INVOICE_CLAIMED'
+            AND entry_type = 'CREDIT'
+            AND status != 'reversed'
+          GROUP BY account_id
+        ) sub ON sub.account_id = a.id
+        WHERE a.tenant_id = ${tenantId}::uuid
+          AND a.account_type IN ('shadow', 'verified')
+          AND a.phone_number IS NOT NULL
+      `;
+      const byTail = new Map<string, typeof accountsRaw[number]>();
+      for (const a of accountsRaw) byTail.set(a.phone_number.replace(/\D/g, '').slice(-10), a);
+
+      consumers = await Promise.all(targetTails.map(async ({ raw, tail }) => {
+        const acc = byTail.get(tail) || null;
+        if (!acc) {
+          return {
+            accountId: null,
+            phoneNumber: raw,
+            displayName: null,
+            cedula: null,
+            lastVisit: null,
+            daysSince: null,
+            qualifies: false,
+            status: 'sin_cuenta' as const,
+            daysUntilQualifies: null,
+            alreadyNotified: false,
+            notifiedAt: null,
+          };
+        }
+        const lastVisit = acc.last_visit;
+        if (!lastVisit) {
+          return {
+            accountId: acc.account_id,
+            phoneNumber: acc.phone_number,
+            displayName: acc.display_name,
+            cedula: acc.cedula,
+            lastVisit: null,
+            daysSince: null,
+            qualifies: false,
+            status: 'sin_historial' as const,
+            daysUntilQualifies: null,
+            alreadyNotified: false,
+            notifiedAt: null,
+          };
+        }
+        const daysSince = Math.floor((Date.now() - lastVisit.getTime()) / (24 * 60 * 60 * 1000));
+        const qualifies = lastVisit < cutoffDate;
+        const notified = qualifies
+          ? await prisma.recurrenceNotification.findUnique({
+              where: {
+                tenantId_ruleId_consumerAccountId_lastVisitAt: {
+                  tenantId,
+                  ruleId: rule.id,
+                  consumerAccountId: acc.account_id,
+                  lastVisitAt: lastVisit,
+                },
+              },
+              select: { id: true, sentAt: true },
+            })
+          : null;
+        return {
+          accountId: acc.account_id,
+          phoneNumber: acc.phone_number,
+          displayName: acc.display_name,
+          cedula: acc.cedula,
+          lastVisit: lastVisit.toISOString(),
+          daysSince,
+          qualifies,
+          status: qualifies ? ('califica_ahora' as const) : ('en_periodo' as const),
+          daysUntilQualifies: qualifies ? 0 : Math.max(0, thresholdDays - daysSince),
+          alreadyNotified: !!notified,
+          notifiedAt: notified?.sentAt.toISOString() || null,
+        };
+      }));
+    } else {
+      // No targetPhones → preview everyone who has lapsed (original behavior).
+      consumers = await Promise.all(lapsed.map(async c => {
+        const notified = await prisma.recurrenceNotification.findUnique({
+          where: {
+            tenantId_ruleId_consumerAccountId_lastVisitAt: {
+              tenantId,
+              ruleId: rule.id,
+              consumerAccountId: c.account_id,
+              lastVisitAt: c.last_visit,
+            },
+          },
+          select: { id: true, sentAt: true },
+        });
+        const daysSince = Math.floor(
+          (Date.now() - new Date(c.last_visit).getTime()) / (24 * 60 * 60 * 1000)
+        );
+        return {
+          accountId: c.account_id,
+          phoneNumber: c.phone_number,
+          displayName: c.display_name,
+          cedula: c.cedula,
+          lastVisit: c.last_visit.toISOString(),
+          daysSince,
+          qualifies: true,
+          status: 'califica_ahora' as const,
+          daysUntilQualifies: 0,
+          alreadyNotified: !!notified,
+          notifiedAt: notified?.sentAt.toISOString() || null,
+        };
+      }));
     }
 
-    // Check which ones have already been notified for their current absence event
-    const consumers = await Promise.all(lapsed.map(async c => {
-      const notified = await prisma.recurrenceNotification.findUnique({
-        where: {
-          tenantId_ruleId_consumerAccountId_lastVisitAt: {
-            tenantId,
-            ruleId: rule.id,
-            consumerAccountId: c.account_id,
-            lastVisitAt: c.last_visit,
-          },
-        },
-        select: { id: true, sentAt: true },
-      });
-      const daysSince = Math.floor(
-        (Date.now() - new Date(c.last_visit).getTime()) / (24 * 60 * 60 * 1000)
-      );
-      return {
-        accountId: c.account_id,
-        phoneNumber: c.phone_number,
-        displayName: c.display_name,
-        cedula: c.cedula,
-        lastVisit: c.last_visit.toISOString(),
-        daysSince,
-        alreadyNotified: !!notified,
-        notifiedAt: notified?.sentAt.toISOString() || null,
-      };
-    }));
-
+    const qualifyingConsumers = consumers.filter(c => c.qualifies);
     return {
       ruleId: rule.id,
       ruleName: rule.name,
       thresholdDays,
-      total: consumers.length,
-      pending: consumers.filter(c => !c.alreadyNotified).length,
-      alreadyNotified: consumers.filter(c => c.alreadyNotified).length,
+      hasTargetList,
+      targetedCount: hasTargetList ? targetPhones.length : null,
+      total: qualifyingConsumers.length,
+      pending: qualifyingConsumers.filter(c => !c.alreadyNotified).length,
+      alreadyNotified: qualifyingConsumers.filter(c => c.alreadyNotified).length,
       consumers,
+    };
+  });
+
+  // Test affordance: run the engine for ONE rule with intervalDays+graceDays
+  // interpreted as MINUTES (not days), so the merchant can verify the message
+  // arrives end-to-end without waiting a full day. Eric requested 2026-04-25.
+  // Production cron run on the worker is unaffected.
+  app.post('/api/merchant/recurrence-rules/:id/test-now', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+    const rule = await prisma.recurrenceRule.findFirst({ where: { id, tenantId } });
+    if (!rule) return reply.status(404).send({ error: 'Rule not found' });
+    if (!rule.active) return reply.status(400).send({ error: 'La regla esta inactiva. Activala antes de probar.' });
+
+    const result = await runRecurrenceEngine({ ruleId: rule.id, thresholdUnit: 'minutes' });
+    return {
+      success: true,
+      thresholdMinutes: rule.intervalDays + rule.graceDays,
+      ...result,
     };
   });
 

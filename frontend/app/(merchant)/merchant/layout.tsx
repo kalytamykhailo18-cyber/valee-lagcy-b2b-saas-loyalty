@@ -7,7 +7,7 @@ import {
   MdDashboard, MdQrCodeScanner, MdAccessTime, MdInventory2,
   MdLocalOffer, MdUploadFile, MdPeople, MdStorefront, MdAutorenew,
   MdFeedback, MdSettings, MdMenu, MdLogout, MdGroups, MdArrowBack, MdBadge,
-  MdShare, MdKey,
+  MdShare, MdKey, MdStars,
 } from 'react-icons/md'
 
 interface NavItem {
@@ -30,6 +30,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/merchant/branches', label: 'Sucursales', Icon: MdStorefront, ownerOnly: true },
   { href: '/merchant/staff', label: 'Cajeros y QR', Icon: MdBadge, ownerOnly: true },
   { href: '/merchant/recurrence', label: 'Recurrencia', Icon: MdAutorenew, ownerOnly: true },
+  { href: '/merchant/welcome-bonus', label: 'Bono de bienvenida', Icon: MdStars, ownerOnly: true },
   { href: '/merchant/referrals', label: 'Referidos', Icon: MdShare, ownerOnly: true },
   { href: '/merchant/disputes', label: 'Disputas', Icon: MdFeedback, ownerOnly: true },
   { href: '/merchant/settings', label: 'Configuracion', Icon: MdSettings, ownerOnly: true },
@@ -103,14 +104,18 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     }
   }, [runAuthCheck])
 
-  // Fetch tenant info if not in localStorage (first visit after login)
+  // Fetch tenant header info if not in localStorage (first visit after
+  // login). Use /tenant-info (readable by both owner and cashier) instead
+  // of /settings (owner-only). Eric 2026-04-24: the cashier session was
+  // rendering the generic "Valee" / "V" fallback because the settings
+  // fetch came back 403 and the sidebar fell through to its placeholder.
   useEffect(() => {
     if (!mounted || !role) return
     if (tenantName && tenantLogoUrl !== null) return // already loaded or explicitly null
     ;(async () => {
       try {
         const { api } = await import('@/lib/api')
-        const s = await api.getMerchantSettings()
+        const s = await api.getMerchantTenantInfo()
         if (s?.name) {
           setTenantName(s.name)
           localStorage.setItem('tenantName', s.name)

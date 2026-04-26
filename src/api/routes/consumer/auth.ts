@@ -78,7 +78,17 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
           ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
           : await prisma.assetType.findFirst();
         if (assetType) {
-          await grantWelcomeBonus(account.id, tenant.id, assetType.id);
+          // If this phone scanned a branch QR recently, inherit that
+          // branch context so the welcome bonus ledger entry gets
+          // stamped instead of showing as "sin sucursal" in the panel.
+          const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
+          const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+          const recentScan = await prisma.merchantScanSession.findFirst({
+            where: { tenantId: tenant.id, consumerPhone: phoneNumber, scannedAt: { gte: cutoff } },
+            orderBy: { scannedAt: 'desc' },
+            select: { branchId: true },
+          });
+          await grantWelcomeBonus(account.id, tenant.id, assetType.id, recentScan?.branchId || null);
         }
       } catch (err) {
         app.log.error({ err }, 'welcome bonus grant failed on consumer OTP login');
@@ -145,7 +155,14 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
         ? await prisma.assetType.findUnique({ where: { id: assetConfig.assetTypeId } })
         : await prisma.assetType.findFirst();
       if (assetType) {
-        await grantWelcomeBonus(account.id, tenant.id, assetType.id);
+        const WINDOW_MIN = parseInt(process.env.MERCHANT_SCAN_WINDOW_MIN || '240');
+        const cutoff = new Date(Date.now() - WINDOW_MIN * 60 * 1000);
+        const recentScan = await prisma.merchantScanSession.findFirst({
+          where: { tenantId: tenant.id, consumerPhone: phoneNumber, scannedAt: { gte: cutoff } },
+          orderBy: { scannedAt: 'desc' },
+          select: { branchId: true },
+        });
+        await grantWelcomeBonus(account.id, tenant.id, assetType.id, recentScan?.branchId || null);
       }
     } catch (err) {
       app.log.error({ err }, 'welcome bonus grant failed on select-merchant');
