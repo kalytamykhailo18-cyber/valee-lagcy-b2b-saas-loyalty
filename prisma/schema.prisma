@@ -268,6 +268,7 @@ model Branch {
   redemptionTokens RedemptionToken[]
   staff            Staff[]
   products         Product[]
+  productAssignments ProductBranch[]
   dualScanSessions DualScanSession[]
 
   @@index([tenantId])
@@ -559,12 +560,31 @@ model Product {
   branch           Branch?           @relation(fields: [branchId], references: [id])
   assetType        AssetType         @relation(fields: [assetTypeId], references: [id])
   redemptionTokens RedemptionToken[]
+  branchAssignments ProductBranch[]
 
   @@index([tenantId, active])
   @@index([tenantId, active, stock])
   @@index([tenantId, archivedAt])
   @@index([tenantId, branchId, active])
   @@map("products")
+}
+
+// Join table for the multi-sucursal scope of a product. Eric 2026-04-26: a
+// merchant must be able to flag "Doritos esta en Valencia y Caracas pero no
+// en Maracay" — the legacy Product.branchId column only allowed a single
+// sucursal or "Todas las sucursales", with no in-between. Empty assignment
+// set === tenant-wide (visible/redeemable everywhere). The legacy
+// Product.branchId is kept as a "primary" hint and mirrors the first
+// assignment, so any code that still reads it keeps working.
+model ProductBranch {
+  productId String   @map("product_id") @db.Uuid
+  branchId  String   @map("branch_id") @db.Uuid
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+
+  @@id([productId, branchId])
+  @@index([branchId])
+  @@map("product_branches")
 }
 
 // ============================================================

@@ -119,16 +119,22 @@ export default function MerchantDashboard() {
     }
   }, [role, txFilters, txOffset])
 
-  // If the merchant clears all unassigned data (or it never existed) but
-  // had previously selected '_unassigned', reset to "Todas las sucursales"
-  // so the UI doesn't get stuck filtering an empty bucket.
+  // Data-driven visibility for the "Sin sucursal" slice. Eric 2026-04-25
+  // wanted it hidden when every movement IS atribuido — but historical
+  // orphans (or rows from before the consumer-side gate landed) need to
+  // remain findable, otherwise the owner has no way to audit them
+  // (Eric 2026-04-26: "no hay manera de identificar esa transaccion").
+  // We surface the option/badge only when real orphan value exists.
+  const hasUnassigned =
+    (!!metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0) ||
+    (!!metrics?.valueRedeemedUnassigned && parseFloat(metrics.valueRedeemedUnassigned) > 0)
+
   useEffect(() => {
-    const hasUnassigned = !!metrics?.valueIssuedUnassigned && parseFloat(metrics.valueIssuedUnassigned) > 0
     if (!hasUnassigned) {
       if (selectedBranch === '_unassigned') setSelectedBranch('')
       if (txFilters.branchId === '_unassigned') setTxFilters(f => ({ ...f, branchId: '' }))
     }
-  }, [metrics?.valueIssuedUnassigned])
+  }, [hasUnassigned])
 
   async function loadAnalytics() {
     try { setAnalytics(await api.getAnalytics()) } catch {}
@@ -275,13 +281,9 @@ export default function MerchantDashboard() {
                 {branches.filter(b => b.active).map(b => (
                   <option key={b.id} value={b.id}>{b.name}</option>
                 ))}
-                {/* Eric 2026-04-25: when the comercio works with sucursales,
-                    the "sin sucursal" option must NEVER appear — every nuevo
-                    movimiento se atribuye a una. Solo aparece cuando el
-                    comercio NO tiene ninguna sucursal activa, en cuyo caso
-                    el merchant es una tienda unica. (El wrapper de afuera
-                    ya esconde el selector entero si no hay branches, asi que
-                    en la practica esta opcion ya no se renderiza nunca aqui.) */}
+                {hasUnassigned && (
+                  <option value="_unassigned">Sin sucursal (sin atribuir)</option>
+                )}
               </select>
             </div>
           )}
@@ -366,6 +368,7 @@ export default function MerchantDashboard() {
               {metrics && (
                 <div className="mt-1.5 space-y-0.5 text-[10px] text-slate-500 leading-tight">
                   <p className="flex justify-between gap-2"><span>Facturas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedInvoices || '0')}</span></p>
+                  <p className="flex justify-between gap-2"><span>Efectivo</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedCash || '0')}</span></p>
                   <p className="flex justify-between gap-2"><span>Bienvenidas</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedWelcome || '0')}</span></p>
                   <p className="flex justify-between gap-2"><span>Referidos</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedReferrals || '0')}</span></p>
                   <p className="flex justify-between gap-2"><span>Manuales</span><span className="tabular-nums">{formatPoints(metrics.valueIssuedManual || '0')}</span></p>
@@ -584,9 +587,9 @@ export default function MerchantDashboard() {
                   {branches.filter(b => b.active).map(b => (
                     <option key={b.id} value={b.id}>{b.name}</option>
                   ))}
-                  {/* "Sin sucursal" no se ofrece cuando hay sucursales (Eric
-                      2026-04-25). Si el comercio trabaja con sucursal, todo
-                      deberia estar atribuido a una. */}
+                  {hasUnassigned && (
+                    <option value="_unassigned">Sin sucursal</option>
+                  )}
                 </select>
               </div>
             )}
@@ -621,13 +624,19 @@ export default function MerchantDashboard() {
                             {(tx.accountName || tx.accountPhone) && (
                               <span>· {tx.accountName || tx.accountPhone}</span>
                             )}
-                            {/* Eric 2026-04-25: cuando el comercio trabaja con
-                                sucursales, "Sin sucursal" no se debe mostrar
-                                en ningun lado. Solo renderizamos el badge
-                                cuando la fila tiene una sucursal real asignada. */}
                             {branches.filter(b => b.active).length > 0 && tx.branchName && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-indigo-50 text-indigo-700">
                                 {tx.branchName}
+                              </span>
+                            )}
+                            {/* Mark orphan rows (null branchId) when the
+                                comercio HAS sucursales — without this badge
+                                the owner cannot tell apart attributed and
+                                unattributed scans (Eric 2026-04-26: "no hay
+                                manera de identificar esa transaccion"). */}
+                            {branches.filter(b => b.active).length > 0 && !tx.branchName && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-100 text-amber-800">
+                                Sin sucursal
                               </span>
                             )}
                           </div>

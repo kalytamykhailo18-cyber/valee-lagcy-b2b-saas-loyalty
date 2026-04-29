@@ -136,16 +136,28 @@ export default function ScanPage() {
     })
 
     const assetTypeId = localStorage.getItem('assetTypeId') || ''
+    // Server-side belt: even if the consumer reaches this code path with no
+    // branch picked (UI gate bypassed via DOM tweaks), reject before the
+    // upload starts. Eric 2026-04-26: comercio multi-sucursal must always
+    // attribute scans to a branch.
+    if (branches.length > 1 && !selectedBranchId) {
+      setResult({ kind: 'invoice', success: false, message: 'Antes de escanear, elige la sucursal donde estas.' })
+      setStage('result')
+      return
+    }
     const apiPromise = api.uploadInvoiceImage(file, assetTypeId, { branchId: selectedBranchId || undefined })
       .catch(err => ({ success: false, message: err.error || 'Error procesando la factura' }))
 
     const [, apiResult] = await Promise.all([animPromise, apiPromise])
     setResult({ kind: 'invoice', ...apiResult })
     setStage('result')
-  }, [])
+  }, [branches.length, selectedBranchId])
 
   const processQrToken = useCallback(async (rawToken: string) => {
     if (isProcessingRef.current) return
+    // Same multi-sucursal gate as processInvoiceImage: a live QR detection
+    // mid-scan must not slip through when the consumer hasn't picked a branch.
+    if (branches.length > 1 && !selectedBranchId) return
     isProcessingRef.current = true
 
     // 0) If the decoded text is a full URL pointing at /scan?dual=<token>
@@ -201,7 +213,7 @@ export default function ScanPage() {
     const [, apiResult] = await Promise.all([animPromise, apiPromise])
     setResult(apiResult)
     setStage('result')
-  }, [stopScanner, router])
+  }, [stopScanner, router, branches.length, selectedBranchId])
 
   // If the page was opened via /scan?dual=<token> (from the native camera on
   // the consumer's phone), auto-process it without waiting for a scan.
@@ -216,6 +228,10 @@ export default function ScanPage() {
 
   const startScanner = useCallback(async () => {
     setCameraError(null)
+    // Multi-sucursal gate: don't even open the camera until the consumer
+    // has picked a sucursal. The selector renders only when there are 2+
+    // branches, so single-branch tenants are unaffected. Eric 2026-04-26.
+    if (branches.length > 1 && !selectedBranchId) return
     try {
       const { Html5Qrcode } = await import('html5-qrcode')
       await stopScanner()
@@ -273,14 +289,20 @@ export default function ScanPage() {
       const msg = typeof err === 'string' ? err : err?.message || 'No se pudo acceder a la camara'
       setCameraError(msg)
     }
-  }, [stopScanner, processQrToken])
+  }, [stopScanner, processQrToken, branches.length, selectedBranchId])
 
   useEffect(() => {
-    if (stage === 'idle') {
-      startScanner()
+    if (stage !== 'idle') return
+    // When the consumer picks a sucursal mid-flight, this effect re-fires
+    // (selectedBranchId is in startScanner's dep list, so its identity
+    // changes) and the camera lights up for the first time.
+    if (branches.length > 1 && !selectedBranchId) {
+      stopScanner()
+      return
     }
+    startScanner()
     return () => { stopScanner() }
-  }, [stage, startScanner, stopScanner])
+  }, [stage, startScanner, stopScanner, branches.length, selectedBranchId])
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -359,6 +381,10 @@ export default function ScanPage() {
     )
   }
 
+  // Multi-sucursal gate: camera + buttons stay locked until the consumer
+  // picks one when there are 2+ branches.
+  const branchGateBlocked = branches.length > 1 && !selectedBranchId
+
   // IDLE: live camera with QR detection + invoice photo capture
   // fixed + inset-0 + dvh units keep the action bar visible above iOS Safari's
   // dynamic bottom chrome (previously h-screen hid the capture buttons below
@@ -389,6 +415,15 @@ export default function ScanPage() {
             <p className="text-red-300 text-sm text-center">{cameraError}</p>
           </div>
         )}
+
+        {branchGateBlocked && (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/90 p-6 z-10">
+            <div className="text-center space-y-2 max-w-xs">
+              <p className="text-white text-base font-semibold">Elige tu sucursal</p>
+              <p className="text-slate-300 text-sm">Para escanear necesitamos saber en que sucursal estas. Elegila abajo y la camara se activa.</p>
+            </div>
+          </div>
+        )}
       </div>
 
       <div
@@ -411,7 +446,9 @@ export default function ScanPage() {
           </div>
         )}
 
-        <p className="text-center text-xs text-slate-400">Apunta al QR del cajero o toma foto de tu factura</p>
+        <p className="text-center text-xs text-slate-400">
+          {branchGateBlocked ? 'Elegi sucursal arriba para activar el escaner' : 'Apunta al QR del cajero o toma foto de tu factura'}
+        </p>
 
         <input
           type="file"
@@ -424,25 +461,29 @@ export default function ScanPage() {
 
         <div className="grid grid-cols-2 gap-3">
           <button
+            disabled={branchGateBlocked}
             onClick={() => {
+              if (branchGateBlocked) return
               if (fileRef.current) {
                 fileRef.current.setAttribute('capture', 'environment')
                 fileRef.current.click()
               }
             }}
-            className="aa-btn aa-btn-primary bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-2xl font-semibold flex items-center justify-center gap-2 text-sm"
+            className="aa-btn aa-btn-primary bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-2xl font-semibold flex items-center justify-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-indigo-600"
           >
             <MdCameraAlt className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Tomar foto</span>
           </button>
           <button
+            disabled={branchGateBlocked}
             onClick={() => {
+              if (branchGateBlocked) return
               if (fileRef.current) {
                 fileRef.current.removeAttribute('capture')
                 fileRef.current.click()
               }
             }}
-            className="aa-btn aa-btn-dark bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-2xl font-semibold flex items-center justify-center gap-2 text-sm"
+            className="aa-btn aa-btn-dark bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-2xl font-semibold flex items-center justify-center gap-2 text-sm disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-slate-700"
           >
             <MdPhotoLibrary className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Galeria</span>

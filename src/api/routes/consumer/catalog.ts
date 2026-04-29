@@ -58,11 +58,21 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
     // all their items to a branch. We keep the optional `branchId`
     // query parameter to let a branch-specific PWA view narrow the
     // list, but with no context we return everything.
+    //
+    // Multi-sucursal scope (Eric 2026-04-26): products carry a join
+    // (product_branches) with the sucursales they're available at.
+    // Empty join === tenant-wide. A consumer at sucursal X sees a
+    // product if it has no assignments OR has at least one matching X.
     let branchClause: any = {};
     if (branchId && branchId !== 'all') {
       const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
       if (branch) {
-        branchClause = { OR: [{ branchId: branch.id }, { branchId: null }] };
+        branchClause = {
+          OR: [
+            { branchAssignments: { none: {} } },
+            { branchAssignments: { some: { branchId: branch.id } } },
+          ],
+        };
       }
       // invalid id → fall through, same as no filter
     }
@@ -84,16 +94,19 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       orderBy: { name: 'asc' },
       take: parseInt(limit),
       skip: parseInt(offset),
-      include: { branch: { select: { id: true, name: true } } },
+      include: {
+        branch: { select: { id: true, name: true } },
+        branchAssignments: { include: { branch: { select: { id: true, name: true } } } },
+      },
     });
 
     const total = await prisma.product.count({ where });
 
-    // For tenant-wide products (branchId=null), collect the list of
+    // For tenant-wide products (no assignments), collect the list of
     // active branches so the consumer can see "Disponible en Centro,
-    // Norte, Sur". Only fetched once — any product with branchId=null
-    // gets the same list. If the tenant has no branches at all, skip.
-    const anyWide = products.some(p => p.branchId === null);
+    // Norte, Sur". Only fetched once — any tenant-wide product gets the
+    // same list. If the tenant has no branches at all, skip.
+    const anyWide = products.some(p => p.branchAssignments.length === 0);
     const tenantBranches = anyWide
       ? await prisma.branch.findMany({
           where: { tenantId, active: true },
@@ -112,29 +125,37 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
     const confirmedBalance = parseFloat(breakdown.confirmed);
 
     return {
-      products: products.map(p => ({
-        id: p.id,
-        name: p.name,
-        description: p.description,
-        photoUrl: p.photoUrl,
-        redemptionCost: p.redemptionCost.toString(),
-        cashPrice: p.cashPrice?.toString() || null,
-        hybridEnabled: p.cashPrice !== null && Number(p.cashPrice) > 0,
-        stock: p.stock,
-        minLevel: p.minLevel,
-        canAfford: confirmedBalance >= Number(p.redemptionCost),
-        // Branch locator (Genesis 2026-04-24): branch-scoped products
-        // carry the branch name; tenant-wide products carry the full
-        // list of active branches so the consumer sees where it's
-        // honored. Empty branchNames + scope='tenant' means the tenant
-        // has no branches configured (single-point operation).
-        branchId: p.branchId,
-        branchName: p.branch?.name ?? null,
-        branchScope: p.branchId ? 'branch' : 'tenant',
-        branchNames: p.branchId
-          ? [p.branch?.name || '']
-          : tenantBranches.map(b => b.name),
-      })),
+      products: products.map(p => {
+        const assignments = p.branchAssignments
+          .map(a => ({ id: a.branch.id, name: a.branch.name }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const isTenantWide = assignments.length === 0;
+        return {
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          photoUrl: p.photoUrl,
+          redemptionCost: p.redemptionCost.toString(),
+          cashPrice: p.cashPrice?.toString() || null,
+          hybridEnabled: p.cashPrice !== null && Number(p.cashPrice) > 0,
+          stock: p.stock,
+          minLevel: p.minLevel,
+          canAfford: confirmedBalance >= Number(p.redemptionCost),
+          // Branch locator. Multi-sucursal scope (Eric 2026-04-26):
+          // a product can be assigned to N sucursales — the consumer
+          // sees them all in branchNames. Tenant-wide products list
+          // every active sucursal so the consumer knows where to
+          // pick it up. Empty branchNames + scope='tenant' === no
+          // sucursales configured at all (single-point operation).
+          branchId: assignments[0]?.id ?? null,
+          branchName: assignments[0]?.name ?? null,
+          branchIds: assignments.map(a => a.id),
+          branchScope: isTenantWide ? 'tenant' : 'branch',
+          branchNames: isTenantWide
+            ? tenantBranches.map(b => b.name)
+            : assignments.map(a => a.name),
+        };
+      }),
       total,
       balance: breakdown.total,
       confirmed: breakdown.confirmed,

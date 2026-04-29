@@ -13,20 +13,22 @@ import { uploadImage } from './cloudinary.js';
 import QRCode from 'qrcode';
 
 /**
- * Generate the WhatsApp deep link URL for a merchant.
- * The pre-filled message is user-friendly with the merchant name visible,
- * and includes a hidden slug tag at the end that the bot parses.
+ * Generate the deep link URL encoded into a merchant QR.
+ *
+ * Eric 2026-04-26: switched from a wa.me/<phone>?text=... link to a direct
+ * PWA URL. The native iOS/Android camera was hijacking every scan and
+ * proposing "open in WhatsApp", which forced testers (and consumers without
+ * the bot configured) through a path they couldn't complete. The PWA
+ * `/consumer/<slug>` route already establishes the tenant context and walks
+ * the consumer through phone-OTP login, so it's the better landing page —
+ * and the camera opens it in the browser without prompting for WhatsApp.
  */
-export async function generateWhatsAppDeepLink(merchantSlug: string, merchantName?: string): Promise<string> {
-  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  // Eric 2026-04-25: restore the persuasive prefix the prefilled message used
-  // to carry. The user reads "Hola! Quiero ganar puntos en <Comercio> " and
-  // the technical "Valee Ref:" marker stays at the end so the bot still parses
-  // it. The previous Notion item complaint was: the bare "Valee Ref: kozmo"
-  // looked like a system glitch from the customer's POV.
-  const greet = merchantName ? `Hola! Quiero ganar puntos en ${merchantName} ` : 'Hola! Quiero ganar puntos ';
-  const text = encodeURIComponent(`${greet}Valee Ref: ${merchantSlug}`);
-  return `https://wa.me/${botPhone}?text=${text}`;
+function getPwaBase(): string {
+  return (process.env.FRONTEND_BASE_URL || 'https://valee.app').replace(/\/$/, '');
+}
+
+export async function generateWhatsAppDeepLink(merchantSlug: string, _merchantName?: string): Promise<string> {
+  return `${getPwaBase()}/consumer/${merchantSlug}`;
 }
 
 /**
@@ -114,16 +116,11 @@ export async function generateStaffQR(staffId: string, options: { rotate?: boole
     if (!qrSlug) throw new Error('Could not generate unique qr_slug');
   }
 
-  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  // Persuasive prefix restored (Eric 2026-04-25). "Hola! Quiero ganar puntos
-  // en <Comercio> con <Cajero> " reads like a real intent message from the
-  // user, not a system marker. The Ref/Cjr tags stay at the tail so the bot
-  // still resolves tenant + staff attribution.
-  const greet = `Hola! Quiero ganar puntos en ${staff.tenant.name}${staff.name ? ` con ${staff.name}` : ''} `;
-  const text = encodeURIComponent(
-    `${greet}Valee Ref: ${staff.tenant.slug} Cjr: ${qrSlug}`
-  );
-  const deepLink = `https://wa.me/${botPhone}?text=${text}`;
+  // Eric 2026-04-26: PWA-direct URL with cjr= so the consumer lands in
+  // /consumer/<slug>?cjr=<qrSlug> and the cashier-attribution context can
+  // be picked up there (replacing the old wa.me/<phone>?text=... that the
+  // native camera kept trying to open in WhatsApp).
+  const deepLink = `${getPwaBase()}/consumer/${staff.tenant.slug}?cjr=${qrSlug}`;
 
   const qrBuffer = await generateQRImage(deepLink);
   let qrCodeUrl = await uploadImage(qrBuffer, `staff-qr/${staff.tenant.slug}/${qrSlug}`);
@@ -149,20 +146,19 @@ export async function generateReferralQR(params: {
   merchantName: string;
   referralSlug: string;
 }): Promise<{ deepLink: string; qrPngBase64: string }> {
-  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  // Persuasive prefix restored (Eric 2026-04-25). The bare Ref/Ref2U markers
-  // looked like a system glitch from the consumer's POV.
-  const greet = `Hola! Quiero ganar puntos en ${params.merchantName} `;
-  const text = encodeURIComponent(
-    `${greet}Valee Ref: ${params.merchantSlug} Ref2U: ${params.referralSlug}`
-  );
-  const deepLink = `https://wa.me/${botPhone}?text=${text}`;
+  // Eric 2026-04-26: PWA-direct (see generateWhatsAppDeepLink rationale).
+  const deepLink = `${getPwaBase()}/consumer/${params.merchantSlug}?ref2u=${params.referralSlug}`;
   const qrBuffer = await generateQRImage(deepLink);
   return { deepLink, qrPngBase64: qrBuffer.toString('base64') };
 }
 
 /**
  * Generate QR for a specific branch.
+ *
+ * If the branch is the PRIMARY (oldest) sucursal of the tenant, regenerating
+ * here also rotates the tenant-level QR ("QR del comercio") so the two stay
+ * in sync. Eric 2026-04-26: regenerating from the first sucursal must update
+ * the QR shown on Cajeros y QR personales as well — they are the same QR.
  */
 export async function generateBranchQR(branchId: string): Promise<{
   deepLink: string;
@@ -174,17 +170,28 @@ export async function generateBranchQR(branchId: string): Promise<{
   });
   if (!branch) throw new Error('Branch not found');
 
-  // Branch QR includes both tenant slug and branch ID. Persuasive prefix
-  // restored (Eric 2026-04-25); names the branch so a customer scanning
-  // a specific sucursal sees "Hola! Quiero ganar puntos en Kromi - Parral ".
-  const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '0000000000';
-  const label = branch.name ? `${branch.tenant.name} - ${branch.name}` : branch.tenant.name;
-  const greet = `Hola! Quiero ganar puntos en ${label} `;
-  const text = encodeURIComponent(`${greet}Valee Ref: ${branch.tenant.slug}/${branch.id}`);
-  const deepLink = `https://wa.me/${botPhone}?text=${text}`;
+  const primary = await prisma.branch.findFirst({
+    where: { tenantId: branch.tenantId },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true },
+  });
+  const isPrimary = primary?.id === branchId;
+
+  // Eric 2026-04-26: PWA-direct URLs. Primary sucursal uses the slug-only
+  // path so the QR matches "QR del comercio" exactly. Non-primary sucursales
+  // append ?branch=<branchId> so the consumer page can preselect the sede.
+  let deepLink: string;
+  let cloudinaryFolder: string;
+  if (isPrimary) {
+    deepLink = `${getPwaBase()}/consumer/${branch.tenant.slug}`;
+    cloudinaryFolder = `merchant-qr/${branch.tenant.slug}`;
+  } else {
+    deepLink = `${getPwaBase()}/consumer/${branch.tenant.slug}?branch=${branch.id}`;
+    cloudinaryFolder = `branch-qr/${branch.tenant.slug}/${branch.id}`;
+  }
 
   const qrBuffer = await generateQRImage(deepLink);
-  let qrCodeUrl = await uploadImage(qrBuffer, `branch-qr/${branch.tenant.slug}/${branch.id}`);
+  let qrCodeUrl = await uploadImage(qrBuffer, cloudinaryFolder);
   if (!qrCodeUrl) {
     qrCodeUrl = `data:image/png;base64,${qrBuffer.toString('base64')}`;
   }
@@ -193,6 +200,15 @@ export async function generateBranchQR(branchId: string): Promise<{
     where: { id: branchId },
     data: { qrCodeUrl },
   });
+
+  // Mirror to tenant.qrCodeUrl when this is the primary sucursal — the
+  // "QR del comercio" tile in Cajeros y QR personales reads from there.
+  if (isPrimary) {
+    await prisma.tenant.update({
+      where: { id: branch.tenantId },
+      data: { qrCodeUrl },
+    });
+  }
 
   return { deepLink, qrCodeUrl };
 }

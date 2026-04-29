@@ -124,11 +124,15 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     // System accounts (issued_value_pool, redemption_holding)
     await createSystemAccounts(tenant.id);
 
-    // Default asset config (use first asset type, conversion 1:1)
+    // Default asset config. Eric 2026-04-26: at signup the multiplier should
+    // land on 100 (= 1.000x label, 10% cashback) so first-time merchants
+    // start with a meaningful tier instead of the "0.1% cashback" floor.
+    // Mirrors the first preset Eric tags as the recommended starting point
+    // on the dashboard widget.
     const defaultAsset = await prisma.assetType.findFirst();
     if (defaultAsset) {
       await prisma.tenantAssetConfig.create({
-        data: { tenantId: tenant.id, assetTypeId: defaultAsset.id, conversionRate: 1 },
+        data: { tenantId: tenant.id, assetTypeId: defaultAsset.id, conversionRate: 100 },
       });
     }
 

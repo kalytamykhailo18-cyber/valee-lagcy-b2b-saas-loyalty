@@ -57,6 +57,25 @@ export async function initiateRedemption(params: {
     return { success: false, message: 'Product is out of stock.' };
   }
 
+  // Consumer-level gate. The catalog hides products above the consumer's
+  // level, but the redeem endpoint is also reachable by direct POST and from
+  // stale clients holding an older catalog snapshot. Without this guard the
+  // catalog filter is cosmetic. Eric 2026-04-26: a level-1 consumer (zero
+  // claims) redeemed a minLevel=2 Galletas Oreo product on their first canje.
+  if (product.minLevel && product.minLevel > 1) {
+    const consumerAccount = await prisma.account.findUnique({
+      where: { id: consumerAccountId },
+      select: { level: true },
+    });
+    const consumerLevel = consumerAccount?.level ?? 1;
+    if (consumerLevel < product.minLevel) {
+      return {
+        success: false,
+        message: `Este producto requiere nivel ${product.minLevel}. Tu nivel actual es ${consumerLevel}. Sigue cargando facturas para subir de nivel.`,
+      };
+    }
+  }
+
   const fullPointsCost = Number(product.redemptionCost);
   const cashPortion = params.cashAmount ? parseFloat(params.cashAmount) : 0;
   const productCashPrice = product.cashPrice ? Number(product.cashPrice) : 0;
@@ -418,6 +437,61 @@ export async function processRedemption(params: {
       return {
         success: false,
         message: `Este canje fue generado en ${originBranch?.name || 'otra sucursal'} y no puede canjearse aqui. Pide al cliente que lo use en esa sucursal.`,
+      };
+    }
+  }
+
+  // 5c. Product branch scope. If the product is scoped to one or more
+  // specific sucursales, the cashier must be physically at one of them —
+  // independent of the QR's origin branch and the tenant's
+  // crossBranchRedemption policy. A product only stocked at Valencia +
+  // Caracas cannot be handed over at Maracay.
+  // Eric 2026-04-26: scope is now multi-sucursal (product_branches join).
+  // Valencia-only product (Galletas Oreo) was approved at a Caracas scanner
+  // because nothing here cross-checked the assignments before this fix.
+  const productForScope = await prisma.product.findUnique({
+    where: { id: payload.productId },
+    select: {
+      minLevel: true,
+      branchAssignments: {
+        include: { branch: { select: { id: true, name: true } } },
+      },
+    },
+  });
+  const allowedBranchIds = productForScope?.branchAssignments?.map(a => a.branch.id) ?? [];
+  if (allowedBranchIds.length > 0) {
+    const allowedNames = productForScope!.branchAssignments
+      .map(a => a.branch.name)
+      .sort((a, b) => a.localeCompare(b))
+      .join(', ');
+    if (!effectiveBranchId) {
+      return {
+        success: false,
+        message: `Este producto solo se canjea en ${allowedNames}. Selecciona la sucursal correcta antes de escanear.`,
+      };
+    }
+    if (!allowedBranchIds.includes(effectiveBranchId)) {
+      return {
+        success: false,
+        message: `Este producto solo se canjea en ${allowedNames}. No puede canjearse aqui.`,
+      };
+    }
+  }
+
+  // 5d. Product minLevel scope. Reject at scan time even if initiateRedemption
+  // missed it (in-flight QRs from before this fix, or any other code path that
+  // calls initiateRedemption directly). Level cannot drop, so checking the
+  // current account.level is correct.
+  if (productForScope?.minLevel && productForScope.minLevel > 1) {
+    const consumerAccount = await prisma.account.findUnique({
+      where: { id: payload.consumerAccountId },
+      select: { level: true },
+    });
+    const consumerLevel = consumerAccount?.level ?? 1;
+    if (consumerLevel < productForScope.minLevel) {
+      return {
+        success: false,
+        message: `Este producto requiere nivel ${productForScope.minLevel}. El cliente esta en nivel ${consumerLevel}.`,
       };
     }
   }

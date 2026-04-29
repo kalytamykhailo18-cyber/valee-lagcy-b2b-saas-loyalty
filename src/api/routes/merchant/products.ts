@@ -24,32 +24,55 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
     const products = await prisma.product.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { branch: { select: { id: true, name: true } } },
+      include: {
+        branch: { select: { id: true, name: true } },
+        branchAssignments: { include: { branch: { select: { id: true, name: true } } } },
+      },
     });
     return {
-      products: products.map(p => ({
-        ...p,
-        branchName: p.branch?.name ?? null,
-      })),
+      products: products.map(p => {
+        const assignments = p.branchAssignments
+          .map(a => ({ id: a.branch.id, name: a.branch.name }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        return {
+          ...p,
+          // Legacy single-branch hint (first assignment, if any) — kept so
+          // any UI still reading p.branchId/p.branchName keeps rendering.
+          branchName: assignments[0]?.name ?? null,
+          // New multi-branch surface: explicit list of sucursal ids/names
+          // the product is scoped to. Empty array === tenant-wide.
+          branchIds: assignments.map(a => a.id),
+          branchNames: assignments.map(a => a.name),
+        };
+      }),
     };
   });
 
   app.post('/api/merchant/products', { preHandler: [requireStaffAuth, requireOwnerRole] }, async (request, reply) => {
     const { tenantId } = request.staff!;
-    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel, branchId } = request.body as any;
+    const { name, description, photoUrl, redemptionCost, cashPrice, assetTypeId, stock, minLevel, branchId, branchIds } = request.body as any;
 
     if (!name || !redemptionCost || !assetTypeId) {
       return reply.status(400).send({ error: 'name, redemptionCost, and assetTypeId are required' });
     }
 
-    // branchId is optional (null = tenant-wide). When set, verify it
-    // belongs to the caller's tenant so an owner can't stash a product
-    // under another tenant's branch by forging the UUID.
-    let resolvedBranchId: string | null = null;
-    if (branchId) {
+    // Resolve sucursal scope. New shape: branchIds (array). Legacy shape:
+    // branchId (single) — still accepted so older clients in flight during
+    // the deploy window keep working. Empty/absent === tenant-wide.
+    let resolvedBranchIds: string[] = [];
+    if (Array.isArray(branchIds) && branchIds.length > 0) {
+      const valid = await prisma.branch.findMany({
+        where: { tenantId, id: { in: branchIds } },
+        select: { id: true },
+      });
+      if (valid.length !== branchIds.length) {
+        return reply.status(400).send({ error: 'Una o mas sucursales no son validas' });
+      }
+      resolvedBranchIds = valid.map(b => b.id);
+    } else if (branchId) {
       const branch = await prisma.branch.findFirst({ where: { id: branchId, tenantId } });
       if (!branch) return reply.status(400).send({ error: 'Sucursal no valida' });
-      resolvedBranchId = branch.id;
+      resolvedBranchIds = [branch.id];
     }
 
     // Plan limit check
@@ -57,15 +80,30 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
     try { await enforceLimit(tenantId, 'products_in_catalog'); }
     catch (e: any) { return reply.status(402).send({ error: e.message, usage: e.usage }); }
 
+    // Mirror the first selection into the legacy branchId column so any
+    // code still reading p.branchId keeps showing a sensible "primary"
+    // sucursal. Multi-sucursal scope lives in product_branches.
     const product = await prisma.product.create({
-      data: { tenantId, branchId: resolvedBranchId, name, description, photoUrl, redemptionCost, cashPrice: cashPrice || null, assetTypeId, stock: stock || 0, minLevel: minLevel || 1, active: true },
+      data: {
+        tenantId,
+        branchId: resolvedBranchIds[0] ?? null,
+        name, description, photoUrl, redemptionCost,
+        cashPrice: cashPrice || null,
+        assetTypeId,
+        stock: stock || 0,
+        minLevel: minLevel || 1,
+        active: true,
+        branchAssignments: resolvedBranchIds.length
+          ? { create: resolvedBranchIds.map(branchId => ({ branchId })) }
+          : undefined,
+      },
     });
 
     // Audit
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)
       VALUES (gen_random_uuid(), ${tenantId}::uuid, ${request.staff!.staffId}::uuid, 'staff', 'owner', 'PRODUCT_CREATED', 'success',
-        ${JSON.stringify({ productId: product.id, name, branchId: resolvedBranchId })}::jsonb, now())
+        ${JSON.stringify({ productId: product.id, name, branchIds: resolvedBranchIds })}::jsonb, now())
     `;
 
     return { product };
@@ -141,15 +179,29 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
       }
     }
 
-    // branchId reassignment: accept `null` (explicit tenant-wide) or a
-    // valid tenant branch UUID. `undefined` means "don't touch it".
-    let nextBranchId: string | null | undefined = undefined;
-    if (data.branchId === null || data.branchId === '') {
-      nextBranchId = null;
+    // Sucursal reassignment. New shape: branchIds (array). Legacy shape:
+    // branchId (single). `undefined` = "don't touch". Empty array / null
+    // means "vuelve a Todas las sucursales" — clears the join.
+    let nextBranchIds: string[] | undefined = undefined;
+    if (Array.isArray(data.branchIds)) {
+      if (data.branchIds.length === 0) {
+        nextBranchIds = [];
+      } else {
+        const valid = await prisma.branch.findMany({
+          where: { tenantId, id: { in: data.branchIds } },
+          select: { id: true },
+        });
+        if (valid.length !== data.branchIds.length) {
+          return reply.status(400).send({ error: 'Una o mas sucursales no son validas' });
+        }
+        nextBranchIds = valid.map(b => b.id);
+      }
+    } else if (data.branchId === null || data.branchId === '') {
+      nextBranchIds = [];
     } else if (typeof data.branchId === 'string') {
       const branch = await prisma.branch.findFirst({ where: { id: data.branchId, tenantId } });
       if (!branch) return reply.status(400).send({ error: 'Sucursal no valida' });
-      nextBranchId = branch.id;
+      nextBranchIds = [branch.id];
     }
 
     const updated = await prisma.product.update({
@@ -165,9 +217,26 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
         active: nextActive,
         stockAutoDisabled: nextAutoDisabled,
         identityEditCount: identityChanged ? product.identityEditCount + 1 : product.identityEditCount,
-        ...(nextBranchId !== undefined ? { branchId: nextBranchId } : {}),
+        // Mirror the first selection into the legacy column so the catalog
+        // card's "primary" sucursal label keeps rendering.
+        ...(nextBranchIds !== undefined ? { branchId: nextBranchIds[0] ?? null } : {}),
       },
     });
+
+    // Sync the join table separately. We delete + re-create rather than
+    // diffing because the typical edit touches at most a handful of
+    // branches, and the simpler write keeps the transaction trivially
+    // correct under concurrent edits.
+    if (nextBranchIds !== undefined) {
+      await prisma.$transaction([
+        prisma.productBranch.deleteMany({ where: { productId: id } }),
+        ...(nextBranchIds.length
+          ? [prisma.productBranch.createMany({
+              data: nextBranchIds.map(branchId => ({ productId: id, branchId })),
+            })]
+          : []),
+      ]);
+    }
 
     await prisma.$executeRaw`
       INSERT INTO audit_log (id, tenant_id, actor_id, actor_type, actor_role, action_type, outcome, metadata, created_at)

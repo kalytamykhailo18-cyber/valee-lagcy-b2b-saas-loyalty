@@ -24,8 +24,12 @@ export default function ProductManagement() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null)
-  const [form, setForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1', branchId: '' })
-  const [editForm, setEditForm] = useState({ name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '', branchId: '' })
+  const [form, setForm] = useState<{ name: string; description: string; photoUrl: string; redemptionCost: string; cashPrice: string; stock: string; assetTypeId: string; minLevel: string; branchIds: string[] }>(
+    { name: '', description: '', photoUrl: '', redemptionCost: '', cashPrice: '', stock: '0', assetTypeId: '', minLevel: '1', branchIds: [] }
+  )
+  const [editForm, setEditForm] = useState<{ name: string; description: string; photoUrl: string; redemptionCost: string; stock: string; minLevel: string; branchIds: string[] }>(
+    { name: '', description: '', photoUrl: '', redemptionCost: '', stock: '', minLevel: '', branchIds: [] }
+  )
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [editUploading, setEditUploading] = useState(false)
@@ -96,7 +100,7 @@ export default function ProductManagement() {
         stock: parseInt(form.stock) || 0,
         assetTypeId: form.assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
-        branchId: form.branchId || undefined,
+        branchIds: form.branchIds,
       })
       // Reset the form but PRESERVE assetTypeId — it's a tenant-level config
       // and is required on every create. Clearing it broke the back-to-back
@@ -105,7 +109,7 @@ export default function ProductManagement() {
       // error so the page looked frozen.
       setForm(prev => ({
         name: '', description: '', photoUrl: '', redemptionCost: '',
-        cashPrice: '', stock: '0', minLevel: '1', branchId: '',
+        cashPrice: '', stock: '0', minLevel: '1', branchIds: [],
         assetTypeId: prev.assetTypeId,
       }))
       setShowForm(false)
@@ -150,7 +154,12 @@ export default function ProductManagement() {
       redemptionCost: p.redemptionCost?.toString() || '',
       stock: p.stock?.toString() || '0',
       minLevel: p.minLevel?.toString() || '1',
-      branchId: p.branchId || '',
+      // Multi-sucursal: read the new branchIds array from the API; fall
+      // back to the legacy single branchId for products created before the
+      // join migration.
+      branchIds: Array.isArray(p.branchIds) && p.branchIds.length > 0
+        ? p.branchIds
+        : (p.branchId ? [p.branchId] : []),
     })
   }
 
@@ -165,9 +174,9 @@ export default function ProductManagement() {
         redemptionCost: editForm.redemptionCost,
         stock: parseInt(editForm.stock),
         minLevel: parseInt(editForm.minLevel) || 1,
-        // Send null (not undefined) when the owner picked "Todas las
-        // sucursales" so the backend actually clears an existing scope.
-        branchId: editForm.branchId ? editForm.branchId : null,
+        // Send the explicit array (empty === Todas las sucursales). The
+        // backend treats `branchIds: []` as "clear all assignments".
+        branchIds: editForm.branchIds,
       })
       setEditingId(null)
       loadProducts()
@@ -300,30 +309,55 @@ export default function ProductManagement() {
               </div>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min.</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={fmtThousands(form.minLevel)}
-                  onChange={e => setForm({ ...form, minLevel: stripNonDigits(e.target.value) })}
-                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
-                />
+                <select
+                  value={form.minLevel || '1'}
+                  onChange={e => setForm({ ...form, minLevel: e.target.value })}
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white"
+                >
+                  <option value="1">Nivel 1</option>
+                  <option value="2">Nivel 2</option>
+                  <option value="3">Nivel 3</option>
+                </select>
               </div>
             </div>
 
             {branches.length > 0 && (
               <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
-                <select
-                  value={form.branchId}
-                  onChange={e => setForm({ ...form, branchId: e.target.value })}
-                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
-                >
-                  <option value="">Todas las sucursales</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400 mt-1">Dejalo en &ldquo;Todas&rdquo; si el producto aplica en todo el comercio.</p>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursales</label>
+                <div className="mt-1 space-y-2 p-3 rounded-lg border border-slate-200 bg-white">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.branchIds.length === 0}
+                      onChange={e => { if (e.target.checked) setForm({ ...form, branchIds: [] }) }}
+                      className="w-4 h-4 accent-emerald-600"
+                    />
+                    <span className="font-medium text-slate-700">Todas las sucursales</span>
+                  </label>
+                  <div className="border-t border-slate-100 pt-2 space-y-1.5">
+                    {branches.map(b => {
+                      const checked = form.branchIds.includes(b.id)
+                      return (
+                        <label key={b.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setForm({ ...form, branchIds: [...form.branchIds, b.id] })
+                              } else {
+                                setForm({ ...form, branchIds: form.branchIds.filter(x => x !== b.id) })
+                              }
+                            }}
+                            className="w-4 h-4 accent-emerald-600"
+                          />
+                          <span className="text-slate-700">{b.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Marca solo las sucursales donde se entrega este producto. Dejalo vacio para activarlo en todas.</p>
               </div>
             )}
 
@@ -397,22 +431,53 @@ export default function ProductManagement() {
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min</label>
-                        <input type="text" inputMode="numeric" placeholder="1" value={fmtThousands(editForm.minLevel)} onChange={e => setEditForm({ ...editForm, minLevel: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <select
+                          value={editForm.minLevel || '1'}
+                          onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })}
+                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm bg-white"
+                        >
+                          <option value="1">Nivel 1</option>
+                          <option value="2">Nivel 2</option>
+                          <option value="3">Nivel 3</option>
+                        </select>
                       </div>
                     </div>
                     {branches.length > 0 && (
                       <div>
-                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
-                        <select
-                          value={editForm.branchId}
-                          onChange={e => setEditForm({ ...editForm, branchId: e.target.value })}
-                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm"
-                        >
-                          <option value="">Todas las sucursales</option>
-                          {branches.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
-                          ))}
-                        </select>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursales</label>
+                        <div className="mt-1 space-y-1.5 p-2.5 rounded-lg border border-slate-200 bg-white">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs">
+                            <input
+                              type="checkbox"
+                              checked={editForm.branchIds.length === 0}
+                              onChange={e => { if (e.target.checked) setEditForm({ ...editForm, branchIds: [] }) }}
+                              className="w-3.5 h-3.5 accent-emerald-600"
+                            />
+                            <span className="font-medium text-slate-700">Todas las sucursales</span>
+                          </label>
+                          <div className="border-t border-slate-100 pt-1.5 space-y-1">
+                            {branches.map(b => {
+                              const checked = editForm.branchIds.includes(b.id)
+                              return (
+                                <label key={b.id} className="flex items-center gap-2 cursor-pointer text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={e => {
+                                      if (e.target.checked) {
+                                        setEditForm({ ...editForm, branchIds: [...editForm.branchIds, b.id] })
+                                      } else {
+                                        setEditForm({ ...editForm, branchIds: editForm.branchIds.filter(x => x !== b.id) })
+                                      }
+                                    }}
+                                    className="w-3.5 h-3.5 accent-emerald-600"
+                                  />
+                                  <span className="text-slate-700">{b.name}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
                       </div>
                     )}
                     <div className="flex gap-2">
@@ -438,11 +503,20 @@ export default function ProductManagement() {
                       ) : (
                         <MdCardGiftcard className="w-12 h-12 text-slate-400" />
                       )}
-                      {branches.length > 0 && (
-                        <span className={`absolute top-2 left-2 text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm ${p.branchId ? 'bg-indigo-600/90 text-white' : 'bg-slate-800/70 text-white'}`}>
-                          {p.branchName || 'Todas las sucursales'}
-                        </span>
-                      )}
+                      {branches.length > 0 && (() => {
+                        const names: string[] = Array.isArray(p.branchNames) && p.branchNames.length > 0
+                          ? p.branchNames
+                          : (p.branchName ? [p.branchName] : [])
+                        const isWide = names.length === 0
+                        const label = isWide ? 'Todas las sucursales' : names.join(' · ')
+                        return (
+                          <span className={`absolute top-2 left-2 max-w-[calc(100%-1rem)] truncate text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm ${isWide ? 'bg-slate-800/70 text-white' : 'bg-indigo-600/90 text-white'}`}
+                            title={label}
+                          >
+                            {label}
+                          </span>
+                        )
+                      })()}
                     </div>
 
                     {/* Product info */}

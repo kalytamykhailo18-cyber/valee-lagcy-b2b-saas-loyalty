@@ -157,6 +157,49 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       };
     }));
 
+    // Branch enrichment: for each REDEMPTION_PENDING in the history, look
+    // up the matching CONFIRMED leg's branch_id (the canonical "where the
+    // canje was scanned"). PENDING's own branch_id reflects QR generation
+    // context, often null. Eric 2026-04-26: customer panel MOVIMIENTOS
+    // wasn't naming the sucursal at all.
+    const pendingTokenIdsInHistory: string[] = [];
+    for (const e of history) {
+      if (e.eventType !== 'REDEMPTION_PENDING') continue;
+      const m = String(e.referenceId || '').match(/^REDEEM-([0-9a-f-]{36})$/i);
+      if (m) pendingTokenIdsInHistory.push(m[1]);
+    }
+    const branchByTokenId = new Map<string, { id: string | null; name: string | null }>();
+    if (pendingTokenIdsInHistory.length > 0) {
+      const confirmedRows = await prisma.$queryRaw<Array<{ token_id: string; branch_id: string | null; branch_name: string | null }>>`
+        SELECT
+          REPLACE(le.reference_id, 'CONFIRMED-', '') AS token_id,
+          le.branch_id,
+          b.name AS branch_name
+        FROM ledger_entries le
+        LEFT JOIN branches b ON b.id = le.branch_id
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.event_type = 'REDEMPTION_CONFIRMED'
+          AND le.entry_type = 'CREDIT'
+          AND le.reference_id = ANY(${pendingTokenIdsInHistory.map(id => `CONFIRMED-${id}`)}::text[])
+      `;
+      for (const row of confirmedRows) {
+        branchByTokenId.set(row.token_id, { id: row.branch_id, name: row.branch_name });
+      }
+    }
+    // For non-redemption history rows, fall back to the row's own branch.
+    // We need to fetch the branch name for non-null branchIds in the history.
+    const branchIdsInHistory = Array.from(new Set(
+      history.map(e => e.branchId).filter((id): id is string => !!id)
+    ));
+    const branchNameById = new Map<string, string>();
+    if (branchIdsInHistory.length > 0) {
+      const branches = await prisma.branch.findMany({
+        where: { tenantId, id: { in: branchIdsInHistory } },
+        select: { id: true, name: true },
+      });
+      for (const b of branches) branchNameById.set(b.id, b.name);
+    }
+
     return {
       account: {
         id: account.id,
@@ -169,14 +212,29 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       },
       balance,
       currencySymbol,
-      history: history.map(e => ({
-        id: e.id,
-        eventType: e.eventType,
-        entryType: e.entryType,
-        amount: e.amount.toString(),
-        status: e.status,
-        createdAt: e.createdAt,
-      })),
+      history: history.map(e => {
+        let branchId: string | null = e.branchId ?? null;
+        let branchName: string | null = branchId ? (branchNameById.get(branchId) ?? null) : null;
+        if (e.eventType === 'REDEMPTION_PENDING') {
+          const m = String(e.referenceId || '').match(/^REDEEM-([0-9a-f-]{36})$/i);
+          const tid = m ? m[1] : null;
+          const confirmed = tid ? branchByTokenId.get(tid) : undefined;
+          if (confirmed && confirmed.id) {
+            branchId = confirmed.id;
+            branchName = confirmed.name;
+          }
+        }
+        return {
+          id: e.id,
+          eventType: e.eventType,
+          entryType: e.entryType,
+          amount: e.amount.toString(),
+          status: e.status,
+          createdAt: e.createdAt,
+          branchId,
+          branchName,
+        };
+      }),
       invoices: invoicesOut,
     };
   });

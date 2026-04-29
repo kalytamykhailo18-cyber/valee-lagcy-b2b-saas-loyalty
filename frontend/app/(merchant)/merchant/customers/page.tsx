@@ -373,9 +373,14 @@ export default function CustomersPage() {
                   ) : (
                     <div className="space-y-2 max-h-48 overflow-y-auto">
                       {selected.history.map((e: any) => (
-                        <div key={e.id} className="flex justify-between items-center py-1.5 border-b border-slate-50 last:border-0">
-                          <span className="text-xs text-slate-600 truncate mr-2">{e.eventType}</span>
-                          <span className={`text-sm font-semibold ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
+                        <div key={e.id} className="flex justify-between items-start gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs text-slate-600 truncate">{e.eventType}</p>
+                            {e.branchName && (
+                              <p className="text-[10px] text-indigo-600 truncate mt-0.5">{e.branchName}</p>
+                            )}
+                          </div>
+                          <span className={`text-sm font-semibold whitespace-nowrap ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
                             {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
                           </span>
                         </div>

@@ -77,11 +77,18 @@ export default function CashierScanner() {
         const data: any = await api.getBranches()
         const active = (data.branches || []).filter((b: any) => b.active)
         setBranches(active)
-        const stored = typeof window !== 'undefined' ? localStorage.getItem('scannerBranchId') : null
-        if (stored && active.find((b: any) => b.id === stored)) {
-          setBranchId(stored)
-        } else if (active.length === 1) {
+        // Single-branch tenants auto-pick the only sucursal (no real choice).
+        // Multi-branch tenants always start empty — Eric 2026-04-26: caching
+        // the last-used sucursal in localStorage was sticking "Caracas" as the
+        // default for an owner who actually wanted to scan in Valencia, so
+        // canjes silently landed on the wrong sucursal. The PASO 1 gate must
+        // re-prompt every time the page opens.
+        if (active.length === 1) {
           setBranchId(active[0].id)
+        }
+        // Best-effort cleanup of the legacy cache key from earlier deploys.
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('scannerBranchId')
         }
       } catch {}
     })()
@@ -89,10 +96,6 @@ export default function CashierScanner() {
 
   function selectBranch(id: string) {
     setBranchId(id)
-    if (typeof window !== 'undefined') {
-      if (id) localStorage.setItem('scannerBranchId', id)
-      else localStorage.removeItem('scannerBranchId')
-    }
   }
 
   const handleSync = useCallback(async () => {

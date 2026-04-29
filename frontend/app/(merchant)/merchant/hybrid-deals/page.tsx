@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { MdLocalOffer } from 'react-icons/md'
+import { MdLocalOffer, MdArchive, MdUnarchive } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints } from '@/lib/format'
@@ -25,14 +25,18 @@ interface Product {
   minLevel: number
   branchId?: string | null
   branchName?: string | null
+  branchIds?: string[]
+  branchNames?: string[]
 }
 
 export default function HybridDealsPage() {
   const [allProducts, setAllProducts] = useState<Product[]>([])
+  const [archivedProducts, setArchivedProducts] = useState<Product[]>([])
+  const [showArchived, setShowArchived] = useState(false)
   const [branches, setBranches] = useState<Array<{ id: string; name: string; active: boolean }>>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<{ name: string; description: string; photoUrl: string; cashPrice: string; redemptionCost: string; stock: string; assetTypeId: string; minLevel: string; branchIds: string[] }>({
     name: '',
     description: '',
     photoUrl: '',
@@ -41,9 +45,9 @@ export default function HybridDealsPage() {
     stock: '0',
     assetTypeId: '',
     minLevel: '1',
-    branchId: '',
+    branchIds: [],
   })
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<{ name: string; description: string; photoUrl: string; cashPrice: string; redemptionCost: string; stock: string; minLevel: string; branchIds: string[] }>({
     name: '',
     description: '',
     photoUrl: '',
@@ -51,7 +55,7 @@ export default function HybridDealsPage() {
     redemptionCost: '',
     stock: '',
     minLevel: '',
-    branchId: '',
+    branchIds: [],
   })
   const [loading, setLoading] = useState(false)
   const [createMessage, setCreateMessage] = useState('')
@@ -69,17 +73,34 @@ export default function HybridDealsPage() {
 
   async function loadProducts() {
     try {
-      const data = await api.getProducts()
-      setAllProducts(data.products)
+      const [active, archived] = await Promise.all([
+        api.getProducts(),
+        api.getProducts({ archived: true }).catch(() => ({ products: [] as Product[] })),
+      ])
+      setAllProducts(active.products)
+      setArchivedProducts((archived as any).products || [])
       // Pick the first product's assetTypeId for new deals
-      if (data.products.length > 0 && !assetTypeId) {
-        setAssetTypeId(data.products[0].assetTypeId || '')
+      if (active.products.length > 0 && !assetTypeId) {
+        setAssetTypeId(active.products[0].assetTypeId || '')
       }
     } catch {}
   }
 
+  async function handleArchive(p: Product) {
+    if (!confirm(`Archivar "${p.name}"? Dejara de verse en el catalogo. Podes restaurarla luego sin perder la data.`)) return
+    try { await api.archiveProduct(p.id); await loadProducts() }
+    catch (e: any) { alert(e?.error || 'No se pudo archivar.') }
+  }
+
+  async function handleUnarchive(p: Product) {
+    try { await api.unarchiveProduct(p.id); await loadProducts() }
+    catch (e: any) { alert(e?.error || 'No se pudo restaurar.') }
+  }
+
   // Only deals with a cashPrice set are considered hybrid
   const hybridDeals = allProducts.filter(p => p.cashPrice !== null && Number(p.cashPrice) > 0)
+  const archivedHybridDeals = archivedProducts.filter(p => p.cashPrice !== null && Number(p.cashPrice) > 0)
+  const visibleDeals = showArchived ? archivedHybridDeals : hybridDeals
 
   async function handleImageUpload(file: File, target: 'create' | 'edit') {
     const setUploadState = target === 'create' ? setUploading : setEditUploading
@@ -111,10 +132,10 @@ export default function HybridDealsPage() {
         stock: parseInt(form.stock) || 0,
         assetTypeId: assetTypeId,
         minLevel: parseInt(form.minLevel) || 1,
-        branchId: form.branchId || undefined,
+        branchIds: form.branchIds,
       })
       setShowForm(false)
-      setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1', branchId: '' })
+      setForm({ name: '', description: '', photoUrl: '', cashPrice: '', redemptionCost: '', stock: '0', assetTypeId: '', minLevel: '1', branchIds: [] })
       setCreateMessage('Promocion creada')
       setTimeout(() => setCreateMessage(''), 2500)
       loadProducts()
@@ -141,7 +162,11 @@ export default function HybridDealsPage() {
       redemptionCost: p.redemptionCost || '',
       stock: p.stock?.toString() || '0',
       minLevel: p.minLevel?.toString() || '1',
-      branchId: p.branchId || '',
+      // Multi-sucursal: prefer the new branchIds array, fall back to the
+      // legacy single branchId for hybrids created before the migration.
+      branchIds: Array.isArray(p.branchIds) && p.branchIds.length > 0
+        ? p.branchIds
+        : (p.branchId ? [p.branchId] : []),
     })
   }
 
@@ -156,9 +181,8 @@ export default function HybridDealsPage() {
         redemptionCost: editForm.redemptionCost,
         stock: parseInt(editForm.stock),
         minLevel: parseInt(editForm.minLevel) || 1,
-        // Null (not undefined) so picking "Todas" actually clears an
-        // existing scope — same contract as the catalog page.
-        branchId: editForm.branchId ? editForm.branchId : null,
+        // Empty array === "Todas las sucursales" — backend clears assignments.
+        branchIds: editForm.branchIds,
       })
       setEditingId(null)
       loadProducts()
@@ -178,12 +202,20 @@ export default function HybridDealsPage() {
               Ofertas combinadas de efectivo + puntos. El cliente paga una parte en efectivo y el resto con sus puntos.
             </p>
           </div>
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
-          >
-            <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nueva promocion'}</span>
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setShowArchived(s => !s)}
+              className={`px-4 py-2.5 rounded-xl text-sm font-semibold border transition ${showArchived ? 'bg-slate-200 text-slate-700 border-slate-300' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
+            >
+              {showArchived ? `Activas (${hybridDeals.length})` : `Archivadas (${archivedHybridDeals.length})`}
+            </button>
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="aa-btn aa-btn-emerald bg-emerald-600 text-white px-5 py-2.5 rounded-xl text-sm font-semibold hover:bg-emerald-700"
+            >
+              <span className="relative z-10">{showForm ? 'Cancelar' : '+ Nueva promocion'}</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -290,30 +322,55 @@ export default function HybridDealsPage() {
               </div>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel min.</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  value={fmtThousands(form.minLevel)}
-                  onChange={e => setForm({ ...form, minLevel: stripNonDigits(e.target.value) })}
-                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
-                />
+                <select
+                  value={form.minLevel || '1'}
+                  onChange={e => setForm({ ...form, minLevel: e.target.value })}
+                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm bg-white"
+                >
+                  <option value="1">Nivel 1</option>
+                  <option value="2">Nivel 2</option>
+                  <option value="3">Nivel 3</option>
+                </select>
               </div>
             </div>
 
             {branches.length > 0 && (
               <div>
-                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
-                <select
-                  value={form.branchId}
-                  onChange={e => setForm({ ...form, branchId: e.target.value })}
-                  className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
-                >
-                  <option value="">Todas las sucursales</option>
-                  {branches.map(b => (
-                    <option key={b.id} value={b.id}>{b.name}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-slate-400 mt-1">Dejalo en &ldquo;Todas&rdquo; si la promocion aplica en todo el comercio.</p>
+                <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursales</label>
+                <div className="mt-1 space-y-2 p-3 rounded-lg border border-slate-200 bg-white">
+                  <label className="flex items-center gap-2 cursor-pointer text-sm">
+                    <input
+                      type="checkbox"
+                      checked={form.branchIds.length === 0}
+                      onChange={e => { if (e.target.checked) setForm({ ...form, branchIds: [] }) }}
+                      className="w-4 h-4 accent-emerald-600"
+                    />
+                    <span className="font-medium text-slate-700">Todas las sucursales</span>
+                  </label>
+                  <div className="border-t border-slate-100 pt-2 space-y-1.5">
+                    {branches.map(b => {
+                      const checked = form.branchIds.includes(b.id)
+                      return (
+                        <label key={b.id} className="flex items-center gap-2 cursor-pointer text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => {
+                              if (e.target.checked) {
+                                setForm({ ...form, branchIds: [...form.branchIds, b.id] })
+                              } else {
+                                setForm({ ...form, branchIds: form.branchIds.filter(x => x !== b.id) })
+                              }
+                            }}
+                            className="w-4 h-4 accent-emerald-600"
+                          />
+                          <span className="text-slate-700">{b.name}</span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-400 mt-1">Marca solo las sucursales donde aplica esta promocion. Dejalo vacio para activarla en todas.</p>
               </div>
             )}
 
@@ -338,15 +395,19 @@ export default function HybridDealsPage() {
         )}
 
         {/* Hybrid deals grid */}
-        {hybridDeals.length === 0 ? (
+        {visibleDeals.length === 0 ? (
           <div className="bg-white rounded-2xl p-12 text-center border border-slate-100">
             <MdLocalOffer className="w-12 h-12 text-slate-400 mx-auto" />
-            <p className="text-slate-500 mt-4">No hay promociones hibridas todavia</p>
-            <p className="text-sm text-slate-400 mt-1">Crea tu primera oferta combinada de efectivo + puntos</p>
+            <p className="text-slate-500 mt-4">
+              {showArchived ? 'No hay promociones archivadas' : 'No hay promociones hibridas todavia'}
+            </p>
+            <p className="text-sm text-slate-400 mt-1">
+              {showArchived ? 'Las promociones que archives van a aparecer aca' : 'Crea tu primera oferta combinada de efectivo + puntos'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {hybridDeals.map((p, i) => (
+            {visibleDeals.map((p, i) => (
               <div key={p.id} className="aa-card aa-row-in bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden" style={{ animationDelay: `${Math.min(i * 40, 360)}ms` }}>
                 {editingId === p.id ? (
                   <div className="p-4 space-y-3">
@@ -404,22 +465,53 @@ export default function HybridDealsPage() {
                       </div>
                       <div>
                         <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Nivel minimo</label>
-                        <input type="text" inputMode="numeric" placeholder="1" value={fmtThousands(editForm.minLevel)} onChange={e => setEditForm({ ...editForm, minLevel: stripNonDigits(e.target.value) })} className="w-full mt-1 px-2 py-2 rounded-lg border text-sm" />
+                        <select
+                          value={editForm.minLevel || '1'}
+                          onChange={e => setEditForm({ ...editForm, minLevel: e.target.value })}
+                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm bg-white"
+                        >
+                          <option value="1">Nivel 1</option>
+                          <option value="2">Nivel 2</option>
+                          <option value="3">Nivel 3</option>
+                        </select>
                       </div>
                     </div>
                     {branches.length > 0 && (
                       <div>
-                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursal</label>
-                        <select
-                          value={editForm.branchId}
-                          onChange={e => setEditForm({ ...editForm, branchId: e.target.value })}
-                          className="w-full mt-1 px-2 py-2 rounded-lg border text-sm"
-                        >
-                          <option value="">Todas las sucursales</option>
-                          {branches.map(b => (
-                            <option key={b.id} value={b.id}>{b.name}</option>
-                          ))}
-                        </select>
+                        <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Sucursales</label>
+                        <div className="mt-1 space-y-1.5 p-2.5 rounded-lg border border-slate-200 bg-white">
+                          <label className="flex items-center gap-2 cursor-pointer text-xs">
+                            <input
+                              type="checkbox"
+                              checked={editForm.branchIds.length === 0}
+                              onChange={e => { if (e.target.checked) setEditForm({ ...editForm, branchIds: [] }) }}
+                              className="w-3.5 h-3.5 accent-emerald-600"
+                            />
+                            <span className="font-medium text-slate-700">Todas las sucursales</span>
+                          </label>
+                          <div className="border-t border-slate-100 pt-1.5 space-y-1">
+                            {branches.map(b => {
+                              const checked = editForm.branchIds.includes(b.id)
+                              return (
+                                <label key={b.id} className="flex items-center gap-2 cursor-pointer text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={e => {
+                                      if (e.target.checked) {
+                                        setEditForm({ ...editForm, branchIds: [...editForm.branchIds, b.id] })
+                                      } else {
+                                        setEditForm({ ...editForm, branchIds: editForm.branchIds.filter(x => x !== b.id) })
+                                      }
+                                    }}
+                                    className="w-3.5 h-3.5 accent-emerald-600"
+                                  />
+                                  <span className="text-slate-700">{b.name}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
                       </div>
                     )}
                     <div className="flex gap-2">
@@ -450,11 +542,20 @@ export default function HybridDealsPage() {
                         <span className="bg-amber-500 text-white px-2.5 py-1 rounded-full text-xs font-bold shadow-sm">
                           HIBRIDA
                         </span>
-                        {branches.length > 0 && (
-                          <span className={`text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm shadow-sm ${p.branchId ? 'bg-indigo-600/90 text-white' : 'bg-slate-800/70 text-white'}`}>
-                            {p.branchName || 'Todas'}
-                          </span>
-                        )}
+                        {branches.length > 0 && (() => {
+                          const names: string[] = Array.isArray(p.branchNames) && p.branchNames.length > 0
+                            ? p.branchNames
+                            : (p.branchName ? [p.branchName] : [])
+                          const isWide = names.length === 0
+                          const label = isWide ? 'Todas' : names.join(' · ')
+                          return (
+                            <span className={`max-w-[180px] truncate text-[10px] font-semibold px-2 py-1 rounded-full backdrop-blur-sm shadow-sm ${isWide ? 'bg-slate-800/70 text-white' : 'bg-indigo-600/90 text-white'}`}
+                              title={label}
+                            >
+                              {label}
+                            </span>
+                          )
+                        })()}
                       </div>
                       <button
                         onClick={() => handleToggle(p.id)}
@@ -495,12 +596,32 @@ export default function HybridDealsPage() {
                         <p className="text-xs text-amber-600 mt-2">Sin stock — invisible para consumidores</p>
                       )}
 
-                      <button
-                        onClick={() => startEdit(p)}
-                        className="w-full mt-3 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition"
-                      >
-                        Editar
-                      </button>
+                      {showArchived ? (
+                        <button
+                          onClick={() => handleUnarchive(p)}
+                          className="w-full mt-3 py-2 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg font-medium transition flex items-center justify-center gap-1"
+                        >
+                          <MdUnarchive className="w-4 h-4" />
+                          Restaurar
+                        </button>
+                      ) : (
+                        <div className="flex gap-2 mt-3">
+                          <button
+                            onClick={() => startEdit(p)}
+                            className="flex-1 py-2 text-xs text-indigo-600 hover:bg-indigo-50 rounded-lg font-medium transition"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            onClick={() => handleArchive(p)}
+                            className="px-3 py-2 text-xs text-slate-500 hover:bg-slate-100 rounded-lg font-medium transition flex items-center gap-1"
+                            title="Archivar"
+                          >
+                            <MdArchive className="w-4 h-4" />
+                            Archivar
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </>
                 )}

@@ -6,7 +6,26 @@ import { MdCheckCircle } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { formatCash, formatPoints } from '@/lib/format'
 
+// Same input-sanitization pair used on Productos / Promociones hibridas.
+// Eric 2026-04-25/26: Venezuelan merchants type "1.500" expecting 1500 (dot is
+// the thousand separator in es-VE), but a raw <input type="number"> reads it
+// as 1.5 and the system multiplies the wrong amount. Strip non-digits on
+// input, re-format with dot thousand separators on display.
+const fmtThousands = (s: string) => {
+  const digits = String(s).replace(/\D/g, '')
+  if (!digits) return ''
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.')
+}
+const stripNonDigits = (s: string) => s.replace(/\D/g, '')
+
 function decodeDualScanNonce(token: string): string | null {
+  // Post 2026-04-23 short-QR redesign the server returns the bare 16-char hex
+  // nonce as the token (so the QR drops from version 14 to 3). Older callers
+  // still emit a base64 HMAC payload with payload.nonce inside — keep that
+  // path so QRs in flight during a deploy keep working. Without this branch
+  // the merchant polling silently no-op'd and the cashier never saw the green
+  // confirmation when the customer paid (Eric 2026-04-26).
+  if (/^[0-9a-f]{8,32}$/i.test(token)) return token
   try {
     const decoded = JSON.parse(atob(token))
     const nonce = decoded?.payload?.nonce
@@ -192,7 +211,7 @@ export default function DualScanPage() {
       {/* Page header */}
       <div className="px-4 sm:px-6 lg:px-8 pt-6 lg:pt-8 pb-4 aa-rise">
         <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 tracking-tight">Pago en efectivo</h1>
-        <p className="text-sm text-slate-500 mt-1">Genera un codigo QR temporal para clientes que pagan sin recibo (efectivo, Pago Movil, Zelle)</p>
+        <p className="text-sm text-slate-500 mt-1">Genera un codigo QR temporal para clientes que pagan sin recibo (efectivo)</p>
         {/* Cross-link back to scanner — cashier kiosk flow toggles between
             the two without needing the sidebar. */}
         <Link
@@ -246,20 +265,19 @@ export default function DualScanPage() {
                 <div className="relative mt-2">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold pointer-events-none text-xl">{currencySymbol}</span>
                   <input
-                    type="number"
-                    value={amount}
-                    onChange={e => setAmount(e.target.value)}
-                    placeholder="30.00"
+                    type="text"
+                    inputMode="numeric"
+                    value={fmtThousands(amount)}
+                    onChange={e => setAmount(stripNonDigits(e.target.value))}
+                    placeholder="30"
                     className="aa-field aa-field-emerald w-full pl-10 pr-4 py-4 rounded-xl border border-slate-200 text-2xl font-bold text-slate-800 tabular-nums"
                     autoFocus
-                    min="0"
-                    step="0.01"
                   />
                 </div>
                 {previewPoints !== null && (
                   <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between">
                     <span className="text-sm text-emerald-700">El cliente ganara</span>
-                    <span className="text-lg font-bold text-emerald-700 tabular-nums">{previewPoints} pts</span>
+                    <span className="text-lg font-bold text-emerald-700 tabular-nums">{formatPoints(previewPoints)} pts</span>
                   </div>
                 )}
                 <p className="text-xs text-slate-400 mt-2">

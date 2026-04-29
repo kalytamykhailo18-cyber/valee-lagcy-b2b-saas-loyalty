@@ -56,7 +56,7 @@ export default function OnboardingWizard() {
 
   // Step 4 (Producto) form state
   const [productName, setProductName] = useState('')
-  const [productCost, setProductCost] = useState('')
+  const [productCost, setProductCost] = useState('3000')
   const [productStock, setProductStock] = useState('10')
   const [productBranchId, setProductBranchId] = useState('')
   const [productPhotoUrl, setProductPhotoUrl] = useState<string | null>(null)
@@ -515,7 +515,7 @@ export default function OnboardingWizard() {
                       Quitar foto
                     </button>
                   )}
-                  <p className="text-xs text-slate-400">Recomendado: cuadrada, max 2MB. La foto se va a usar tambien en la tarjeta de bienvenida del PWA del cliente.</p>
+                  <p className="text-xs text-slate-400">Recomendado: cuadrada, max 2MB. La foto tambien se va a usar en nuestro marketplace, donde miles de personas veran los mejores incentivos que ofreces a tus clientes premium.</p>
                 </div>
               </div>
             </div>
@@ -526,7 +526,7 @@ export default function OnboardingWizard() {
                   type="text" inputMode="numeric"
                   value={fmtThousands(productCost)}
                   onChange={e => setProductCost(stripNonDigits(e.target.value))}
-                  placeholder="100"
+                  placeholder="3.000"
                   className="aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm"
                 />
               </div>
@@ -570,21 +570,38 @@ export default function OnboardingWizard() {
             <div className="w-16 h-16 mx-auto bg-emerald-100 rounded-full flex items-center justify-center">
               <MdCheckCircle className="w-10 h-10 text-emerald-600" />
             </div>
-            <h2 className="text-xl font-bold text-slate-800">Todo listo</h2>
+            <h2 className="text-xl font-bold text-slate-800">¡Tu comercio ya esta listo para fidelizar!</h2>
             <p className="text-sm text-slate-500">
-              Tu comercio ya puede recibir clientes. Imprime tu QR, ponlo visible en tu local, y cuando alguien lo escanee empezara a acumular puntos.
+              Sigue estos 3 pasos para convertir visitas en ventas recurrentes:
             </p>
-            <div className="bg-slate-50 rounded-xl p-4 text-left text-sm text-slate-600 space-y-2">
-              <p className="font-semibold text-slate-800">Proximos pasos:</p>
-              <p>• Crear tus cajeros en Cajeros y QR</p>
-              <p>• Configurar tus sucursales si tenes mas de una</p>
-              <p>• Subir tus facturas por CSV para acreditar puntos automaticamente</p>
+            <div className="bg-slate-50 rounded-xl p-4 text-left text-sm text-slate-600 space-y-3">
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center">1</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Imprime tu QR</p>
+                  <p className="mt-0.5">Tus clientes ahora tienen una razon mas para volver. Descarga tu QR, ponlo en un lugar visible y deja que la magia ocurra. Cada escaneo es un cliente que regresa.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center">2</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Empodera a tu equipo</p>
+                  <p className="mt-0.5">Ve a Cajeros y QR. Crea un codigo personalizado para cada mesonero o cajero. Asi podras medir quien esta impulsando mas la lealtad en tu local y garantizar que nadie se quede sin sus puntos.</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="flex-shrink-0 w-6 h-6 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center">3</span>
+                <div>
+                  <p className="font-semibold text-slate-800">Validacion anti-fraude</p>
+                  <p className="mt-0.5">Ve a Cargar CSV donde podras cargar las facturas de tus ventas diarias. Es el paso final para convertir puntos provisionales en recompensas reales.</p>
+                </div>
+              </div>
             </div>
             <button
               onClick={() => router.push('/merchant')}
               className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-3 rounded-xl font-semibold hover:bg-emerald-700"
             >
-              <span className="relative z-10">Ir a mi panel</span>
+              <span className="relative z-10">¡Empezemos a fidelizar ahora!</span>
             </button>
           </div>
         )}

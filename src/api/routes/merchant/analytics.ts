@@ -107,10 +107,43 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       params.push(status);
       paramIndex++;
     }
+    // Branch filter — special case for redemptions: a row's own branch_id
+    // alone is not enough. The collapse logic (below) keeps the PENDING leg
+    // and hides the CONFIRMED leg, but the PENDING row's branch_id reflects
+    // where the consumer GENERATED the QR (often null), while CONFIRMED's
+    // branch_id reflects where the merchant SCANNED. Eric 2026-04-26:
+    // filtering by Caracas was returning zero canjes even when the canje
+    // was actually scanned at Caracas, because the surviving PENDING row
+    // had branch_id=null. So when filtering, also accept a PENDING row
+    // whose paired CONFIRMED leg matches the requested branch.
     if (branchId === '_unassigned') {
-      conditions.push(`le.branch_id IS NULL`);
+      conditions.push(`(
+        le.branch_id IS NULL
+        AND NOT (
+          le.event_type = 'REDEMPTION_PENDING'
+          AND EXISTS (
+            SELECT 1 FROM ledger_entries le_c
+            WHERE le_c.tenant_id = le.tenant_id
+              AND le_c.event_type = 'REDEMPTION_CONFIRMED'
+              AND le_c.reference_id = 'CONFIRMED-' || SUBSTRING(le.reference_id FROM 8)
+              AND le_c.branch_id IS NOT NULL
+          )
+        )
+      )`);
     } else if (branchId) {
-      conditions.push(`le.branch_id = $${paramIndex}::uuid`);
+      conditions.push(`(
+        le.branch_id = $${paramIndex}::uuid
+        OR (
+          le.event_type = 'REDEMPTION_PENDING'
+          AND EXISTS (
+            SELECT 1 FROM ledger_entries le_c
+            WHERE le_c.tenant_id = le.tenant_id
+              AND le_c.event_type = 'REDEMPTION_CONFIRMED'
+              AND le_c.reference_id = 'CONFIRMED-' || SUBSTRING(le.reference_id FROM 8)
+              AND le_c.branch_id = $${paramIndex}::uuid
+          )
+        )
+      )`);
       params.push(branchId);
       paramIndex++;
     }
@@ -232,6 +265,33 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       }
     }
 
+    // For each redemption pair, look up the CONFIRMED leg's branch context.
+    // The PENDING row survives the collapse and carries the consumer
+    // account, but its branch_id reflects where the QR was generated, not
+    // where the canje was scanned. Override with the CONFIRMED branch so
+    // the merchant filter and the row badge name the actual sucursal.
+    const confirmedBranchByTokenId = new Map<string, { id: string | null; name: string | null }>();
+    if (confirmedTokenIds.size > 0) {
+      const confirmedRows = await prisma.$queryRaw<Array<{ token_id: string; branch_id: string | null; branch_name: string | null }>>`
+        SELECT
+          REPLACE(le.reference_id, 'CONFIRMED-', '') AS token_id,
+          le.branch_id,
+          b.name AS branch_name
+        FROM ledger_entries le
+        LEFT JOIN branches b ON b.id = le.branch_id
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.event_type = 'REDEMPTION_CONFIRMED'
+          AND le.entry_type = 'CREDIT'
+          AND le.reference_id = ANY(${Array.from(confirmedTokenIds).map(id => `CONFIRMED-${id}`)}::text[])
+      `;
+      for (const row of confirmedRows) {
+        confirmedBranchByTokenId.set(row.token_id, {
+          id: row.branch_id,
+          name: row.branch_name,
+        });
+      }
+    }
+
     // Effective status for INVOICE_CLAIMED rows: a row stays raw
     // status='provisional' in the ledger (it's immutable), but if the
     // linked invoice has since been reconciled to status='claimed' via
@@ -294,6 +354,20 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
             && ref.startsWith('PENDING-')
             && claimedInvoiceNumbers.has(ref.slice('PENDING-'.length));
           const effectiveStatus = isReconciled ? 'confirmed' : e.status;
+          // Override branch context for relabeled redemption rows: the
+          // CONFIRMED leg's branch is the canonical "where the canje
+          // happened". PENDING's own branch_id is the consumer's QR
+          // generation context and may be null, which made the per-branch
+          // filter return zero results (Eric 2026-04-26).
+          let effectiveBranchId: string | null = e.branch_id ?? null;
+          let effectiveBranchName: string | null = e.branch_name ?? null;
+          if (tid && e.event_type === 'REDEMPTION_PENDING' && confirmedTokenIds.has(tid)) {
+            const cb = confirmedBranchByTokenId.get(tid);
+            if (cb && cb.id) {
+              effectiveBranchId = cb.id;
+              effectiveBranchName = cb.name;
+            }
+          }
           return {
             id: e.id,
             eventType: effectiveEventType,
@@ -301,8 +375,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
             amount: e.amount,
             status: effectiveStatus,
             referenceId: e.reference_id,
-            branchId: e.branch_id,
-            branchName: e.branch_name,
+            branchId: effectiveBranchId,
+            branchName: effectiveBranchName,
             accountPhone: e.account_phone,
             accountName: e.account_name || null,
             // Product info stamped at write time survives token cleanup; also

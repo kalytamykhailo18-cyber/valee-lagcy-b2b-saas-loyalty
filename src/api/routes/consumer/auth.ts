@@ -7,6 +7,37 @@ import { sendWhatsAppOTP } from '../../../services/whatsapp.js';
 import { grantWelcomeBonus } from '../../../services/welcome-bonus.js';
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
+  // ---- PUBLIC: Merchant entry info ----
+  // Serves the /consumer/<slug> landing page so it can render BOTH a
+  // "Continuar aqui" (stay in PWA) button and an "Abrir en WhatsApp"
+  // (jump to wa.me deep link) button. Eric 2026-04-27: switching the QR
+  // to PWA-direct removed the WhatsApp option entirely; he wants both
+  // surfaced so users (especially returning ones who like the bot) keep
+  // their preferred entry.
+  app.get('/api/consumer/merchant-entry/:slug', async (request, reply) => {
+    const { slug } = request.params as { slug: string };
+    const tenant = await prisma.tenant.findUnique({
+      where: { slug },
+      select: { name: true, slug: true, status: true, qrCodeUrl: true },
+    });
+    if (!tenant || tenant.status !== 'active') {
+      return reply.status(404).send({ error: 'Merchant not found' });
+    }
+    const botPhone = process.env.META_WHATSAPP_DISPLAY_PHONE || process.env.EVOLUTION_INSTANCE_NAME || '';
+    let whatsappLink: string | null = null;
+    if (botPhone) {
+      const greet = `Hola! Quiero ganar puntos en ${tenant.name} `;
+      const text = encodeURIComponent(`${greet}Valee Ref: ${tenant.slug}`);
+      whatsappLink = `https://wa.me/${botPhone.replace(/\D/g, '')}?text=${text}`;
+    }
+    return {
+      name: tenant.name,
+      slug: tenant.slug,
+      qrCodeUrl: tenant.qrCodeUrl,
+      whatsappLink,
+    };
+  });
+
   // ---- AUTH: Request OTP ----
   // tenantSlug is optional. With slug → legacy per-merchant flow.
   // Without slug → tenantless "global" login. The OTP itself is per phone number,
