@@ -389,12 +389,19 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
     // The latter bucket catches merchants where the user still has accumulated
     // points even if the merchant has no active products today — hiding those
     // would make balances appear to vanish.
+    //
+    // Eric 2026-05-04 (Notion "Error en multicomercio"): when the admin
+    // deactivates a merchant, the user's account at that merchant must
+    // STILL surface here so the saldo remains visible. Hiding it makes
+    // Valee look like the one who lost the points. The card will render
+    // with no products and a "comercio inactivo" tag — transparency
+    // wins trust. Discovery (tenants-with-products) still requires
+    // status=active so deactivated tenants don't appear to strangers.
     const tenantsById = new Map<string, { id: string; name: string; slug: string; status: string }>();
     for (const t of tenantsWithProducts) {
       tenantsById.set(t.id, { id: t.id, name: t.name, slug: t.slug, status: t.status });
     }
     for (const acc of allAccounts) {
-      if (acc.tenant.status !== 'active') continue;
       if (!tenantsById.has(acc.tenantId)) {
         tenantsById.set(acc.tenantId, { id: acc.tenant.id, name: acc.tenant.name, slug: acc.tenant.slug, status: acc.tenant.status });
       }
@@ -434,13 +441,18 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         unitLabel = assetType.unitLabel;
       }
 
-      // Top 3 products by lowest cost (entry-level redemptions are most attractive)
-      const topProducts = await prisma.product.findMany({
-        where: { tenantId: tenant.id, active: true, stock: { gt: 0 } },
-        orderBy: { redemptionCost: 'asc' },
-        take: 3,
-        select: { id: true, name: true, photoUrl: true, redemptionCost: true, stock: true },
-      });
+      // Top 3 products by lowest cost — but only for active tenants. A
+      // deactivated tenant has nothing to redeem; the card surfaces only
+      // for balance transparency.
+      const tenantActive = tenant.status === 'active';
+      const topProducts = tenantActive
+        ? await prisma.product.findMany({
+            where: { tenantId: tenant.id, active: true, stock: { gt: 0 } },
+            orderBy: { redemptionCost: 'asc' },
+            take: 3,
+            select: { id: true, name: true, photoUrl: true, redemptionCost: true, stock: true },
+          })
+        : [];
 
       const fullTenant = await prisma.tenant.findUnique({
         where: { id: tenant.id },
@@ -452,6 +464,8 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
         tenantId: tenant.id,
         tenantName: tenant.name,
         tenantSlug: tenant.slug,
+        tenantStatus: tenant.status,
+        tenantActive,
         tenantLogoUrl: fullTenant?.logoUrl || null,
         accountType: acc?.accountType || null,
         hasAccount: !!acc,
@@ -468,10 +482,16 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       };
     }));
 
-    // Final filter: show the merchant if EITHER the user has a balance there OR
-    // it has at least one active product to redeem. A merchant with zero
-    // products AND zero balance is noise.
-    const merchants = merchantsRaw.filter(m => Number(m.balance) > 0 || m.topProducts.length > 0);
+    // Final filter:
+    //   - active tenant: show if balance > 0 OR has products
+    //   - inactive tenant: show ONLY if the user has a balance there
+    //     (otherwise it's just a deactivated merchant the user once visited
+    //     but never accumulated points at — pure noise)
+    const merchants = merchantsRaw.filter(m =>
+      m.tenantActive
+        ? Number(m.balance) > 0 || m.topProducts.length > 0
+        : Number(m.balance) > 0
+    );
 
     // Sort: merchants with a balance first (by balance desc), then merchants
     // the user has an account in but no balance, then the rest alphabetically.

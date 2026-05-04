@@ -174,8 +174,37 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     if (!tenantSlug) return reply.status(400).send({ error: 'tenantSlug is required' });
 
     const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
-    if (!tenant || tenant.status !== 'active') {
+    if (!tenant) {
       return reply.status(404).send({ error: 'Merchant not found' });
+    }
+
+    // Eric 2026-05-04 (Notion "Error en multicomercio"): if the tenant is
+    // inactive, allow the consumer to enter ONLY if they already have an
+    // account there with a positive balance. The page renders "comercio
+    // inactivo" + saldo intact, no products, no welcome bonus, no
+    // findOrCreate (which would create a fresh account at a dead merchant).
+    if (tenant.status !== 'active') {
+      const existing = await prisma.account.findUnique({
+        where: { tenantId_phoneNumber: { tenantId: tenant.id, phoneNumber } },
+      });
+      if (!existing) {
+        return reply.status(404).send({ error: 'Merchant not found' });
+      }
+      const tokens = issueConsumerTokens({
+        accountId: existing.id,
+        tenantId: tenant.id,
+        phoneNumber,
+        type: 'consumer' as const,
+      });
+      return {
+        ...tokens,
+        accountId: existing.id,
+        tenantId: tenant.id,
+        merchantName: tenant.name,
+        merchantSlug: tenant.slug,
+        tenantStatus: tenant.status,
+        tenantActive: false,
+      };
     }
 
     const { account } = await findOrCreateConsumerAccount(tenant.id, phoneNumber);

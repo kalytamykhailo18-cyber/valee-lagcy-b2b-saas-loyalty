@@ -940,6 +940,8 @@ interface MerchantAccount {
   tenantName: string
   tenantSlug: string
   tenantLogoUrl?: string | null
+  tenantStatus?: string
+  tenantActive?: boolean
   balance: string
   reserved?: string
   unitLabel: string
@@ -1079,15 +1081,20 @@ function MultiMerchantHub() {
                         <div className="px-6 pt-6 pb-5 sm:px-7 sm:pt-7 sm:pb-6">
                           <div className="flex items-start justify-between gap-4">
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 mb-2">
+                              <div className="flex items-center gap-2 mb-2 flex-wrap">
                                 {m.tenantLogoUrl ? (
-                                  <img src={m.tenantLogoUrl} alt={m.tenantName} className="w-8 h-8 rounded-full object-cover border border-slate-200 bg-white flex-shrink-0" />
+                                  <img src={m.tenantLogoUrl} alt={m.tenantName} className={`w-8 h-8 rounded-full object-cover border border-slate-200 bg-white flex-shrink-0 ${m.tenantActive === false ? 'grayscale' : ''}`} />
                                 ) : (
                                   <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm flex-shrink-0">
                                     {m.tenantName.charAt(0)}
                                   </div>
                                 )}
                                 <p className="text-sm font-semibold text-slate-900 truncate">{m.tenantName}</p>
+                                {m.tenantActive === false && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-slate-100 text-slate-600 flex-shrink-0">
+                                    Comercio inactivo
+                                  </span>
+                                )}
                               </div>
                               <p className="text-[11px] uppercase tracking-[0.12em] text-slate-400 font-semibold mb-1">Saldo</p>
                               {(() => {
@@ -1117,7 +1124,7 @@ function MultiMerchantHub() {
                             <MdChevronRight className="w-6 h-6 text-slate-300 group-hover:text-indigo-500 group-hover:translate-x-0.5 transition-all flex-shrink-0 mt-1" />
                           </div>
                         </div>
-                        {m.topProducts.length > 0 && (
+                        {m.topProducts.length > 0 ? (
                           <div className="px-6 pb-6 sm:px-7 sm:pb-7">
                             <div className="flex gap-3 overflow-x-auto scrollbar-hide -mx-1 px-1">
                               {m.topProducts.map(p => {
@@ -1141,7 +1148,13 @@ function MultiMerchantHub() {
                               })}
                             </div>
                           </div>
-                        )}
+                        ) : m.tenantActive === false ? (
+                          <div className="px-6 pb-6 sm:px-7 sm:pb-7">
+                            <p className="text-xs text-slate-500 leading-relaxed">
+                              Tu saldo sigue intacto. Este comercio no tiene recompensas pautadas en este momento.
+                            </p>
+                          </div>
+                        ) : null}
                       </div>
                     ))}
                   </div>
