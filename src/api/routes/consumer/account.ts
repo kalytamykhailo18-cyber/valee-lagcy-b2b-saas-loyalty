@@ -54,6 +54,8 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       balance: breakdown.total,           // total displayed (confirmed + provisional)
       confirmed: breakdown.confirmed,
       provisional: breakdown.provisional,
+      cashProvisional: breakdown.cashProvisional, // PRESENCE_VALIDATED awaiting reconciliation
+      spendable: breakdown.spendable,     // confirmed + invoice-provisional (cash excluded)
       reserved,                           // pending redemption QRs still held
       unitLabel: assetType.unitLabel,
       assetTypeId: assetType.id,

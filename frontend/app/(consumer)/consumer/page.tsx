@@ -75,6 +75,8 @@ function ConsumerApp() {
   const [reservedBalance, setReservedBalance] = useState('0')
   const [confirmedBalance, setConfirmedBalance] = useState('0')
   const [provisionalBalance, setProvisionalBalance] = useState('0')
+  const [cashProvisionalBalance, setCashProvisionalBalance] = useState('0')
+  const [spendableBalance, setSpendableBalance] = useState('0')
   const [unitLabel, setUnitLabel] = useState('points')
   const [assetTypeId, setAssetTypeId] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -242,6 +244,8 @@ function ConsumerApp() {
       setBalance(balData.balance)
       setConfirmedBalance(balData.confirmed || balData.balance)
       setProvisionalBalance(balData.provisional || '0')
+      setCashProvisionalBalance(balData.cashProvisional || '0')
+      setSpendableBalance(balData.spendable || balData.balance)
       setReservedBalance(balData.reserved || '0')
       setUnitLabel(balData.unitLabel)
       setAssetTypeId(balData.assetTypeId)
@@ -500,7 +504,10 @@ function ConsumerApp() {
   const sessionPhoneLabel = account?.phoneNumber || ''
   const regularProducts = products.filter((p: any) => !p.cashPrice || Number(p.cashPrice) === 0)
   const hybridProducts = products.filter((p: any) => p.cashPrice && Number(p.cashPrice) > 0)
-  const userBalance = parseFloat(balance) - getLocalPendingBalance()
+  // Spendable balance excludes cash-provisional (PRESENCE_VALIDATED still in
+  // verification — Eric 2026-05-04). Falls back to total when the API has
+  // not yet returned the spendable field.
+  const userBalance = parseFloat(spendableBalance || balance) - getLocalPendingBalance()
 
   return (
     <div className="min-h-screen bg-slate-50 pb-32">
@@ -652,6 +659,11 @@ function ConsumerApp() {
               <MdLock className="w-3.5 h-3.5" />
               <span>{formatPoints(provisionalBalance)} en verificacion</span>
             </div>
+          )}
+          {parseFloat(cashProvisionalBalance) > 0 && (
+            <p className="mt-1.5 text-[11px] text-indigo-100/80 leading-snug">
+              Incluye {formatPoints(cashProvisionalBalance)} de pagos en efectivo aun no validados con el comercio. No estan disponibles para canjeo hasta la conciliacion.
+            </p>
           )}
 
           {parseFloat(reservedBalance) > 0 && (

@@ -101,13 +101,19 @@ export async function initiateRedemption(params: {
   }
 
   // Final balance check (only for the points portion).
-  // Use total balance (confirmed + provisional) for redemptions. Provisional
-  // credits from invoice submissions are real value that the consumer earned —
-  // restricting to confirmed-only blocks all redemptions when no CSV has been
-  // uploaded for reconciliation.
-  const totalBalance = parseFloat(await getAccountBalance(consumerAccountId, assetTypeId, tenantId));
-  if (totalBalance < pointsToDeduct) {
-    return { success: false, message: `Saldo insuficiente. Necesitas ${pointsToDeduct} puntos pero tienes ${Math.round(totalBalance).toLocaleString()}.` };
+  // Eric 2026-05-04 (Notion "Escaneo de pagos en efectivo"): cash provisional
+  // points (PRESENCE_VALIDATED in provisional state) are NOT spendable until
+  // reconciled against the merchant's records. Invoice-provisional points
+  // stay spendable so a merchant who hasn't uploaded a CSV doesn't block
+  // every redemption. getAccountBalanceBreakdown.spendable encodes that rule.
+  const breakdown = await getAccountBalanceBreakdown(consumerAccountId, assetTypeId, tenantId);
+  const spendableBalance = parseFloat(breakdown.spendable);
+  if (spendableBalance < pointsToDeduct) {
+    const cashHeld = parseFloat(breakdown.cashProvisional);
+    const message = cashHeld > 0
+      ? `Saldo insuficiente. Necesitas ${pointsToDeduct} puntos pero tienes ${Math.round(spendableBalance).toLocaleString()} disponibles (${Math.round(cashHeld).toLocaleString()} en verificacion por pago en efectivo).`
+      : `Saldo insuficiente. Necesitas ${pointsToDeduct} puntos pero tienes ${Math.round(spendableBalance).toLocaleString()}.`;
+    return { success: false, message };
   }
 
   // Get holding account

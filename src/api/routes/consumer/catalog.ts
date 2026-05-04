@@ -120,14 +120,15 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
         })
       : [];
 
-    // Get consumer balance — split into confirmed (spendable) and provisional (in verification, not yet spendable).
-    // Affordability is computed on confirmed points only — provisional points cannot be redeemed
-    // until the merchant CSV cross-reference confirms them.
+    // Get consumer balance. Affordability uses the spendable bucket
+    // (confirmed + invoice-provisional, EXCLUDING cash-provisional). Eric
+    // 2026-05-04 (Notion "Escaneo de pagos en efectivo"): cash payments
+    // stay in verification until reconciled and cannot fund a canje.
     const assetType = await prisma.assetType.findFirst();
     const breakdown = assetType
       ? await getAccountBalanceBreakdown(accountId, assetType.id, tenantId)
-      : { confirmed: '0', provisional: '0', total: '0' };
-    const confirmedBalance = parseFloat(breakdown.confirmed);
+      : { confirmed: '0', provisional: '0', cashProvisional: '0', spendable: '0', total: '0' };
+    const spendableBalance = parseFloat(breakdown.spendable);
 
     return {
       products: products.map(p => {
@@ -146,7 +147,7 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           stock: p.stock,
           minLevel: p.minLevel,
           levelLocked: p.minLevel > consumerLevel,
-          canAfford: confirmedBalance >= Number(p.redemptionCost) && p.minLevel <= consumerLevel,
+          canAfford: spendableBalance >= Number(p.redemptionCost) && p.minLevel <= consumerLevel,
           // Branch locator. Multi-sucursal scope (Eric 2026-04-26):
           // a product can be assigned to N sucursales — the consumer
           // sees them all in branchNames. Tenant-wide products list
@@ -166,6 +167,8 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       balance: breakdown.total,
       confirmed: breakdown.confirmed,
       provisional: breakdown.provisional,
+      cashProvisional: breakdown.cashProvisional,
+      spendable: breakdown.spendable,
       consumerLevel,
     };
   });

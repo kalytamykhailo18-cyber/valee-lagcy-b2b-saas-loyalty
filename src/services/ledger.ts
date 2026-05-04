@@ -178,6 +178,12 @@ export async function getAccountBalance(
  * - confirmed: sum of credits/debits where status = 'confirmed'
  * - provisional: net contribution of entries with status = 'provisional' (these are
  *   credits that have been provisionally granted but not yet confirmed by reconciliation)
+ * - cashProvisional: subset of provisional where event_type='PRESENCE_VALIDATED'.
+ *   Eric 2026-05-04: cash payments must NOT be spendable until validated.
+ * - spendable: confirmed + (provisional - cashProvisional). The amount the
+ *   consumer can actually use to canjear today. Invoice-provisional points
+ *   remain spendable so a merchant who hasn't uploaded their CSV yet doesn't
+ *   block all redemptions.
  * - total: confirmed + provisional (the displayed balance)
  *
  * Reversed entries are excluded from both.
@@ -186,7 +192,7 @@ export async function getAccountBalanceBreakdown(
   accountId: string,
   assetTypeId: string,
   tenantId: string
-): Promise<{ confirmed: string; provisional: string; total: string }> {
+): Promise<{ confirmed: string; provisional: string; cashProvisional: string; spendable: string; total: string }> {
   // The ledger is append-only at the DB trigger level — we cannot flip a
   // row's status from 'provisional' to 'confirmed' when the CSV later
   // matches a pending_validation invoice. The source of truth for "did
@@ -199,7 +205,7 @@ export async function getAccountBalanceBreakdown(
   // REVERSALs also land as status='confirmed' and the raw formula used to
   // leave their target amount in the provisional bucket. Treatment:
   // REVERSAL debits come out of provisional; REVERSAL credits add back in.
-  const result = await prisma.$queryRaw<[{ confirmed: string; provisional: string }]>`
+  const result = await prisma.$queryRaw<[{ confirmed: string; provisional: string; cash_provisional: string }]>`
     WITH le AS (
       SELECT
         l.amount,
@@ -242,14 +248,24 @@ export async function getAccountBalanceBreakdown(
           WHEN effective_status = 'confirmed' AND event_type = 'REVERSAL' AND entry_type = 'CREDIT'
             THEN amount ELSE 0 END),
         0
-      )::text AS provisional
+      )::text AS provisional,
+      COALESCE(
+        SUM(CASE WHEN effective_status = 'provisional' AND event_type = 'PRESENCE_VALIDATED' AND entry_type = 'CREDIT' THEN amount ELSE 0 END) -
+        SUM(CASE WHEN effective_status = 'provisional' AND event_type = 'PRESENCE_VALIDATED' AND entry_type = 'DEBIT' THEN amount ELSE 0 END),
+        0
+      )::text AS cash_provisional
     FROM le
   `;
 
   const confirmed = result[0].confirmed;
   const provisional = result[0].provisional;
+  const cashProvisional = result[0].cash_provisional;
+  // spendable: confirmed + (provisional - cashProvisional). Cash provisional
+  // points are pending validation against the merchant's records and cannot
+  // be canjeado until that reconciliation completes.
+  const spendable = (Number(confirmed) + Number(provisional) - Number(cashProvisional)).toFixed(8);
   const total = (Number(confirmed) + Number(provisional)).toFixed(8);
-  return { confirmed, provisional, total };
+  return { confirmed, provisional, cashProvisional, spendable, total };
 }
 
 /**

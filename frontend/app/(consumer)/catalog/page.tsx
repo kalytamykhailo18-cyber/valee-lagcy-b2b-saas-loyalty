@@ -36,6 +36,8 @@ interface Product {
 export default function Catalog() {
   const [products, setProducts] = useState<Product[]>([])
   const [balance, setBalance] = useState('0')
+  const [spendable, setSpendable] = useState('0')
+  const [cashProvisional, setCashProvisional] = useState('0')
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -130,6 +132,8 @@ export default function Catalog() {
       })
       setProducts(unique)
       setBalance(data.balance)
+      setSpendable((data as any).spendable ?? data.balance)
+      setCashProvisional((data as any).cashProvisional ?? '0')
       const totalKnown = data.total ?? unique.length
       setTotal(totalKnown)
       setHasMore(unique.length < totalKnown)
@@ -140,9 +144,12 @@ export default function Catalog() {
     }
   }
 
-  /** Effective balance = server balance - locally pending debits */
+  /** Effective spendable = server spendable - locally pending debits.
+   *  Spendable excludes cash-provisional credits (PRESENCE_VALIDATED still
+   *  awaiting reconciliation), per Eric 2026-05-04. Falls back to total when
+   *  the API hasn't returned the spendable field yet. */
   function getEffectiveBalance(): number {
-    const serverBal = parseFloat(balance) || 0
+    const serverBal = parseFloat(spendable || balance) || 0
     const pendingDebits = getLocalPendingBalance()
     return serverBal - pendingDebits
   }
@@ -296,6 +303,11 @@ export default function Catalog() {
           </span>
         )}
       </p>
+      {parseFloat(cashProvisional) > 0 && (
+        <p className="text-xs text-slate-500 -mt-2 mb-4 leading-relaxed">
+          {formatPoints(cashProvisional)} pts de pagos en efectivo estan en verificacion y no se pueden canjear hasta que el comercio los confirme.
+        </p>
+      )}
 
       {message && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-sm text-amber-800">
