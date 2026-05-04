@@ -213,10 +213,9 @@ export default function SettingsPage() {
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      setMessage('Error: el logo debe ser menor a 2MB')
-      return
-    }
+    // Eric 2026-05-04: no client-side size guard, backend handles the
+    // ceiling. The merchant should be able to upload a phone photo
+    // straight off the camera roll without resizing.
     setUploadingLogo(true)
     setMessage('')
     try {
@@ -351,7 +350,7 @@ export default function SettingsPage() {
                       )}
                     </div>
                   </div>
-                  <p className="text-xs text-slate-400 mt-2">Formato recomendado: cuadrado, 400x400px, maximo 2MB. Se mostrara en el menu del dashboard.</p>
+                  <p className="text-xs text-slate-400 mt-2">Formato recomendado: cuadrado, 400x400px. Se mostrara en el menu del dashboard.</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 p-4 space-y-3">
                   <div className="flex items-center justify-between gap-3">

@@ -141,10 +141,10 @@ export default function OnboardingWizard() {
   async function handleProductPhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    if (file.size > 2 * 1024 * 1024) {
-      setError('La foto debe ser menor a 2MB')
-      return
-    }
+    // Eric 2026-05-04: no client-side size guard — modern phone photos
+    // are routinely 3–10MB and the merchant should not have to resize
+    // before uploading. Backend multipart limit handles the safety
+    // ceiling; if the upload fails for size we surface the server error.
     setUploadingPhoto(true)
     setError('')
     try {
@@ -515,7 +515,7 @@ export default function OnboardingWizard() {
                       Quitar foto
                     </button>
                   )}
-                  <p className="text-xs text-slate-400">Recomendado: cuadrada, max 2MB. La foto tambien se va a usar en nuestro marketplace, donde miles de personas veran los mejores incentivos que ofreces a tus clientes premium.</p>
+                  <p className="text-xs text-slate-400">Recomendado: cuadrada. La foto tambien se va a usar en nuestro marketplace, donde miles de personas veran los mejores incentivos que ofreces a tus clientes premium.</p>
                 </div>
               </div>
             </div>

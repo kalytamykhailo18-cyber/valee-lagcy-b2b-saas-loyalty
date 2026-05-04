@@ -91,7 +91,11 @@ async function start() {
 
   await app.register(cors, { origin: true, credentials: true });
   await app.register(cookie);
-  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10 MB max
+  // Eric 2026-05-04 (Notion image upload friction): a 10 MB ceiling was
+  // rejecting straight-off-the-camera phone photos. Bump to 50 MB so the
+  // merchant doesn't have to think about file size; this still leaves a
+  // sane upper bound to protect the API from accidental huge uploads.
+  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } }); // 50 MB max
 
   // Global rate limit as a safety net. The actual tight limits live on the
   // sensitive endpoints (auth, signup) via { config: { rateLimit: ... } }.
