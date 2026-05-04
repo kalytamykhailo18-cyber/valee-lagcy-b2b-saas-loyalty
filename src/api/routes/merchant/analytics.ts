@@ -314,6 +314,36 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       : [];
     const claimedInvoiceNumbers = new Set(claimedInvoices.map(i => i.invoiceNumber));
 
+    // Eric 2026-05-04: pull line items for every INVOICE_CLAIMED row in the
+    // current page so clicking an entry can reveal the OCR'd consumption.
+    // We already have invoice numbers via meta.invoiceNumber or the
+    // ref-prefix strip; collect them all in one pass.
+    const invoiceNumbersInPage = new Set<string>();
+    for (const e of entries) {
+      if (e.event_type !== 'INVOICE_CLAIMED') continue;
+      const meta: any = e.metadata || {};
+      const ref = String(e.reference_id || '');
+      const num = meta.invoiceNumber || ref.replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '');
+      if (num) invoiceNumbersInPage.add(num);
+    }
+    const invoiceItemsByNumber = new Map<string, Array<{ name: string; quantity: number; unitPrice: number }>>();
+    if (invoiceNumbersInPage.size > 0) {
+      const invs = await prisma.invoice.findMany({
+        where: { tenantId, invoiceNumber: { in: Array.from(invoiceNumbersInPage) } },
+        select: { invoiceNumber: true, orderDetails: true },
+      });
+      for (const i of invs) {
+        const od: any = i.orderDetails || null;
+        if (od && Array.isArray(od.items)) {
+          invoiceItemsByNumber.set(i.invoiceNumber, od.items.map((it: any) => ({
+            name: String(it?.name || ''),
+            quantity: Number(it?.quantity ?? 1),
+            unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
+          })));
+        }
+      }
+    }
+
     return {
       entries: entries
         .filter(e => {
@@ -368,6 +398,19 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
               effectiveBranchName = cb.name;
             }
           }
+          const invoiceNumber = meta.invoiceNumber
+            || (e.event_type === 'INVOICE_CLAIMED'
+                ? String(e.reference_id || '').replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '')
+                : null);
+          // Eric 2026-05-04: cash payments stamp source='dual_scan' +
+          // originalAmount (already in the tenant's reference currency).
+          // Surface it on the row so the merchant transactions table can
+          // show "$10" next to "Pago en efectivo" without a join.
+          const cashAmountInReference = (e.event_type === 'PRESENCE_VALIDATED'
+            && meta.source === 'dual_scan'
+            && meta.originalAmount != null)
+            ? String(meta.originalAmount)
+            : null;
           return {
             id: e.id,
             eventType: effectiveEventType,
@@ -386,10 +429,9 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
             // stamping (referenceId on those is the invoice number itself).
             productName: meta.productName || null,
             productPhotoUrl: meta.productPhotoUrl || null,
-            invoiceNumber: meta.invoiceNumber
-              || (e.event_type === 'INVOICE_CLAIMED'
-                  ? String(e.reference_id || '').replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '')
-                  : null),
+            invoiceNumber,
+            items: invoiceNumber ? (invoiceItemsByNumber.get(invoiceNumber) || null) : null,
+            cashAmountInReference,
             createdAt: e.created_at,
           };
         }),

@@ -46,6 +46,12 @@ interface ProductPerf {
   totalValueRedeemed: string
 }
 
+interface InvoiceItem {
+  name: string
+  quantity: number
+  unitPrice: number
+}
+
 interface TransactionEntry {
   id: string
   eventType: string
@@ -60,6 +66,8 @@ interface TransactionEntry {
   productName: string | null
   productPhotoUrl: string | null
   invoiceNumber: string | null
+  items: InvoiceItem[] | null
+  cashAmountInReference: string | null
   createdAt: string
 }
 
@@ -91,6 +99,7 @@ export default function MerchantDashboard() {
   const [txOffset, setTxOffset] = useState(0)
   const [txFilters, setTxFilters] = useState({ startDate: '', endDate: '', eventType: '', status: '', branchId: '' })
   const [txLoading, setTxLoading] = useState(false)
+  const [expandedTxId, setExpandedTxId] = useState<string | null>(null)
 
   // Active tab
   const [activeTab, setActiveTab] = useState<'overview' | 'products' | 'transactions'>('overview')
@@ -604,9 +613,16 @@ export default function MerchantDashboard() {
             <>
               <p className="text-xs text-slate-500 mb-2">{txTotal} transacciones encontradas</p>
               <div className="space-y-2">
-                {transactions.map(tx => (
+                {transactions.map(tx => {
+                  const hasItems = Array.isArray(tx.items) && tx.items.length > 0
+                  const isOpen = expandedTxId === tx.id
+                  return (
                   <div key={tx.id} className="aa-card bg-white rounded-xl p-3 shadow-sm">
-                    <div className="flex items-start justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={() => hasItems && setExpandedTxId(isOpen ? null : tx.id)}
+                      className={`w-full text-left flex items-start justify-between gap-3 ${hasItems ? 'cursor-pointer' : 'cursor-default'}`}
+                    >
                       <div className="flex items-start gap-3 min-w-0 flex-1">
                         {tx.productPhotoUrl && (
                           <img src={tx.productPhotoUrl} alt={tx.productName || ''} className="w-11 h-11 rounded-lg object-cover border border-slate-100 flex-shrink-0" />
@@ -618,6 +634,9 @@ export default function MerchantDashboard() {
                           )}
                           {tx.invoiceNumber && (
                             <p className="text-xs text-slate-500 font-mono truncate">Factura #{tx.invoiceNumber}</p>
+                          )}
+                          {tx.cashAmountInReference && (
+                            <p className="text-xs text-slate-500 truncate">Pago: ${tx.cashAmountInReference}</p>
                           )}
                           <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2 items-center">
                             <span>{new Date(tx.createdAt).toLocaleString('es-VE')}</span>
@@ -639,6 +658,9 @@ export default function MerchantDashboard() {
                                 Sin sucursal
                               </span>
                             )}
+                            {hasItems && (
+                              <span className="text-[10px] text-indigo-500">{isOpen ? 'Ocultar items' : `${tx.items!.length} item${tx.items!.length === 1 ? '' : 's'}`}</span>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -654,9 +676,22 @@ export default function MerchantDashboard() {
                           {tx.status}
                         </span>
                       </div>
-                    </div>
+                    </button>
+                    {isOpen && hasItems && (
+                      <div className="mt-2 ml-1 border-l-2 border-indigo-100 pl-3 space-y-1">
+                        {tx.items!.map((it, idx) => (
+                          <div key={idx} className="flex justify-between text-xs text-slate-600">
+                            <span className="truncate flex-1">{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
+                            {it.unitPrice > 0 && (
+                              <span className="text-slate-400 ml-2">Bs {(it.unitPrice * it.quantity).toLocaleString('es-VE')}</span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
+                  )
+                })}
               </div>
               {/* Pagination */}
               <div className="flex justify-between items-center mt-4">
