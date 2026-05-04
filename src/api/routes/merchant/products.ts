@@ -331,4 +331,103 @@ export async function registerProductsRoutes(app: FastifyInstance): Promise<void
 
     return { product: updated };
   });
+
+  // Eric 2026-05-04 (Notion "Panel de clientes Nota 3"): per-product canje
+  // history. Returns:
+  //   summary: { totalRedemptions, uniqueConsumers, last30dRedemptions }
+  //   topConsumers: who canjeado the product, their phone, displayName,
+  //                 how many times each, and the most recent canje date.
+  // Built on REDEMPTION_CONFIRMED ledger entries that reference this
+  // product via metadata.productId (the canonical signal that a canje
+  // actually completed; PENDING/EXPIRED pairs are filtered out).
+  app.get('/api/merchant/products/:id/redemption-history', { preHandler: [requireStaffAuth] }, async (request, reply) => {
+    const { tenantId } = request.staff!;
+    const { id } = request.params as { id: string };
+
+    const product = await prisma.product.findFirst({ where: { id, tenantId } });
+    if (!product) return reply.status(404).send({ error: 'Product not found' });
+
+    // Aggregate by consumer phone. We use REDEMPTION_CONFIRMED rows
+    // (the credit leg lives on the pool; the debit on the consumer
+    // for the PENDING leg). Track canjes by walking the PENDING row's
+    // account when its token resolved CONFIRMED — the ledger metadata
+    // on the CONFIRMED leg has productId, so we can join by tokenId.
+    const rows = await prisma.$queryRaw<Array<{
+      account_id: string;
+      phone_number: string;
+      display_name: string | null;
+      account_type: string;
+      cnt: bigint;
+      last_at: Date;
+    }>>`
+      WITH confirmed_tokens AS (
+        SELECT REPLACE(le.reference_id, 'CONFIRMED-', '') AS token_id, le.created_at
+        FROM ledger_entries le
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.event_type = 'REDEMPTION_CONFIRMED'
+          AND le.entry_type = 'CREDIT'
+          AND (le.metadata->>'productId') = ${id}
+      ),
+      pending_for_product AS (
+        SELECT le.account_id, le.created_at
+        FROM ledger_entries le
+        JOIN confirmed_tokens ct
+          ON le.reference_id = 'REDEEM-' || ct.token_id
+        WHERE le.tenant_id = ${tenantId}::uuid
+          AND le.event_type = 'REDEMPTION_PENDING'
+          AND le.entry_type = 'DEBIT'
+      )
+      SELECT
+        a.id AS account_id,
+        a.phone_number,
+        a.display_name,
+        a.account_type::text AS account_type,
+        COUNT(*)::bigint AS cnt,
+        MAX(p.created_at) AS last_at
+      FROM pending_for_product p
+      JOIN accounts a ON a.id = p.account_id
+      WHERE a.account_type IN ('shadow', 'verified')
+      GROUP BY a.id, a.phone_number, a.display_name, a.account_type
+      ORDER BY MAX(p.created_at) DESC
+      LIMIT 100
+    `;
+
+    // Summary: total canjes (sum of counts) + unique consumers
+    const totalRedemptions = rows.reduce((s, r) => s + Number(r.cnt), 0);
+    const uniqueConsumers = rows.length;
+
+    const since30d = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [{ count: last30dCount }] = await prisma.$queryRaw<[{ count: bigint }]>`
+      SELECT COUNT(*)::bigint AS count
+      FROM ledger_entries le
+      WHERE le.tenant_id = ${tenantId}::uuid
+        AND le.event_type = 'REDEMPTION_CONFIRMED'
+        AND le.entry_type = 'CREDIT'
+        AND (le.metadata->>'productId') = ${id}
+        AND le.created_at >= ${since30d}
+    `;
+
+    return {
+      product: {
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        photoUrl: product.photoUrl,
+        redemptionCost: product.redemptionCost.toString(),
+      },
+      summary: {
+        totalRedemptions,
+        uniqueConsumers,
+        last30dRedemptions: Number(last30dCount),
+      },
+      consumers: rows.map(r => ({
+        accountId: r.account_id,
+        phoneNumber: r.phone_number,
+        displayName: r.display_name,
+        accountType: r.account_type,
+        count: Number(r.cnt),
+        lastAt: r.last_at,
+      })),
+    };
+  });
 }

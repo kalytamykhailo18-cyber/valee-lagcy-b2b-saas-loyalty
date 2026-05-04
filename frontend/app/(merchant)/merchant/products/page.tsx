@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { MdCardGiftcard, MdArchive, MdUnarchive } from 'react-icons/md'
+import { MdCardGiftcard, MdArchive, MdUnarchive, MdHistory, MdClose, MdPerson } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 import { formatPoints, formatCash } from '@/lib/format'
@@ -36,6 +36,9 @@ export default function ProductManagement() {
   const [createMessage, setCreateMessage] = useState('')
   const [toggleError, setToggleError] = useState<{ id: string; msg: string } | null>(null)
   const [showArchived, setShowArchived] = useState(false)
+  // Per-product redemption history modal (Eric 2026-05-04 Notion Nota 3).
+  const [historyFor, setHistoryFor] = useState<any | null>(null)
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   async function handleImageUpload(file: File, target: 'create' | 'edit') {
     const setUploadState = target === 'create' ? setUploading : setEditUploading
@@ -143,6 +146,20 @@ export default function ProductManagement() {
   async function handleUnarchive(p: any) {
     try { await api.unarchiveProduct(p.id); await loadProducts() }
     catch (e: any) { alert(e?.error || 'No se pudo restaurar.') }
+  }
+
+  async function loadHistory(p: any) {
+    setHistoryFor({ ...p, loading: true })
+    setHistoryLoading(true)
+    try {
+      const data: any = await api.getProductRedemptionHistory(p.id)
+      setHistoryFor(data)
+    } catch (e: any) {
+      setHistoryFor(null)
+      alert(e?.error || 'No se pudo cargar el historial.')
+    } finally {
+      setHistoryLoading(false)
+    }
   }
 
   function startEdit(p: any) {
@@ -585,6 +602,13 @@ export default function ProductManagement() {
                           Archivar
                         </button>
                       </div>
+                      <button
+                        onClick={() => loadHistory(p)}
+                        className="w-full mt-2 py-2 text-xs text-emerald-700 hover:bg-emerald-50 rounded-lg font-medium inline-flex items-center justify-center gap-1"
+                      >
+                        <MdHistory className="w-4 h-4" />
+                        Historial de canjes
+                      </button>
                     </div>
                   </>
                 )}
@@ -634,6 +658,92 @@ export default function ProductManagement() {
           </div>
         )}
       </div>
+
+      {/* Per-product redemption history modal — Eric 2026-05-04 Notion Nota 3 */}
+      {historyFor && (
+        <div
+          className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setHistoryFor(null)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-5 border-b border-slate-100">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Historial de canjes</p>
+                <p className="text-lg font-bold text-slate-800 truncate">{historyFor.product?.name || historyFor.name}</p>
+                {(historyFor.product?.description || historyFor.description) && (
+                  <p className="text-xs text-slate-500 truncate">{historyFor.product?.description || historyFor.description}</p>
+                )}
+              </div>
+              <button
+                onClick={() => setHistoryFor(null)}
+                className="ml-3 w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center flex-shrink-0"
+                aria-label="Cerrar"
+              >
+                <MdClose className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+            {historyLoading ? (
+              <div className="p-8 text-center text-slate-400 text-sm">Cargando...</div>
+            ) : (
+              <>
+                {historyFor.summary && (
+                  <div className="grid grid-cols-3 gap-3 p-5 border-b border-slate-100">
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">Canjes totales</p>
+                      <p className="text-2xl font-bold text-emerald-700 mt-0.5">{historyFor.summary.totalRedemptions}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">Clientes unicos</p>
+                      <p className="text-2xl font-bold text-emerald-700 mt-0.5">{historyFor.summary.uniqueConsumers}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wide">Ultimos 30 dias</p>
+                      <p className="text-2xl font-bold text-emerald-700 mt-0.5">{historyFor.summary.last30dRedemptions}</p>
+                    </div>
+                  </div>
+                )}
+                <div className="overflow-y-auto p-5 flex-1">
+                  {Array.isArray(historyFor.consumers) && historyFor.consumers.length > 0 ? (
+                    <div className="space-y-2">
+                      {historyFor.consumers.map((c: any) => (
+                        <div key={c.accountId} className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50/50">
+                          <div className="flex items-center gap-3 min-w-0 flex-1">
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${c.accountType === 'verified' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                              <MdPerson className="w-4 h-4" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              {c.displayName ? (
+                                <>
+                                  <p className="text-sm font-semibold text-slate-800 truncate">{c.displayName}</p>
+                                  <p className="text-xs text-slate-500 truncate">{c.phoneNumber}</p>
+                                </>
+                              ) : (
+                                <p className="text-sm font-semibold text-slate-800 truncate">{c.phoneNumber}</p>
+                              )}
+                              <p className="text-[10px] text-slate-400 mt-0.5">
+                                Ultimo canje: {new Date(c.lastAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right flex-shrink-0 ml-2">
+                            <p className="text-base font-bold text-emerald-700">{c.count}</p>
+                            <p className="text-[10px] text-slate-400">{c.count === 1 ? 'canje' : 'canjes'}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-center text-slate-400 text-sm py-8">Aun no hay canjes confirmados de este producto.</p>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

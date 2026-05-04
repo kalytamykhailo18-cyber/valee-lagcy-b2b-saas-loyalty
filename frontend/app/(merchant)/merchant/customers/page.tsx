@@ -8,6 +8,7 @@ import { formatPoints, formatCash } from '@/lib/format'
 interface Customer {
   id: string
   phoneNumber: string
+  displayName: string | null
   accountType: string
   cedula: string | null
   level: number
@@ -184,8 +185,15 @@ export default function CustomersPage() {
                         }`}>
                           {c.accountType === 'verified' ? <MdVerified className="w-5 h-5" /> : <MdPerson className="w-5 h-5" />}
                         </div>
-                        <div>
-                          <p className="font-semibold text-slate-800 text-sm">{c.phoneNumber}</p>
+                        <div className="min-w-0">
+                          {c.displayName ? (
+                            <>
+                              <p className="font-semibold text-slate-800 text-sm truncate">{c.displayName}</p>
+                              <p className="text-xs text-slate-500 truncate">{c.phoneNumber}</p>
+                            </>
+                          ) : (
+                            <p className="font-semibold text-slate-800 text-sm truncate">{c.phoneNumber}</p>
+                          )}
                           <p className="text-xs text-slate-400">
                             {c.invoiceCount} factura{c.invoiceCount !== 1 ? 's' : ''}
                             {c.cedula && ` · ${c.cedula}`}

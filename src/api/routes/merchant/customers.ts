@@ -66,6 +66,10 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       return {
         id: acc.id,
         phoneNumber: acc.phoneNumber,
+        // Eric 2026-05-04 (Notion "Panel de clientes Nota 1"): the
+        // WhatsApp profile name is captured at first contact. Surface
+        // it on the list row so the comercio doesn't only see phones.
+        displayName: acc.displayName,
         accountType: acc.accountType,
         cedula: acc.cedula,
         level: acc.level,
@@ -175,14 +179,27 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
     // canje was scanned"). PENDING's own branch_id reflects QR generation
     // context, often null. Eric 2026-04-26: customer panel MOVIMIENTOS
     // wasn't naming the sucursal at all.
+    //
+    // Also track which tokens have an EXPIRED row in the ledger. The
+    // transactions panel collapses expired-only pairs so the merchant
+    // doesn't see "REDEMPTION_PENDING -3000 / REDEMPTION_EXPIRED +3000"
+    // for a canje the consumer cancelled. Eric 2026-05-04 (Notion
+    // "Panel de clientes Nota 2"): the customer-detail panel must
+    // behave the same way.
     const pendingTokenIdsInHistory: string[] = [];
     for (const e of history) {
-      if (e.eventType !== 'REDEMPTION_PENDING') continue;
-      const m = String(e.referenceId || '').match(/^REDEEM-([0-9a-f-]{36})$/i);
-      if (m) pendingTokenIdsInHistory.push(m[1]);
+      if (e.eventType !== 'REDEMPTION_PENDING' && e.eventType !== 'REDEMPTION_EXPIRED') continue;
+      const m = String(e.referenceId || '').match(/^(REDEEM|EXPIRED)-([0-9a-f-]{36})$/i);
+      if (m) pendingTokenIdsInHistory.push(m[2]);
     }
     const branchByTokenId = new Map<string, { id: string | null; name: string | null }>();
     const confirmedTokenIds = new Set<string>();
+    const expiredTokenIds = new Set<string>();
+    for (const e of history) {
+      if (e.eventType !== 'REDEMPTION_EXPIRED') continue;
+      const m = String(e.referenceId || '').match(/^EXPIRED-([0-9a-f-]{36})$/i);
+      if (m) expiredTokenIds.add(m[1]);
+    }
     if (pendingTokenIdsInHistory.length > 0) {
       const confirmedRows = await prisma.$queryRaw<Array<{ token_id: string; branch_id: string | null; branch_name: string | null }>>`
         SELECT
@@ -292,7 +309,23 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       }
     };
 
-    const enrichedHistory = await Promise.all(history.map(async (e) => {
+    // Filter expired-only redemption pairs (PENDING + EXPIRED with no
+    // matching CONFIRMED). Eric 2026-05-04 (Notion "Panel de clientes
+    // Nota 2"): a cancelled QR is net-zero noise — both legs hidden,
+    // matching the merchant transactions panel collapse rule.
+    const filteredHistory = history.filter(e => {
+      const refStr = String(e.referenceId || '');
+      const m = refStr.match(/^(REDEEM|EXPIRED|CONFIRMED)-([0-9a-f-]{36})$/i);
+      if (!m) return true;
+      const tid = m[2];
+      // Expired-only: hide both legs.
+      if (expiredTokenIds.has(tid) && !confirmedTokenIds.has(tid)) return false;
+      // Confirmed: drop the system-side CONFIRMED row, keep PENDING (relabeled).
+      if (e.eventType === 'REDEMPTION_CONFIRMED' && confirmedTokenIds.has(tid)) return false;
+      return true;
+    });
+
+    const enrichedHistory = await Promise.all(filteredHistory.map(async (e) => {
       const meta: any = (e as any).metadata || {};
       const refStr = String(e.referenceId || '');
 

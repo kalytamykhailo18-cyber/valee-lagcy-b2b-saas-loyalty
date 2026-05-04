@@ -254,6 +254,8 @@ export const api = {
     request(`/api/merchant/products/${id}/archive`, { method: 'PATCH' }),
   unarchiveProduct: (id: string) =>
     request(`/api/merchant/products/${id}/unarchive`, { method: 'PATCH' }),
+  getProductRedemptionHistory: (id: string) =>
+    request(`/api/merchant/products/${id}/redemption-history`),
   scanRedemption: (token: string, branchId?: string) =>
     request('/api/merchant/scan-redemption', {
       method: 'POST',
