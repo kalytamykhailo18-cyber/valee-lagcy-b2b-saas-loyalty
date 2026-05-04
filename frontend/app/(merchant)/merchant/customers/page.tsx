@@ -39,6 +39,10 @@ export default function CustomersPage() {
   const [editMsg, setEditMsg] = useState('')
   const [editConflict, setEditConflict] = useState<string | null>(null)
 
+  // Expanded rows in FACTURAS / MOVIMIENTOS — show OCR'd line items.
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null)
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
+
   useEffect(() => { loadCustomers() }, [offset, search])
 
   async function loadCustomers() {
@@ -335,32 +339,55 @@ export default function CustomersPage() {
                   {!selected.invoices?.length ? (
                     <p className="text-sm text-slate-400">Sin facturas</p>
                   ) : (
-                    <div className="space-y-2 max-h-56 overflow-y-auto">
-                      {selected.invoices.map((inv: any) => (
-                        <div key={inv.id} className="flex justify-between items-start gap-2 py-2 border-b border-slate-50 last:border-0">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm text-slate-700 font-mono truncate">{inv.invoiceNumber}</p>
-                            <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
-                              {inv.uploadedAt && <span>Subida: {new Date(inv.uploadedAt).toLocaleDateString('es-VE')}</span>}
-                              {inv.branch?.name && <span>· {inv.branch.name}</span>}
-                            </div>
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
+                      {selected.invoices.map((inv: any) => {
+                        const hasItems = Array.isArray(inv.items) && inv.items.length > 0
+                        const isOpen = expandedInvoiceId === inv.id
+                        return (
+                          <div key={inv.id} className="border-b border-slate-50 last:border-0">
+                            <button
+                              type="button"
+                              onClick={() => hasItems && setExpandedInvoiceId(isOpen ? null : inv.id)}
+                              className={`w-full flex justify-between items-start gap-2 py-2 text-left ${hasItems ? 'cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded' : ''}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm text-slate-700 font-mono truncate">{inv.invoiceNumber}</p>
+                                <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                                  {inv.uploadedAt && <span>Subida: {new Date(inv.uploadedAt).toLocaleDateString('es-VE')}</span>}
+                                  {inv.branch?.name && <span>· {inv.branch.name}</span>}
+                                  {hasItems && <span className="text-indigo-500">· {isOpen ? 'Ocultar items' : `${inv.items.length} item${inv.items.length === 1 ? '' : 's'}`}</span>}
+                                </div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <p className="text-sm font-semibold">
+                                  {inv.amountInReference
+                                    ? `${inv.currencySymbol || '$'}${formatCash(inv.amountInReference)}`
+                                    : `Bs ${formatCash(inv.amount)}`}
+                                </p>
+                                <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{
+                                  inv.status === 'available' ? 'No reclamada'
+                                  : inv.status === 'claimed' ? 'Canjeada'
+                                  : inv.status === 'pending_validation' ? 'En validacion'
+                                  : inv.status === 'rejected' ? 'Rechazada'
+                                  : inv.status
+                                }</span>
+                              </div>
+                            </button>
+                            {isOpen && hasItems && (
+                              <div className="ml-1 mb-2 mt-1 border-l-2 border-indigo-100 pl-3 space-y-1">
+                                {inv.items.map((it: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between text-xs text-slate-600">
+                                    <span className="truncate flex-1">{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
+                                    {it.unitPrice > 0 && (
+                                      <span className="text-slate-400 ml-2">Bs {formatCash(String(it.unitPrice * it.quantity))}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
-                          <div className="text-right flex-shrink-0">
-                            <p className="text-sm font-semibold">
-                              {inv.amountInReference
-                                ? `${inv.currencySymbol || '$'}${formatCash(inv.amountInReference)}`
-                                : `Bs ${formatCash(inv.amount)}`}
-                            </p>
-                            <span className={`text-[11px] font-semibold ${inv.status === 'claimed' ? 'text-green-600' : inv.status === 'available' ? 'text-blue-500' : 'text-amber-500'}`}>{
-                              inv.status === 'available' ? 'No reclamada'
-                              : inv.status === 'claimed' ? 'Canjeada'
-                              : inv.status === 'pending_validation' ? 'En validacion'
-                              : inv.status === 'rejected' ? 'Rechazada'
-                              : inv.status
-                            }</span>
-                          </div>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -372,23 +399,47 @@ export default function CustomersPage() {
                     <p className="text-sm text-slate-400">Sin movimientos</p>
                   ) : (
                     <div className="space-y-2 max-h-72 overflow-y-auto">
-                      {selected.history.map((e: any) => (
-                        <div key={e.id} className="flex justify-between items-start gap-2 py-2 border-b border-slate-50 last:border-0">
-                          <div className="min-w-0 flex-1">
-                            <p className="text-sm font-semibold text-slate-700 truncate">{e.label || e.eventType}</p>
-                            {e.subtitle && (
-                              <p className="text-xs text-slate-500 truncate mt-0.5">{e.subtitle}</p>
+                      {selected.history.map((e: any) => {
+                        const hasItems = Array.isArray(e.items) && e.items.length > 0
+                        const isOpen = expandedHistoryId === e.id
+                        const expandable = hasItems
+                        return (
+                          <div key={e.id} className="border-b border-slate-50 last:border-0">
+                            <button
+                              type="button"
+                              onClick={() => expandable && setExpandedHistoryId(isOpen ? null : e.id)}
+                              className={`w-full flex justify-between items-start gap-2 py-2 text-left ${expandable ? 'cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded' : ''}`}
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="text-sm font-semibold text-slate-700 truncate">{e.label || e.eventType}</p>
+                                {e.subtitle && (
+                                  <p className="text-xs text-slate-500 truncate mt-0.5">{e.subtitle}</p>
+                                )}
+                                <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                                  <span>{new Date(e.createdAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                                  {e.branchName && <span className="text-indigo-600">· {e.branchName}</span>}
+                                  {hasItems && <span className="text-indigo-500">· {isOpen ? 'Ocultar items' : `${e.items.length} item${e.items.length === 1 ? '' : 's'}`}</span>}
+                                </div>
+                              </div>
+                              <span className={`text-sm font-semibold whitespace-nowrap ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
+                                {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
+                              </span>
+                            </button>
+                            {isOpen && hasItems && (
+                              <div className="ml-1 mb-2 mt-1 border-l-2 border-indigo-100 pl-3 space-y-1">
+                                {e.items.map((it: any, idx: number) => (
+                                  <div key={idx} className="flex justify-between text-xs text-slate-600">
+                                    <span className="truncate flex-1">{it.quantity > 1 ? `${it.quantity}× ` : ''}{it.name}</span>
+                                    {it.unitPrice > 0 && (
+                                      <span className="text-slate-400 ml-2">Bs {formatCash(String(it.unitPrice * it.quantity))}</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
                             )}
-                            <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
-                              <span>{new Date(e.createdAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}</span>
-                              {e.branchName && <span className="text-indigo-600">· {e.branchName}</span>}
-                            </div>
                           </div>
-                          <span className={`text-sm font-semibold whitespace-nowrap ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
-                            {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
-                          </span>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>

@@ -143,6 +143,18 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
           normalizedAmount = (Number(i.amount) / rate.rateBs).toFixed(2);
         }
       }
+      // Eric 2026-05-04: clicking an invoice row should reveal the
+      // OCR'd line items (name, quantity, unit_price). Persisted on
+      // invoice.orderDetails.items by invoice-validation.ts:1048.
+      const orderDetails: any = (i as any).orderDetails || null;
+      const items: Array<{ name: string; quantity: number; unitPrice: number }> | null =
+        orderDetails && Array.isArray(orderDetails.items)
+          ? orderDetails.items.map((it: any) => ({
+              name: String(it?.name || ''),
+              quantity: Number(it?.quantity ?? 1),
+              unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
+            }))
+          : null;
       return {
         id: i.id,
         invoiceNumber: i.invoiceNumber,
@@ -154,6 +166,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
         uploadedAt: i.createdAt,
         createdAt: i.createdAt,
         branch: i.branch ? { id: i.branch.id, name: i.branch.name } : null,
+        items,
       };
     }));
 
@@ -302,6 +315,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       let productName: string | null = meta.productName || null;
       let productPhotoUrl: string | null = meta.productPhotoUrl || null;
       let cashAmountInReference: string | null = null;
+      let items: Array<{ name: string; quantity: number; unitPrice: number }> | null = null;
 
       if (e.eventType === 'INVOICE_CLAIMED') {
         invoiceNumber = meta.invoiceNumber || invoiceNumberFromRef(refStr);
@@ -312,6 +326,13 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
           if (rate && rate.rateBs > 0) {
             invoiceAmountInReference = (Number(inv.amount) / rate.rateBs).toFixed(2);
           }
+        }
+        if (inv?.orderDetails && Array.isArray(inv.orderDetails.items)) {
+          items = inv.orderDetails.items.map((it: any) => ({
+            name: String(it?.name || ''),
+            quantity: Number(it?.quantity ?? 1),
+            unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
+          }));
         }
         if (invoiceNumber && invoiceAmountInReference) {
           subtitle = `Factura ${invoiceNumber} · ${currencySymbol}${invoiceAmountInReference}`;
@@ -353,6 +374,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
         cashAmountInReference,
         productName,
         productPhotoUrl,
+        items,
       };
     }));
 
