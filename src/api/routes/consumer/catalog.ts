@@ -77,12 +77,17 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
       // invalid id → fall through, same as no filter
     }
 
+    // Eric 2026-05-04 (Notion "Productos / Niveles"): higher-tier products
+    // must REMAIN visible to lower-tier consumers (in B&W with a
+    // "Solo valido para Socios Valee nivel N" tag) instead of being
+    // filtered out — this becomes a visible upgrade incentive rather than
+    // an empty catalog. Return the unfiltered set; the frontend renders
+    // lock state from levelLocked + minLevel.
     const where = {
       tenantId,
       active: true,
       archivedAt: null,
       stock: { gt: 0 } as any,
-      minLevel: { lte: consumerLevel },
       ...branchClause,
     };
 
@@ -140,7 +145,8 @@ export async function registerCatalogRoutes(app: FastifyInstance): Promise<void>
           hybridEnabled: p.cashPrice !== null && Number(p.cashPrice) > 0,
           stock: p.stock,
           minLevel: p.minLevel,
-          canAfford: confirmedBalance >= Number(p.redemptionCost),
+          levelLocked: p.minLevel > consumerLevel,
+          canAfford: confirmedBalance >= Number(p.redemptionCost) && p.minLevel <= consumerLevel,
           // Branch locator. Multi-sucursal scope (Eric 2026-04-26):
           // a product can be assigned to N sucursales — the consumer
           // sees them all in branchNames. Tenant-wide products list

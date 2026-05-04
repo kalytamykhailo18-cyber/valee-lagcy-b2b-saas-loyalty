@@ -64,6 +64,7 @@ interface TransactionEntry {
   accountPhone: string | null
   accountName: string | null
   productName: string | null
+  productDescription: string | null
   productPhotoUrl: string | null
   invoiceNumber: string | null
   items: InvoiceItem[] | null
@@ -631,6 +632,9 @@ export default function MerchantDashboard() {
                           <p className="text-sm font-medium text-slate-800 truncate">{EVENT_LABELS[tx.eventType] || tx.eventType}</p>
                           {tx.productName && (
                             <p className="text-xs text-indigo-600 font-medium truncate">{tx.productName}</p>
+                          )}
+                          {tx.productDescription && (
+                            <p className="text-[11px] text-slate-500 truncate">{tx.productDescription}</p>
                           )}
                           {tx.invoiceNumber && (
                             <p className="text-xs text-slate-500 font-mono truncate">Factura #{tx.invoiceNumber}</p>

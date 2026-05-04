@@ -128,7 +128,15 @@ export async function initiateRedemption(params: {
   // RedemptionToken row for lookups, but those get purged once expired/used,
   // leaving the ledger pointer dangling. Stamping product name+photo here lets
   // the consumer history keep showing "Cafe Gratis" forever.
-  const productMeta = { productId: product.id, productName: product.name, productPhotoUrl: product.photoUrl || null };
+  // Eric 2026-05-04 (Notion "Productos / Niveles"): stamp description too —
+  // merchants with multiple Pizza/Refresco variants need it to differentiate
+  // identical names in the transactions panel.
+  const productMeta = {
+    productId: product.id,
+    productName: product.name,
+    productDescription: product.description || null,
+    productPhotoUrl: product.photoUrl || null,
+  };
 
   // Write PENDING_REDEMPTION double-entry for the POINTS portion (skip if 0 points — full cash).
   // branchId is stamped on the ledger row so the cashier-side processRedemption can
@@ -536,6 +544,7 @@ export async function processRedemption(params: {
       cashierId: params.cashierStaffId,
       productId: payload.productId,
       productName: product?.name || null,
+      productDescription: product?.description || null,
       productPhotoUrl: product?.photoUrl || null,
     },
   });
@@ -626,6 +635,7 @@ export async function expireRedemption(tokenId: string): Promise<void> {
     metadata: {
       productId: tokenRecord.productId,
       productName: product?.name || null,
+      productDescription: product?.description || null,
       productPhotoUrl: product?.photoUrl || null,
     },
   });

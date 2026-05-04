@@ -314,6 +314,23 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       : [];
     const claimedInvoiceNumbers = new Set(claimedInvoices.map(i => i.invoiceNumber));
 
+    // Eric 2026-05-04 (Notion "Productos / Niveles"): backfill product
+    // description for redemption rows whose metadata predates the
+    // description stamp. One batched lookup keyed off metadata.productId.
+    const productIdsInPage = new Set<string>();
+    for (const e of entries) {
+      const meta: any = e.metadata || {};
+      if (meta.productId && !meta.productDescription) productIdsInPage.add(meta.productId);
+    }
+    const productDescById = new Map<string, string | null>();
+    if (productIdsInPage.size > 0) {
+      const prods = await prisma.product.findMany({
+        where: { tenantId, id: { in: Array.from(productIdsInPage) } },
+        select: { id: true, description: true },
+      });
+      for (const p of prods) productDescById.set(p.id, p.description);
+    }
+
     // Eric 2026-05-04: pull line items for every INVOICE_CLAIMED row in the
     // current page so clicking an entry can reveal the OCR'd consumption.
     // We already have invoice numbers via meta.invoiceNumber or the
@@ -428,6 +445,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
             // to referenceId for INVOICE_CLAIMED rows that predate the metadata
             // stamping (referenceId on those is the invoice number itself).
             productName: meta.productName || null,
+            productDescription: meta.productDescription
+              || (meta.productId ? (productDescById.get(meta.productId) || null) : null),
             productPhotoUrl: meta.productPhotoUrl || null,
             invoiceNumber,
             items: invoiceNumber ? (invoiceItemsByNumber.get(invoiceNumber) || null) : null,

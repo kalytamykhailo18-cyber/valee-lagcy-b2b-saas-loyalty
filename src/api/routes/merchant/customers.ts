@@ -256,6 +256,23 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       }
     }
 
+    // Eric 2026-05-04 (Notion "Productos / Niveles"): backfill product
+    // description for legacy redemption rows whose metadata predates the
+    // description stamp. One batched lookup keyed off metadata.productId.
+    const historyProductIds = new Set<string>();
+    for (const e of history) {
+      const meta: any = (e as any).metadata || {};
+      if (meta.productId && !meta.productDescription) historyProductIds.add(meta.productId);
+    }
+    const productDescById = new Map<string, string | null>();
+    if (historyProductIds.size > 0) {
+      const prods = await prisma.product.findMany({
+        where: { tenantId, id: { in: Array.from(historyProductIds) } },
+        select: { id: true, description: true },
+      });
+      for (const p of prods) productDescById.set(p.id, p.description);
+    }
+
     // Spanish labels — match the canonical map in merchant/page.tsx and
     // consumer/page.tsx so the customer detail panel speaks the same
     // language as the rest of the merchant UI.
@@ -313,6 +330,8 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       let invoiceNumber: string | null = null;
       let invoiceAmountInReference: string | null = null;
       let productName: string | null = meta.productName || null;
+      let productDescription: string | null = meta.productDescription
+        || (meta.productId ? (productDescById.get(meta.productId) || null) : null);
       let productPhotoUrl: string | null = meta.productPhotoUrl || null;
       let cashAmountInReference: string | null = null;
       let items: Array<{ name: string; quantity: number; unitPrice: number }> | null = null;
@@ -351,7 +370,14 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
           subtitle = 'Pago en efectivo';
         }
       } else if (effectiveEventType === 'REDEMPTION_PENDING' || effectiveEventType === 'REDEMPTION_CONFIRMED' || effectiveEventType === 'REDEMPTION_EXPIRED') {
-        if (productName) subtitle = productName;
+        // Eric 2026-05-04: include product description so merchants with
+        // multiple Pizza/Refresco variants can tell rows apart at a glance
+        // ("Pizza familiar — Tamano grande" vs "Pizza familiar — Pequena").
+        if (productName) {
+          subtitle = productDescription
+            ? `${productName} — ${productDescription}`
+            : productName;
+        }
       } else if (effectiveEventType === 'WELCOME_BONUS') {
         subtitle = 'Bienvenida al programa';
       } else if (effectiveEventType === 'REFERRAL_BONUS') {
@@ -373,10 +399,12 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
         invoiceAmountInReference,
         cashAmountInReference,
         productName,
+        productDescription,
         productPhotoUrl,
         items,
       };
     }));
+
 
     return {
       account: {

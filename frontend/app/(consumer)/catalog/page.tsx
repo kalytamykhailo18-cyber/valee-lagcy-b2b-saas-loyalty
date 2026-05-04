@@ -25,6 +25,8 @@ interface Product {
   redemptionCost: string
   stock: number
   canAfford: boolean
+  minLevel?: number
+  levelLocked?: boolean
   branchId?: string | null
   branchName?: string | null
   branchScope?: 'branch' | 'tenant'
@@ -305,11 +307,13 @@ export default function Catalog() {
       <div className="grid grid-cols-2 gap-3">
         {products.map((product, i) => {
           const canAfford = parseFloat(product.redemptionCost) <= effectiveBalance
+          const levelLocked = !!product.levelLocked
+          const dimmed = levelLocked || !canAfford
           return (
             <div
               key={product.id}
-              onClick={() => handleProductClick(product)}
-              className={`aa-card aa-row-in bg-white rounded-xl shadow-sm overflow-hidden cursor-pointer ${!canAfford ? 'grayscale opacity-70' : ''}`}
+              onClick={() => !levelLocked && handleProductClick(product)}
+              className={`aa-card aa-row-in bg-white rounded-xl shadow-sm overflow-hidden ${levelLocked ? '' : 'cursor-pointer'} ${dimmed ? 'grayscale opacity-70' : ''}`}
               style={{ animationDelay: `${Math.min(i * 30, 300)}ms` }}
             >
               <div className="h-32 bg-slate-100 flex items-center justify-center">
@@ -341,13 +345,17 @@ export default function Catalog() {
                   }
                   return null
                 })()}
-                {canAfford ? (
+                {levelLocked ? (
+                  <button className="w-full mt-2 bg-slate-100 text-slate-600 text-[11px] py-2 rounded-lg font-semibold cursor-not-allowed" disabled>
+                    Solo valido para Socios Valee nivel {product.minLevel}
+                  </button>
+                ) : canAfford ? (
                   <button className="aa-btn aa-btn-primary w-full mt-2 bg-indigo-600 text-white text-xs py-2 rounded-lg font-medium">
                     <span className="relative z-10">Canjear</span>
                   </button>
                 ) : (
                   <button className="w-full mt-2 bg-slate-200 text-slate-500 text-xs py-2 rounded-lg font-medium cursor-not-allowed" disabled>
-                    Bloqueado
+                    Ya casi es tuyo!
                   </button>
                 )}
               </div>

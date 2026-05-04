@@ -745,11 +745,14 @@ function ConsumerApp() {
           <div className="flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory scrollbar-hide">
             {regularProducts.map((p: any) => {
               const canAfford = userBalance >= parseFloat(p.redemptionCost)
+              const levelLocked = !!p.levelLocked
+              const dimmed = levelLocked || !canAfford
               return (
                 <Link
                   key={p.id}
-                  href="/catalog"
-                  className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${canAfford ? '' : 'opacity-50 grayscale'}`}
+                  href={levelLocked ? '#' : '/catalog'}
+                  onClick={levelLocked ? (e) => e.preventDefault() : undefined}
+                  className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${dimmed ? 'opacity-50 grayscale' : ''}`}
                 >
                   <div className="w-full aspect-square bg-slate-100 rounded-2xl overflow-hidden" style={{ boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 20px -10px rgba(15,23,42,0.12)' }}>
                     {p.photoUrl ? (
@@ -768,6 +771,11 @@ function ConsumerApp() {
                         si lo puede canjear y donde sin tener que abrir "Ver todo". */}
                     {typeof p.stock === 'number' && (
                       <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                    )}
+                    {levelLocked && (
+                      <p className="text-[11px] text-slate-600 mt-0.5 font-semibold">
+                        Solo Socios nivel {p.minLevel}
+                      </p>
                     )}
                     {(() => {
                       const names = p.branchNames || []
@@ -805,11 +813,14 @@ function ConsumerApp() {
             </h2>
           </div>
           <div className="flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory scrollbar-hide">
-            {hybridProducts.map((p: any) => (
+            {hybridProducts.map((p: any) => {
+              const levelLocked = !!p.levelLocked
+              return (
               <Link
                 key={p.id}
-                href="/catalog"
-                className="flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform"
+                href={levelLocked ? '#' : '/catalog'}
+                onClick={levelLocked ? (e) => e.preventDefault() : undefined}
+                className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${levelLocked ? 'opacity-50 grayscale' : ''}`}
               >
                 <div className="w-full aspect-square bg-gradient-to-b from-amber-50 to-white rounded-2xl overflow-hidden border border-amber-100" style={{ boxShadow: '0 1px 2px rgba(245,158,11,0.08), 0 8px 20px -10px rgba(245,158,11,0.20)' }}>
                   {p.photoUrl ? (
@@ -826,6 +837,11 @@ function ConsumerApp() {
                   <p className="text-xs text-amber-600 font-bold mt-0.5">+ ${formatCash(p.cashPrice)}</p>
                   {typeof p.stock === 'number' && (
                     <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                  )}
+                  {levelLocked && (
+                    <p className="text-[11px] text-slate-600 mt-0.5 font-semibold">
+                      Solo Socios nivel {p.minLevel}
+                    </p>
                   )}
                   {(() => {
                     const names = p.branchNames || []
@@ -847,7 +863,8 @@ function ConsumerApp() {
                   })()}
                 </div>
               </Link>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}
