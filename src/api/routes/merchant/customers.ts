@@ -169,6 +169,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       if (m) pendingTokenIdsInHistory.push(m[1]);
     }
     const branchByTokenId = new Map<string, { id: string | null; name: string | null }>();
+    const confirmedTokenIds = new Set<string>();
     if (pendingTokenIdsInHistory.length > 0) {
       const confirmedRows = await prisma.$queryRaw<Array<{ token_id: string; branch_id: string | null; branch_name: string | null }>>`
         SELECT
@@ -184,6 +185,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       `;
       for (const row of confirmedRows) {
         branchByTokenId.set(row.token_id, { id: row.branch_id, name: row.branch_name });
+        confirmedTokenIds.add(row.token_id);
       }
     }
     // For non-redemption history rows, fall back to the row's own branch.
@@ -200,6 +202,160 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       for (const b of branches) branchNameById.set(b.id, b.name);
     }
 
+    // Eric 2026-05-04 (Notion "Bienvenida / Referidos. Clientes"): the
+    // MOVIMIENTOS panel was rendering raw event types (PRESENCE_VALIDATED,
+    // REDEMPTION_PENDING) — developer-facing strings the merchant should
+    // never see. Mirror the effective-event-type derivation already in
+    // analytics.ts and consumer/account.ts:
+    //   ADJUSTMENT_MANUAL + WELCOME-…   → WELCOME_BONUS
+    //   ADJUSTMENT_MANUAL + REFERRAL-…  → REFERRAL_BONUS
+    //   REDEMPTION_PENDING (confirmed)   → REDEMPTION_CONFIRMED
+    // and resolve the human context per row (invoice number + $, product
+    // name, "Pago en efectivo") so the panel reads like a transaction log.
+
+    // Build invoice lookup for INVOICE_CLAIMED rows in history. The
+    // referenceId is one of: <invoiceNumber>, PENDING-<n>, REVIEW-<n>,
+    // CSV-<actor>:<n>. Strip the prefix to get the canonical number.
+    const invoiceNumberFromRef = (refId: string | null | undefined): string | null => {
+      if (!refId) return null;
+      return String(refId).replace(/^(REVIEW|PENDING|CSV-[^:]+:)-?/i, '') || null;
+    };
+    const historyInvoiceNumbers = new Set<string>();
+    for (const e of history) {
+      if (e.eventType !== 'INVOICE_CLAIMED') continue;
+      const meta: any = (e as any).metadata || {};
+      const num = meta.invoiceNumber || invoiceNumberFromRef(e.referenceId);
+      if (num) historyInvoiceNumbers.add(num);
+    }
+    const invoicesByNumber = new Map<string, { amount: string; transactionDate: Date | null; createdAt: Date; orderDetails: any }>();
+    if (historyInvoiceNumbers.size > 0) {
+      const invs = await prisma.invoice.findMany({
+        where: { tenantId, invoiceNumber: { in: Array.from(historyInvoiceNumbers) } },
+        select: { invoiceNumber: true, amount: true, transactionDate: true, createdAt: true, orderDetails: true },
+      });
+      for (const i of invs) {
+        invoicesByNumber.set(i.invoiceNumber, {
+          amount: i.amount.toString(),
+          transactionDate: i.transactionDate,
+          createdAt: i.createdAt,
+          orderDetails: i.orderDetails,
+        });
+      }
+    }
+
+    // Spanish labels — match the canonical map in merchant/page.tsx and
+    // consumer/page.tsx so the customer detail panel speaks the same
+    // language as the rest of the merchant UI.
+    const labelFor = (effectiveEventType: string, status: string): string => {
+      switch (effectiveEventType) {
+        case 'INVOICE_CLAIMED': return status === 'provisional' ? 'Factura validada (provisional)' : 'Factura validada';
+        case 'WELCOME_BONUS': return 'Puntos de Bienvenida';
+        case 'REFERRAL_BONUS': return 'Bono por Referido';
+        case 'PRESENCE_VALIDATED': return 'Pago en efectivo';
+        case 'REDEMPTION_PENDING': return 'Canje pendiente';
+        case 'REDEMPTION_CONFIRMED': return 'Canje confirmado';
+        case 'REDEMPTION_EXPIRED': return 'Canje expirado';
+        case 'REVERSAL': return 'Reverso';
+        case 'ADJUSTMENT_MANUAL': return 'Ajuste manual';
+        case 'TRANSFER_P2P': return 'Transferencia';
+        default: return effectiveEventType;
+      }
+    };
+
+    const enrichedHistory = await Promise.all(history.map(async (e) => {
+      const meta: any = (e as any).metadata || {};
+      const refStr = String(e.referenceId || '');
+
+      // Effective event type
+      let effectiveEventType: string = e.eventType;
+      if (e.eventType === 'ADJUSTMENT_MANUAL') {
+        if (refStr.startsWith('WELCOME-') || meta?.type === 'welcome_bonus') {
+          effectiveEventType = 'WELCOME_BONUS';
+        } else if (refStr.startsWith('REFERRAL-') || meta?.type === 'referral_bonus') {
+          effectiveEventType = 'REFERRAL_BONUS';
+        }
+      }
+      // Confirmed pendings collapse to REDEMPTION_CONFIRMED (Genesis M6).
+      if (e.eventType === 'REDEMPTION_PENDING') {
+        const m = refStr.match(/^REDEEM-([0-9a-f-]{36})$/i);
+        const tid = m ? m[1] : null;
+        if (tid && confirmedTokenIds.has(tid)) effectiveEventType = 'REDEMPTION_CONFIRMED';
+      }
+
+      // Branch
+      let branchId: string | null = e.branchId ?? null;
+      let branchName: string | null = branchId ? (branchNameById.get(branchId) ?? null) : null;
+      if (e.eventType === 'REDEMPTION_PENDING') {
+        const m = refStr.match(/^REDEEM-([0-9a-f-]{36})$/i);
+        const tid = m ? m[1] : null;
+        const confirmed = tid ? branchByTokenId.get(tid) : undefined;
+        if (confirmed && confirmed.id) {
+          branchId = confirmed.id;
+          branchName = confirmed.name;
+        }
+      }
+
+      // Subtitle: invoice context, product context, or cash marker.
+      let subtitle: string | null = null;
+      let invoiceNumber: string | null = null;
+      let invoiceAmountInReference: string | null = null;
+      let productName: string | null = meta.productName || null;
+      let productPhotoUrl: string | null = meta.productPhotoUrl || null;
+      let cashAmountInReference: string | null = null;
+
+      if (e.eventType === 'INVOICE_CLAIMED') {
+        invoiceNumber = meta.invoiceNumber || invoiceNumberFromRef(refStr);
+        const inv = invoiceNumber ? invoicesByNumber.get(invoiceNumber) : null;
+        if (inv && exchangeSource && refCurrency) {
+          const date = inv.transactionDate || inv.createdAt;
+          const rate = await getRateAtDate(exchangeSource as any, refCurrency as any, date);
+          if (rate && rate.rateBs > 0) {
+            invoiceAmountInReference = (Number(inv.amount) / rate.rateBs).toFixed(2);
+          }
+        }
+        if (invoiceNumber && invoiceAmountInReference) {
+          subtitle = `Factura ${invoiceNumber} · ${currencySymbol}${invoiceAmountInReference}`;
+        } else if (invoiceNumber) {
+          subtitle = `Factura ${invoiceNumber}`;
+        }
+      } else if (e.eventType === 'PRESENCE_VALIDATED') {
+        // Cash payment via dual-scan stamps source='dual_scan' +
+        // originalAmount (the bill total in the tenant's reference
+        // currency, already $ or €). No invoice number — items can't be
+        // OCR'd from a cash transaction.
+        if (meta.source === 'dual_scan' && meta.originalAmount) {
+          cashAmountInReference = String(meta.originalAmount);
+          subtitle = `Pago en efectivo · ${currencySymbol}${meta.originalAmount}`;
+        } else {
+          subtitle = 'Pago en efectivo';
+        }
+      } else if (effectiveEventType === 'REDEMPTION_PENDING' || effectiveEventType === 'REDEMPTION_CONFIRMED' || effectiveEventType === 'REDEMPTION_EXPIRED') {
+        if (productName) subtitle = productName;
+      } else if (effectiveEventType === 'WELCOME_BONUS') {
+        subtitle = 'Bienvenida al programa';
+      } else if (effectiveEventType === 'REFERRAL_BONUS') {
+        subtitle = 'Por referir a un amigo';
+      }
+
+      return {
+        id: e.id,
+        eventType: effectiveEventType,
+        entryType: e.entryType,
+        amount: e.amount.toString(),
+        status: e.status,
+        createdAt: e.createdAt,
+        branchId,
+        branchName,
+        label: labelFor(effectiveEventType, e.status),
+        subtitle,
+        invoiceNumber,
+        invoiceAmountInReference,
+        cashAmountInReference,
+        productName,
+        productPhotoUrl,
+      };
+    }));
+
     return {
       account: {
         id: account.id,
@@ -212,29 +368,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       },
       balance,
       currencySymbol,
-      history: history.map(e => {
-        let branchId: string | null = e.branchId ?? null;
-        let branchName: string | null = branchId ? (branchNameById.get(branchId) ?? null) : null;
-        if (e.eventType === 'REDEMPTION_PENDING') {
-          const m = String(e.referenceId || '').match(/^REDEEM-([0-9a-f-]{36})$/i);
-          const tid = m ? m[1] : null;
-          const confirmed = tid ? branchByTokenId.get(tid) : undefined;
-          if (confirmed && confirmed.id) {
-            branchId = confirmed.id;
-            branchName = confirmed.name;
-          }
-        }
-        return {
-          id: e.id,
-          eventType: e.eventType,
-          entryType: e.entryType,
-          amount: e.amount.toString(),
-          status: e.status,
-          createdAt: e.createdAt,
-          branchId,
-          branchName,
-        };
-      }),
+      history: enrichedHistory,
       invoices: invoicesOut,
     };
   });

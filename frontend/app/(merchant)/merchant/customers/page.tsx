@@ -371,14 +371,18 @@ export default function CustomersPage() {
                   {!selected.history?.length ? (
                     <p className="text-sm text-slate-400">Sin movimientos</p>
                   ) : (
-                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                    <div className="space-y-2 max-h-72 overflow-y-auto">
                       {selected.history.map((e: any) => (
-                        <div key={e.id} className="flex justify-between items-start gap-2 py-1.5 border-b border-slate-50 last:border-0">
+                        <div key={e.id} className="flex justify-between items-start gap-2 py-2 border-b border-slate-50 last:border-0">
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs text-slate-600 truncate">{e.eventType}</p>
-                            {e.branchName && (
-                              <p className="text-[10px] text-indigo-600 truncate mt-0.5">{e.branchName}</p>
+                            <p className="text-sm font-semibold text-slate-700 truncate">{e.label || e.eventType}</p>
+                            {e.subtitle && (
+                              <p className="text-xs text-slate-500 truncate mt-0.5">{e.subtitle}</p>
                             )}
+                            <div className="text-[10px] text-slate-400 mt-0.5 flex flex-wrap gap-x-2">
+                              <span>{new Date(e.createdAt).toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'short' })}</span>
+                              {e.branchName && <span className="text-indigo-600">· {e.branchName}</span>}
+                            </div>
                           </div>
                           <span className={`text-sm font-semibold whitespace-nowrap ${e.entryType === 'CREDIT' ? 'text-green-600' : 'text-red-500'}`}>
                             {e.entryType === 'CREDIT' ? '+' : '-'}{formatPoints(e.amount)}
