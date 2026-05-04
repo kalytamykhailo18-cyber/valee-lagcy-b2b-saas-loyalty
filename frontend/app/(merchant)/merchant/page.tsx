@@ -213,7 +213,12 @@ export default function MerchantDashboard() {
     setMultiplierMsg('')
     try {
       await api.setMultiplier(newMultiplier, multiplier.assetTypeId)
-      setMultiplierMsg(`Multiplicador actualizado a ${newMultiplier}x`)
+      // Eric 2026-05-04 (Notion "Texto de multiplicador de puntos"):
+      // success line was showing the raw rate ("150x") instead of the
+      // cosmetic label every other field uses ("1.500x"). Format it
+      // through the same convention.
+      const cosmetic = (parseFloat(newMultiplier) * 10).toLocaleString('es-VE')
+      setMultiplierMsg(`Multiplicador actualizado a ${cosmetic}x`)
       setNewMultiplier('')
       loadMultiplier()
     } catch { setMultiplierMsg('Error al actualizar') }
@@ -309,6 +314,12 @@ export default function MerchantDashboard() {
             // they pick a tier. Underlying rate stored unchanged (still 50)
             // so cashback math + the $10 example stay correct.
             const labelX = (r: number) => `${(r * 10).toLocaleString('es-VE')}x`
+            // Eric 2026-05-04 (Notion "Texto de multiplicador de puntos"):
+            // points alone don't make cashback intuitive — surface the $
+            // equivalent so the merchant grasps the math at a glance.
+            // 1000 pts = $1, so $-back = points / 1000.
+            const dollarsBack = (rate: number, spend: number) =>
+              ((rate * spend) / 1000).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             const presets: Array<{ value: string; label: string }> = [
               { value: '50',  label: '5%' },
               { value: '100', label: '10%' },
@@ -322,7 +333,8 @@ export default function MerchantDashboard() {
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Multiplicador de puntos</p>
                     <p className="text-4xl font-bold text-emerald-700 mt-1">{labelX(rateNow)}</p>
                     <p className="text-xs text-slate-500 mt-1">
-                      Cada <span className="font-semibold">$10</span> gastados = <span className="font-semibold">{Math.round(rateNow * 10).toLocaleString('es-VE')}</span> puntos
+                      Por cada <span className="font-semibold">$10</span> gastados, el cliente recibe{' '}
+                      <span className="font-semibold">${dollarsBack(rateNow, 10)}</span> en puntos
                       <span className="text-emerald-700"> ({pct(rateNow)} cashback)</span>
                     </p>
                   </div>
@@ -332,7 +344,11 @@ export default function MerchantDashboard() {
                         decida por impacto economico y no por un numero suelto.
                         Eric 2026-04-25: label muestra 500x/1.000x/1.500x/2.000x
                         (rate * 10) — solo cosmetico, el value enviado al backend
-                        sigue siendo 50/100/150/200. */}
+                        sigue siendo 50/100/150/200.
+                        Eric 2026-05-04: campo "Otro" desactivado provisionalmente
+                        — los valores fuera de los presets re-introducen el
+                        problema de copy ("1500x" se mostraba como "150x") y
+                        confunden la lectura de cashback. */}
                     {presets.map(p => (
                       <button key={p.value} onClick={() => setNewMultiplier(p.value)}
                         className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight ${newMultiplier === p.value ? 'bg-emerald-600 text-white' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}>
@@ -341,9 +357,9 @@ export default function MerchantDashboard() {
                       </button>
                     ))}
                     <input type="number" step="1" min="0.1" placeholder="Otro"
-                      value={newMultiplier}
-                      onChange={e => setNewMultiplier(e.target.value)}
-                      className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm" />
+                      disabled
+                      title="Personalizacion proximamente"
+                      className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-slate-50 text-slate-400 cursor-not-allowed" />
                     {newMultiplier && (
                       <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
                         Aplicar
@@ -354,13 +370,15 @@ export default function MerchantDashboard() {
                 {/* Live preview: make the math obvious so the owner can pick
                     the scale that reads cleanly to their customers. */}
                 <div className="mt-3 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-xs text-emerald-800">
-                  Ejemplo: si un cliente gasta <span className="font-semibold">${sample}</span>, gana{' '}
-                  <span className="font-semibold">{Math.round(sample * previewRate).toLocaleString('es-VE')} puntos</span>
+                  Ejemplo: si un cliente gasta <span className="font-semibold">${sample}</span>, recibe{' '}
+                  <span className="font-semibold">${dollarsBack(previewRate, sample)}</span> en puntos
+                  <span className="text-emerald-600/80"> ({Math.round(sample * previewRate).toLocaleString('es-VE')} pts)</span>
                   <span className="text-emerald-700"> ({pct(previewRate)} cashback)</span>
                   {newMultiplier && previewRate !== rateNow && (
                     <span className="text-emerald-700/70"> (con el nuevo {labelX(previewRate)})</span>
                   )}.
                 </div>
+                <p className="text-[10px] text-slate-400 mt-1">1.000 puntos equivalen a $1 de descuento al canjear.</p>
                 {multiplierMsg && <p className="text-sm text-emerald-600 mt-2">{multiplierMsg}</p>}
               </div>
             )
