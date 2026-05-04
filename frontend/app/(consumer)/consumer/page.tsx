@@ -67,6 +67,10 @@ function ConsumerApp() {
   // The useEffect below checks localStorage and sets the real screen.
   const [screen, setScreen] = useState<Screen>('loading')
   const [phoneNumber, setPhoneNumber] = useState('')
+  // Eric 2026-05-04: phoneInput preserves the user's typed digits
+  // including the leading 0 ("04144556677") for display, while
+  // phoneNumber stores the normalized "+58<10-digit>" form for the API.
+  const [phoneInput, setPhoneInput] = useState('')
   const [otp, setOtp] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -354,22 +358,27 @@ function ConsumerApp() {
             <Link href="/" className="inline-block">
               <h1 className="text-3xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors">Valee</h1>
             </Link>
-            <p className="text-slate-500 mt-2">Ingresa tu numero para comenzar</p>
+            <p className="text-slate-700 font-semibold mt-3">Lo que Valencia estaba esperando</p>
+            <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+              Ingresa tu numero para comenzar y descubre beneficios exclusivos en cada visita.
+            </p>
           </div>
           <div className="space-y-2">
             {(() => {
-              // Accept either "0414..." (11 digits) or "414..." (10 digits)
-              // Strip leading zero if present for normalization
-              const raw = phoneNumber.startsWith('+58') ? phoneNumber.slice(3) : phoneNumber.replace(/\D/g, '')
-              const normalized = raw.startsWith('0') ? raw.slice(1) : raw
-              const prefix = normalized.slice(0, 3)
+              // Eric 2026-05-04 (Notion "Ingreso de numero de telefono"):
+              // accept the natural Venezuelan format with leading 0 AND show
+              // it back to the user as they type. Storage stays normalized
+              // to a 10-digit body under +58 so all backend lookups keep
+              // working. The previous version stripped the leading 0 on
+              // input, so typing "0414…" silently became "414…" — Eric
+              // flagged this as broken UX.
+              const raw = phoneInput.replace(/\D/g, '').slice(0, 11)
+              const body = raw.startsWith('0') ? raw.slice(1) : raw
+              const prefix = body.slice(0, 3)
               const validPrefix = ['412', '414', '416', '424', '426'].includes(prefix)
-              const validLength = normalized.length === 10
+              const validLength = body.length === 10
               const isValid = validPrefix && validLength
-              const showValidation = normalized.length > 0
-
-              // Display value: user can see what they typed (with or without leading 0)
-              const displayValue = raw
+              const showValidation = body.length > 0
 
               return (
                 <>
@@ -381,24 +390,24 @@ function ConsumerApp() {
                     <input
                       type="tel"
                       inputMode="numeric"
-                      placeholder="0414 1234567"
-                      value={displayValue}
+                      placeholder="0424 4202999"
+                      value={raw}
                       onChange={e => {
                         const digits = e.target.value.replace(/\D/g, '').slice(0, 11)
-                        // Normalize to 10-digit body for storage (strip optional leading 0)
-                        const body = digits.startsWith('0') ? digits.slice(1) : digits
-                        setPhoneNumber(body ? `+58${body.slice(0, 10)}` : '')
+                        setPhoneInput(digits)
+                        const next = digits.startsWith('0') ? digits.slice(1) : digits
+                        setPhoneNumber(next ? `+58${next.slice(0, 10)}` : '')
                         if (error) setError('')
                       }}
                       onKeyDown={e => e.key === 'Enter' && isValid && handleRequestOTP()}
                       className="w-full px-4 py-3 focus:outline-none"
                     />
                   </div>
-                  {showValidation && normalized.length >= 3 && !validPrefix && (
+                  {showValidation && body.length >= 3 && !validPrefix && (
                     <p className="text-amber-600 text-xs">El numero debe empezar con 0414, 0424, 0412, 0416 o 0426</p>
                   )}
                   {showValidation && validPrefix && !validLength && (
-                    <p className="text-slate-500 text-xs">Faltan {10 - normalized.length} digitos</p>
+                    <p className="text-slate-500 text-xs">Faltan {10 - body.length} digitos</p>
                   )}
                   {error && <p className="text-red-500 text-sm">{error}</p>}
                   <button
@@ -406,10 +415,10 @@ function ConsumerApp() {
                     disabled={loading || !isValid}
                     className="aa-btn aa-btn-primary w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 disabled:opacity-50 mt-3 flex items-center justify-center"
                   >
-                    {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Enviando...' : 'Enviar codigo OTP'}</span>
+                    {loading && <span className="aa-spinner" />}<span className="relative z-10">{loading ? 'Enviando...' : 'Gana hoy con Valee'}</span>
                   </button>
-                  <p className="text-xs text-slate-400 text-center pt-2">
-                    Recibiras un codigo por WhatsApp para verificar tu numero.
+                  <p className="text-xs text-slate-400 text-center pt-2 leading-relaxed">
+                    Recibiras un codigo por WhatsApp para verificar tu numero. Rapido, seguro y sin contraseñas.
                   </p>
                 </>
               )
