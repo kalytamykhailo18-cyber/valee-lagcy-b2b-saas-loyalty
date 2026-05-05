@@ -198,6 +198,10 @@ export default function MerchantDashboard() {
 
   const [multiplier, setMultiplier] = useState<any>(null)
   const [newMultiplier, setNewMultiplier] = useState('')
+  // Eric 2026-05-04 (Notion "Multiplicador de puntos" Low): expanded
+  // tier "Super Valee" with 25%–50% cashback presets that the merchant
+  // opens deliberately, so they don't bump the rate sky-high by mistake.
+  const [showSuperValee, setShowSuperValee] = useState(false)
   const [multiplierMsg, setMultiplierMsg] = useState('')
 
   useEffect(() => {
@@ -326,6 +330,18 @@ export default function MerchantDashboard() {
               { value: '150', label: '15%' },
               { value: '200', label: '20%' },
             ]
+            // Eric 2026-05-04 (Notion "Multiplicador de puntos" Low):
+            // Super Valee tier — high-cashback presets revealed only when
+            // the merchant explicitly opens it, so an accidental tap on
+            // "Otro" doesn't push them to a 50% cashback they didn't mean.
+            const superPresets: Array<{ value: string; label: string }> = [
+              { value: '250', label: '25%' },
+              { value: '300', label: '30%' },
+              { value: '350', label: '35%' },
+              { value: '400', label: '40%' },
+              { value: '450', label: '45%' },
+              { value: '500', label: '50%' },
+            ]
             return (
               <div className={`bg-white rounded-xl p-5 shadow-sm border border-slate-100 ${branches.filter(b => b.active).length > 0 ? 'lg:col-span-2' : ''}`}>
                 <div className="flex items-center justify-between flex-wrap gap-3">
@@ -356,10 +372,14 @@ export default function MerchantDashboard() {
                         <span className={`text-[10px] ${newMultiplier === p.value ? 'text-emerald-100' : 'text-emerald-600/70'}`}>{p.label}</span>
                       </button>
                     ))}
-                    <input type="number" step="1" min="0.1" placeholder="Otro"
-                      disabled
-                      title="Personalizacion proximamente"
-                      className="w-24 px-3 py-2 rounded-lg border border-slate-200 text-sm bg-slate-50 text-slate-400 cursor-not-allowed" />
+                    <button
+                      onClick={() => setShowSuperValee(s => !s)}
+                      className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight border ${showSuperValee ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
+                      title="Cashback alto (25-50%)"
+                    >
+                      <span>Super Valee</span>
+                      <span className={`text-[10px] ${showSuperValee ? 'text-amber-100' : 'text-amber-600/80'}`}>{showSuperValee ? 'Ocultar' : '25–50%'}</span>
+                    </button>
                     {newMultiplier && (
                       <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
                         Aplicar
@@ -367,6 +387,24 @@ export default function MerchantDashboard() {
                     )}
                   </div>
                 </div>
+                {/* Super Valee tier reveal — high-cashback presets. */}
+                {showSuperValee && (
+                  <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                    <p className="text-[11px] uppercase tracking-wide font-bold text-amber-700 mb-2">Super Valee · Cashback alto</p>
+                    <div className="flex flex-wrap gap-2">
+                      {superPresets.map(p => (
+                        <button key={p.value} onClick={() => setNewMultiplier(p.value)}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight ${newMultiplier === p.value ? 'bg-amber-600 text-white' : 'bg-white text-amber-700 border border-amber-300 hover:bg-amber-100'}`}>
+                          <span>{labelX(parseFloat(p.value))}</span>
+                          <span className={`text-[10px] ${newMultiplier === p.value ? 'text-amber-100' : 'text-amber-600/80'}`}>{p.label}</span>
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-amber-700/80 mt-2 leading-relaxed">
+                      Cashback alto: el cliente recibe entre 25% y 50% del monto en puntos. Pensado para promociones puntuales o categorias premium.
+                    </p>
+                  </div>
+                )}
                 {/* Live preview: make the math obvious so the owner can pick
                     the scale that reads cleanly to their customers. */}
                 <div className="mt-3 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-xs text-emerald-800">
