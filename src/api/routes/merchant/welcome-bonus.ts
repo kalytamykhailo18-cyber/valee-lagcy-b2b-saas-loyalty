@@ -48,6 +48,20 @@ export async function registerWelcomeBonusRoutes(app: FastifyInstance): Promise<
     const limit = tenant?.welcomeBonusLimit ?? null;
     const remaining = limit != null ? Math.max(0, limit - granted) : null;
 
+    // Eric 2026-05-05 (Notion "Puntos de bienvenida priorida mvp"): when the
+    // merchant opens this page and the cap is already reached, sync the
+    // toggle to OFF so the visual control matches reality. Without this,
+    // the toggle could stay ON forever after the cap closed (no further
+    // grants ever fire to trigger the toggle-off in welcome-bonus.ts).
+    let activeAfterSync = tenant?.welcomeBonusActive ?? true;
+    if (limit != null && granted >= limit && activeAfterSync !== false) {
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { welcomeBonusActive: false },
+      });
+      activeAfterSync = false;
+    }
+
     const recent = welcomeRows.slice(0, 20);
     const acctIds = Array.from(new Set(recent.map(r => r.accountId).filter(Boolean) as string[]));
     const acctRows = acctIds.length > 0
@@ -85,7 +99,7 @@ export async function registerWelcomeBonusRoutes(app: FastifyInstance): Promise<
     return {
       config: {
         amount: tenant?.welcomeBonusAmount ?? 50,
-        active: tenant?.welcomeBonusActive ?? true,
+        active: activeAfterSync,
         limit,
       },
       summary: {

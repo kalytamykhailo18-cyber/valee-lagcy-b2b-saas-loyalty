@@ -49,6 +49,18 @@ export async function grantWelcomeBonus(
       },
     });
     if (granted >= tenant.welcomeBonusLimit) {
+      // Eric 2026-05-05: if the limit was already exhausted before this
+      // call (e.g. tenant lowered the limit retroactively, or this is a
+      // late scanner contact firing after the cap closed), make sure the
+      // toggle reflects reality and flip it off too. Without this, the
+      // toggle could stay visually ON while every grant attempt silently
+      // returns "no grant" — the merchant has no signal that the bono is
+      // already paused.
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { welcomeBonusActive: false },
+      });
+      console.log(`[WelcomeBonus] Cap already reached for tenant=${tenantId} (${granted}/${tenant.welcomeBonusLimit}) — auto-disabled welcomeBonusActive`);
       return { granted: false, amount: '0' };
     }
   }
@@ -79,6 +91,31 @@ export async function grantWelcomeBonus(
     where: { id: accountId },
     data: { welcomeBonusGranted: true },
   });
+
+  // Eric 2026-05-05 (Notion "Puntos de bienvenida priorida mvp"): when the
+  // grant we just wrote exhausts the merchant's limit, automatically turn
+  // the bono OFF. Without this, "Restante: 0" shows in the metrics card
+  // but the toggle button stays visually ON, which confuses the merchant
+  // (the bot already stops mentioning the bono — but the toggle is the
+  // single most-watched control on this page). If they want to restart,
+  // they raise the limit and flip the toggle back manually.
+  if (tenant.welcomeBonusLimit != null) {
+    const grantedAfter = await prisma.ledgerEntry.count({
+      where: {
+        tenantId,
+        eventType: 'ADJUSTMENT_MANUAL',
+        entryType: 'CREDIT',
+        referenceId: { startsWith: 'WELCOME-' },
+      },
+    });
+    if (grantedAfter >= tenant.welcomeBonusLimit) {
+      await prisma.tenant.update({
+        where: { id: tenantId },
+        data: { welcomeBonusActive: false },
+      });
+      console.log(`[WelcomeBonus] Cap reached for tenant=${tenantId} (${grantedAfter}/${tenant.welcomeBonusLimit}) — auto-disabled welcomeBonusActive`);
+    }
+  }
 
   return { granted: true, amount: parseFloat(bonusAmount).toFixed(8) };
 }
