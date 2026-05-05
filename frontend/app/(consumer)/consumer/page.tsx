@@ -729,13 +729,19 @@ function ConsumerApp() {
             </div>
           )}
 
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className="mt-5 text-xs font-semibold text-indigo-100 hover:text-white inline-flex items-center gap-1 transition-colors"
-          >
-            {showHistory ? 'Ocultar historial' : 'Ver historial'}
-            <MdChevronRight className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
-          </button>
+          {/* Eric 2026-05-04: anchor "Ver / Ocultar historial" to the
+              bottom-right corner of the saldo card. justify-end pushes it
+              away from the pills on the left so the lock chips and the
+              history toggle don't crowd each other. */}
+          <div className="mt-5 flex justify-end">
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="text-xs font-semibold text-indigo-100 hover:text-white inline-flex items-center gap-1 transition-colors"
+            >
+              {showHistory ? 'Ocultar historial' : 'Ver historial'}
+              <MdChevronRight className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
+            </button>
+          </div>
         </div>
       </section>
 
