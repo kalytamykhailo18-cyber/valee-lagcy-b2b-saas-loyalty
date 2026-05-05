@@ -724,8 +724,18 @@ export default function MerchantDashboard() {
                                 comercio HAS sucursales — without this badge
                                 the owner cannot tell apart attributed and
                                 unattributed scans (Eric 2026-04-26: "no hay
-                                manera de identificar esa transaccion"). */}
-                            {branches.filter(b => b.active).length > 0 && !tx.branchName && (
+                                manera de identificar esa transaccion").
+                                Eric 2026-05-04 (image.png): welcome and
+                                referral bonuses don't logically have a
+                                sucursal (granted on first scan, often before
+                                any sucursal-specific interaction), so the
+                                amber warning is misleading noise on those
+                                rows. Suppress it. */}
+                            {branches.filter(b => b.active).length > 0
+                              && !tx.branchName
+                              && tx.eventType !== 'WELCOME_BONUS'
+                              && tx.eventType !== 'REFERRAL_BONUS'
+                              && tx.eventType !== 'ADJUSTMENT_MANUAL' && (
                               <span className="text-[10px] px-1.5 py-0.5 rounded font-semibold bg-amber-100 text-amber-800">
                                 Sin sucursal
                               </span>
