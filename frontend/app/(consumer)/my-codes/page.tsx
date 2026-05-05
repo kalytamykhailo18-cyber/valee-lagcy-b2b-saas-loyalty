@@ -3,9 +3,10 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { api } from '@/lib/api'
-import { MdArrowBack } from 'react-icons/md'
+import { MdArrowBack, MdChevronRight } from 'react-icons/md'
 import { formatPoints } from '@/lib/format'
 import { consumerHomeUrl } from '@/lib/consumer-nav'
+import { clearTokens } from '@/lib/token-store'
 
 interface ActiveRedemption {
   id: string
@@ -24,6 +25,8 @@ export default function MyCodesPage() {
   const [redemptions, setRedemptions] = useState<ActiveRedemption[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<ActiveRedemption | null>(null)
+  const [account, setAccount] = useState<any>(null)
+  const phoneNumber = account?.phoneNumber || ''
 
   useEffect(() => {
     load()
@@ -33,11 +36,25 @@ export default function MyCodesPage() {
 
   async function load() {
     try {
-      const data = await api.getActiveRedemptions()
-      setRedemptions(data.redemptions || [])
+      const [redemptionsData, accountData] = await Promise.allSettled([
+        api.getActiveRedemptions(),
+        api.getAccount(),
+      ])
+      if (redemptionsData.status === 'fulfilled') {
+        setRedemptions(redemptionsData.value.redemptions || [])
+      }
+      if (accountData.status === 'fulfilled') {
+        setAccount(accountData.value)
+      }
     } catch {} finally {
       setLoading(false)
     }
+  }
+
+  async function logout() {
+    try { await fetch('/api/consumer/auth/logout', { method: 'POST', credentials: 'include' }) } catch {}
+    clearTokens('consumer')
+    window.location.href = '/'
   }
 
   if (loading) {
@@ -54,16 +71,58 @@ export default function MyCodesPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 aa-rise-sm">
-        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
-          <a href={consumerHomeUrl()} className="text-slate-600 hover:text-indigo-600 transition-transform hover:-translate-x-0.5">
-            <MdArrowBack className="w-6 h-6" />
-          </a>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight">Mis codigos activos</h1>
-        </div>
-      </header>
+      {/*Header*/}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 ">
+                <div className="max-w-[90%] mx-auto px-3 sm:px-6 lg:px-8 py-3 sm:py-4 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                        <Link href="/" className="inline-block text-xl sm:text-2xl font-extrabold tracking-tight text-indigo-700 hover:text-indigo-800 transition-colors">Valee</Link>
+                        {phoneNumber && (
+                            <div className="mt-1 flex items-center gap-2 flex-wrap">
+                                <span className="inline-flex items-center gap-1.5 bg-indigo-50 border border-indigo-200 text-indigo-800 text-[11px] sm:text-xs font-mono font-semibold px-2 py-0.5 rounded-full">
+                                    {phoneNumber}
+                                </span>
+                                {/*<button onClick={logout} className="text-[11px] sm:text-xs text-slate-500 hover:text-indigo-700 underline underline-offset-2">
+                                    No soy yo
+                                </button>*/}
+                            </div>
+                        )}
+                    </div>
+                    <button onClick={logout} className="text-xs sm:text-sm font-medium text-slate-500 hover:text-indigo-700 hover:underline underline-offset-4 transition-colors whitespace-nowrap flex-shrink-0">Cerrar sesion</button>
+                </div>
+                {/* Header: back to hub + merchant label + logout
+                "Mis comercios" goes back to the multi-merchant hub at /consumer
+                without dropping the session (that's what "Salir" is for). */}
+                <div className="bg-white border-t border-slate-100 px-4 py-3 gap-3">
+                    <div className="max-w-[90%] mx-auto flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <Link
+                                href="/consumer"
+                                className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors whitespace-nowrap"
+                            >
+                                <MdChevronRight className="w-4 h-4 rotate-180" />
+                                Mis comercios
+                            </Link>
+                            {account?.merchantName && (
+                                <>
+                                    <span className="text-slate-300">|</span>
+                                    <MdChevronRight className="w-4 h-4 rotate-180 text-indigo-600" />
+                                    {/* <span className="text-sm font-semibold text-slate-600 truncate">{account.merchantName}</span> */}
+                                    <a href={consumerHomeUrl()} className="text-xs font-semibold text-indigo-600 text-2xl transition-transform hover:-translate-x-0.5">{account.merchantName}</a>
+                                </>
+                            )}
+                        </div>
+                        <button onClick={logout} className="lg:hidden text-xs font-medium text-slate-400 hover:text-slate-600 transition whitespace-nowrap">Salir</button>
+                    </div>
+                </div>
+            </header>
 
-      <div className="max-w-2xl mx-auto p-4 space-y-3">
+      <div className="max-w-2xl mx-auto py-10 space-y-3">
+
+                <h1 className="font-extrabold px-5">Estos son tu codigos activos en <span className="text-indigo-600">{account.merchantName}</span></h1>
+                <p className="text-sm text-slate-500 px-5">
+                    Todos los codigos tienen un tiempo de expiracion.
+                </p>
+
         {redemptions.length === 0 ? (
           <div className="text-center py-16 aa-rise">
             <p className="text-slate-500">No tienes codigos activos</p>
@@ -207,10 +266,10 @@ function QRView({ redemption, onBack }: { redemption: ActiveRedemption; onBack: 
           <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mt-4 text-center">
             <p className="text-xs text-indigo-600 uppercase tracking-wider font-semibold">Codigo manual</p>
             <p className="text-3xl font-bold text-indigo-700 tracking-widest font-mono mt-1">{redemption.shortCode}</p>
-            <p className="text-xs text-indigo-500 mt-1">Dile este codigo al cajero si no puede escanear</p>
+            <p className="text-xs text-indigo-500 mt-1">Si el escáner no funciona, dicta estos números al cajero.</p>
           </div>
         )}
-        <p className="text-center text-sm text-slate-500 mt-4">Muestra este codigo al cajero</p>
+        <p className="text-center text-sm text-slate-500 mt-4">Presenta este código al personal del comercio.</p>
         <p key={secondsLeft} className="text-center text-lg font-bold text-indigo-600 mt-2 aa-count tabular-nums">
           Expira en {formatTime(secondsLeft)}
         </p>
