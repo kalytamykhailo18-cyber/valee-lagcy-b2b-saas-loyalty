@@ -309,6 +309,13 @@ export default function CashierScanner() {
           <span className="text-8xl">*</span>
           <h1 className="text-3xl font-bold mt-6">CANJE EXITOSO</h1>
           {result?.productName && <p className="text-xl mt-2">{result.productName}</p>}
+          {/* Eric 2026-05-05 (Notion "Logica en confirmacion de canjes"):
+              show the product description below the name so the cajero
+              knows which variant to entregar (e.g. Pizza familiar →
+              "margarita") without leaving this fullscreen confirmation. */}
+          {result?.productDescription && (
+            <p className="text-base mt-1 text-green-50/90 italic">{result.productDescription}</p>
+          )}
           {result?.amount && <p className="text-2xl font-bold mt-2">{formatPoints(result.amount)} pts</p>}
           {isHybrid && (
             <div className="bg-yellow-400 text-yellow-900 rounded-xl p-4 mt-4 mx-4">

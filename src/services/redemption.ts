@@ -275,6 +275,7 @@ export async function processRedemption(params: {
   success: boolean;
   message: string;
   productName?: string;
+  productDescription?: string | null;
   amount?: string;
   cashAmount?: string;
 }> {
@@ -604,6 +605,11 @@ export async function processRedemption(params: {
       ? `Hybrid redemption: ${payload.amount} pts + $${Number(tokenRecord.cashAmount)} cash`
       : 'Redemption processed successfully!',
     productName: product?.name || 'Unknown',
+    // Eric 2026-05-05 (Notion "Logica en confirmacion de canjes"): the
+    // cashier success screen needs the description (e.g. "margarita" for
+    // "Pizza familiar") so the cajero/mesonero knows which variant to
+    // entregar without going back to the catalog.
+    productDescription: product?.description || null,
     amount: payload.amount,
     cashAmount: tokenRecord.cashAmount ? Number(tokenRecord.cashAmount).toString() : undefined,
   };
