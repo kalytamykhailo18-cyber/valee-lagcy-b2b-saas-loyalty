@@ -342,6 +342,9 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       // false — promising a bonus the merchant has refused to pay
       // would be a broken contract.
       referralBonusActive: tenant?.referralBonusActive !== false,
+      // Eric 2026-05-05 (Notion "F (genesis) Configuracion de texto"):
+      // welcome modal copy adapts to the merchant's billing methods.
+      invoiceMethods: (tenant?.invoiceMethods?.length ? tenant.invoiceMethods : ['fiscal_invoice']),
     };
   });
 

@@ -218,6 +218,13 @@ model Tenant {
   crossBranchRedemption   Boolean  @default(true) @map("cross_branch_redemption")
   plan                    PlanTier @default(basic)
   trustLevel              TrustLevel @default(level_2_standard) @map("trust_level")
+  /// Eric 2026-05-05 (Notion "F (genesis) Configuracion de texto"): which
+  /// billing methods the merchant uses, multi-select. Drives the welcome
+  /// modal copy on the consumer PWA so a comercio that only takes pago
+  /// movil doesn't see "Escanea tus facturas" in the greeting.
+  /// Values: 'fiscal_invoice', 'mobile_payment', 'voucher'. Default
+  /// fiscal_invoice for back-compat with existing tenants.
+  invoiceMethods          String[] @default(["fiscal_invoice"]) @map("invoice_methods")
   redemptionFeePercent       Decimal? @map("redemption_fee_percent") @db.Decimal(5, 2)
   attributedSaleFeePercent   Decimal? @map("attributed_sale_fee_percent") @db.Decimal(5, 2)
   attributedCustomerFixedFee Decimal? @map("attributed_customer_fixed_fee") @db.Decimal(10, 2)

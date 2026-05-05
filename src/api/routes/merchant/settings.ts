@@ -78,6 +78,11 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       preferredExchangeSource: tenant?.preferredExchangeSource || null,
       referenceCurrency: tenant?.referenceCurrency || 'usd',
       trustLevel: tenant?.trustLevel || 'level_2_standard',
+      // Eric 2026-05-05 (Notion "F (genesis) Configuracion de texto"):
+      // multi-select of which billing methods this comercio uses. Drives
+      // copy on the consumer welcome modal so a comercio that only takes
+      // pago movil doesn't tell the consumer to "escanea tus facturas".
+      invoiceMethods: tenant?.invoiceMethods?.length ? tenant.invoiceMethods : ['fiscal_invoice'],
       assetTypeId: assetType?.id || null,
       assetTypeName: assetType?.name || null,
       unitLabel: assetType?.unitLabel || 'pts',
@@ -92,6 +97,7 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       referralBonusAmount, referralBonusActive, referralBonusLimit,
       rif, preferredExchangeSource, referenceCurrency, trustLevel, logoUrl,
       name, address, contactPhone, contactEmail, website, description, instagramHandle, crossBranchRedemption,
+      invoiceMethods,
     } = request.body as {
       welcomeBonusAmount?: number;
       welcomeBonusActive?: boolean;
@@ -112,6 +118,7 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
       description?: string | null;
       instagramHandle?: string | null;
       crossBranchRedemption?: boolean;
+      invoiceMethods?: string[];
     };
 
     const validSources = ['bcv', 'binance_p2p', 'bybit_p2p', 'promedio', 'euro_bcv'];
@@ -253,6 +260,17 @@ export async function registerSettingsRoutes(app: FastifyInstance): Promise<void
         return reply.status(400).send({ error: 'crossBranchRedemption must be a boolean' });
       }
       data.crossBranchRedemption = crossBranchRedemption;
+    }
+    if (invoiceMethods !== undefined) {
+      const VALID_METHODS = ['fiscal_invoice', 'mobile_payment', 'voucher'];
+      if (!Array.isArray(invoiceMethods)) {
+        return reply.status(400).send({ error: 'invoiceMethods must be an array' });
+      }
+      const filtered = Array.from(new Set(invoiceMethods.filter(m => VALID_METHODS.includes(m))));
+      if (filtered.length === 0) {
+        return reply.status(400).send({ error: 'invoiceMethods debe incluir al menos un metodo (fiscal_invoice, mobile_payment, voucher)' });
+      }
+      data.invoiceMethods = filtered;
     }
 
     const updated = await prisma.tenant.update({ where: { id: tenantId }, data });

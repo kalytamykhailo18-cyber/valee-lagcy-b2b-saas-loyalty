@@ -92,6 +92,10 @@ export default function SettingsPage() {
   const [description, setDescription] = useState('')
   const [instagramHandle, setInstagramHandle] = useState('')
   const [crossBranch, setCrossBranch] = useState(true)
+  // Eric 2026-05-05 (Notion "F (genesis) Configuracion de texto"): which
+  // billing methods this comercio accepts (multi-select). Drives the
+  // welcome modal copy in the consumer PWA.
+  const [invoiceMethods, setInvoiceMethods] = useState<string[]>(['fiscal_invoice'])
 
   useEffect(() => { load() }, [])
 
@@ -126,6 +130,8 @@ export default function SettingsPage() {
       setDescription(s.description || '')
       setInstagramHandle(s.instagramHandle || '')
       setCrossBranch(s.crossBranchRedemption !== false)
+      const im = (s as any).invoiceMethods
+      setInvoiceMethods(Array.isArray(im) && im.length > 0 ? im : ['fiscal_invoice'])
     } catch (e: any) {
       setMessage('Error: ' + (e.error || 'no se pudo cargar'))
     } finally {
@@ -196,6 +202,7 @@ export default function SettingsPage() {
         description: description.trim() || null,
         instagramHandle: instagramHandle.trim().replace(/^@/, '') || null,
         crossBranchRedemption: crossBranch,
+        invoiceMethods,
         ...(rifValue !== undefined ? { rif: rifValue } : {}),
       })
       setSettings(updated)
@@ -477,6 +484,50 @@ export default function SettingsPage() {
                       </p>
                     </div>
                   </label>
+                </div>
+
+                {/* Eric 2026-05-05 (Notion "F (genesis) Configuracion de
+                    texto"): multi-select de metodos de facturacion. La
+                    copy del modal de bienvenida del consumidor se adapta
+                    a lo que selecciona el comercio. */}
+                <div className="pt-2 border-t border-slate-100">
+                  <p className="text-sm font-semibold text-slate-700 mb-1">Metodos de facturacion</p>
+                  <p className="text-xs text-slate-500 mb-3">
+                    Elige los metodos de pago/comprobante que aceptas. El mensaje de bienvenida del cliente cambia para que coincida con lo que ustedes manejan.
+                  </p>
+                  <div className="space-y-2">
+                    {[
+                      { v: 'fiscal_invoice', label: 'Factura fiscal', sub: 'Factura impresa con numero, RIF, items.' },
+                      { v: 'mobile_payment', label: 'Pago movil', sub: 'Captura del pago movil con referencia.' },
+                      { v: 'voucher', label: 'Voucher / comprobante', sub: 'Comprobante de transferencia o voucher de banco.' },
+                    ].map(m => {
+                      const checked = invoiceMethods.includes(m.v)
+                      return (
+                        <label key={m.v} className="flex items-start gap-3 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={e => {
+                              if (e.target.checked) setInvoiceMethods(prev => Array.from(new Set([...prev, m.v])))
+                              else {
+                                const next = invoiceMethods.filter(x => x !== m.v)
+                                if (next.length === 0) return // keep at least one
+                                setInvoiceMethods(next)
+                              }
+                            }}
+                            className="mt-1 w-4 h-4 text-emerald-600 border-slate-300 rounded focus:ring-emerald-500"
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-slate-700">{m.label}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{m.sub}</p>
+                          </div>
+                        </label>
+                      )
+                    })}
+                    {invoiceMethods.length === 1 && (
+                      <p className="text-[11px] text-slate-400 pl-7">Tienes que dejar al menos un metodo activo.</p>
+                    )}
+                  </div>
                 </div>
 
                 {/* Eric 2026-05-05 (Notion "Modificaciones en logica

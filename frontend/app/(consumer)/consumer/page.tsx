@@ -533,6 +533,36 @@ function ConsumerApp() {
   // the user sees both pieces clearly: what they can spend now, and
   // what is parked in an active QR.
   const displayBalance = formatPoints(parseFloat(balance) - getLocalPendingBalance())
+  // Eric 2026-05-05 (Notion "F (genesis) Configuracion de texto"): the
+  // merchant configures which billing methods they accept; consumer copy
+  // adapts. Centralised here so the welcome modal, the attendedBy banner
+  // and the bottom CTA all stay consistent without duplicating the
+  // mapping. Fallback to fiscal_invoice keeps existing tenants identical.
+  const _methods: string[] = (account?.invoiceMethods && account.invoiceMethods.length > 0)
+    ? account.invoiceMethods
+    : ['fiscal_invoice']
+  const _labelPlural: Record<string, string> = {
+    fiscal_invoice: 'facturas',
+    mobile_payment: 'pagos moviles',
+    voucher: 'vouchers de pago',
+  }
+  const _labelSingular: Record<string, string> = {
+    fiscal_invoice: 'factura',
+    mobile_payment: 'pago movil',
+    voucher: 'voucher',
+  }
+  const _joinList = (xs: string[]): string =>
+    xs.length === 1 ? xs[0] :
+    xs.length === 2 ? `${xs[0]} o ${xs[1]}` :
+    `${xs.slice(0, -1).join(', ')} o ${xs[xs.length - 1]}`
+  const methodPluralList = _joinList(_methods.map(m => _labelPlural[m] || m))
+  const methodSingularList = _joinList(_methods.map(m => _labelSingular[m] || m))
+  // Bottom CTA label: keep it short. One method = its label, multiple = generic.
+  const ctaLabel = _methods.length === 1
+    ? (_methods[0] === 'fiscal_invoice' ? 'Escanear factura'
+        : _methods[0] === 'mobile_payment' ? 'Subir pago movil'
+        : 'Subir voucher')
+    : 'Subir comprobante'
   // Greet with the name the merchant linked in "Buscar cliente". If no name is
   // on file we deliberately skip the phone fallback — showing the number feels
   // robotic and clutters the hero.
@@ -568,7 +598,7 @@ function ConsumerApp() {
               Bienvenido{account?.merchantName ? ` a ${account.merchantName}` : ' a Valee'}!
             </h2>
             <p className="mt-2 text-indigo-100 text-sm">
-              Escanea tus facturas, acumula puntos y canjealos por productos como estos:
+              Sube tus {methodPluralList}, acumula puntos y canjealos por productos como estos:
             </p>
             {previewPhotos.length > 0 && (
               <div className="mt-3 grid grid-cols-4 gap-2">
@@ -586,7 +616,7 @@ function ConsumerApp() {
             )}
             <ol className="mt-4 text-[13px] text-indigo-100 space-y-1">
               <li>1. Haz tu compra en el comercio.</li>
-              <li>2. Envia la foto de la factura o escaneala aqui mismo.</li>
+              <li>2. Envia la foto de tu {methodSingularList} o cargala aqui mismo.</li>
               <li>3. Acumula puntos y canjealos por premios del catalogo.</li>
             </ol>
             <button onClick={dismissWelcome} className="aa-btn mt-4 bg-white text-indigo-600 px-4 py-2 rounded-lg font-medium text-sm">
@@ -641,7 +671,7 @@ function ConsumerApp() {
           invoice will generate. */}
       {attendedBy && (
         <div className="bg-emerald-50 border-b border-emerald-100 px-4 py-2 text-xs text-emerald-800">
-          Atendido por <span className="font-semibold">{attendedBy}</span>. La factura que envies se le acredita.
+          Atendido por <span className="font-semibold">{attendedBy}</span>. La {methodSingularList} que envies se le acredita.
         </div>
       )}
 
@@ -1002,7 +1032,7 @@ function ConsumerApp() {
             className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700"
           >
             <MdCameraAlt className="w-5 h-5 relative z-10" />
-            <span className="relative z-10">Escanear factura</span>
+            <span className="relative z-10">{ctaLabel}</span>
           </Link>
           <Link
             href="/catalog"
