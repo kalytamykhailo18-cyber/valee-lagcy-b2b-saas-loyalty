@@ -7,6 +7,7 @@ import { registerHealthRoutes } from './admin/health.js';
 import { registerManualReviewRoutes } from './admin/manual-review.js';
 import { registerWhatsAppRoutes } from './admin/whatsapp.js';
 import { registerAuditRoutes } from './admin/audit.js';
+import { registerSystemRoutes } from './admin/system.js';
 
 /**
  * Admin route plugin. Previously a single 981-line file; now composes
@@ -23,4 +24,5 @@ export default async function adminRoutes(app: FastifyInstance) {
   await registerManualReviewRoutes(app);
   await registerWhatsAppRoutes(app);
   await registerAuditRoutes(app);
+  await registerSystemRoutes(app);
 }

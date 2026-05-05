@@ -5,7 +5,7 @@ import { usePathname, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   MdDashboard, MdStorefront, MdMenuBook, MdTune,
-  MdMenu, MdLogout,
+  MdMenu, MdLogout, MdSms,
 } from 'react-icons/md'
 
 interface NavItem {
@@ -19,6 +19,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: '/admin/tenants', label: 'Comercios', Icon: MdStorefront },
   { href: '/admin/ledger', label: 'Ledger global', Icon: MdMenuBook },
   { href: '/admin/adjustments', label: 'Ajustes manuales', Icon: MdTune },
+  { href: '/admin/auth-channel', label: 'Canal de OTP', Icon: MdSms },
 ]
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

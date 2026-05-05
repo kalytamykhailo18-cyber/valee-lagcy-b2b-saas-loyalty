@@ -5,6 +5,8 @@ import { findOrCreateConsumerAccount, normalizeVenezuelanPhone } from '../../../
 import { requireConsumerAuth } from '../../middleware/auth.js';
 import { sendWhatsAppOTP } from '../../../services/whatsapp.js';
 import { grantWelcomeBonus } from '../../../services/welcome-bonus.js';
+import { getAuthChannel } from '../../../services/system-settings.js';
+import { startTwilioSmsVerification, checkTwilioSmsVerification, isTwilioConfigured } from '../../../services/twilio-verify.js';
 
 export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
   // ---- PUBLIC: Merchant entry info ----
@@ -73,12 +75,30 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
       }
     }
 
-    const otp = await generateOTP(phoneNumber);
+    // Eric 2026-05-04 (Notion "Codigo otp via Sms"): when the admin
+    // flips auth_channel='sms', delegate to Twilio Verify. Twilio owns
+    // the OTP digits + expiry on this path, so we don't call generateOTP.
+    const channel = await getAuthChannel();
+    if (channel === 'sms' && isTwilioConfigured()) {
+      const sent = await startTwilioSmsVerification(phoneNumber);
+      if (sent) {
+        console.log(`[Auth] OTP requested (sms): phone=${phoneNumber} slug=${tenantSlug || '(global)'} bucket=${bucketCount}`);
+        return { success: true, message: 'OTP sent via SMS', channel: 'sms' };
+      }
+      // Twilio failed — fall through to WhatsApp so the user is not stranded.
+      console.warn(`[Auth] Twilio start failed; falling back to WhatsApp for ${phoneNumber}`);
+    }
 
+    const otp = await generateOTP(phoneNumber);
     await sendWhatsAppOTP(phoneNumber, otp);
 
-    console.log(`[Auth] OTP requested: phone=${phoneNumber} slug=${tenantSlug || '(global)'} bucket=${bucketCount}`);
-    return { success: true, message: 'OTP sent via WhatsApp', otp: process.env.NODE_ENV !== 'production' ? otp : undefined };
+    console.log(`[Auth] OTP requested (whatsapp): phone=${phoneNumber} slug=${tenantSlug || '(global)'} bucket=${bucketCount}`);
+    return {
+      success: true,
+      message: 'OTP sent via WhatsApp',
+      channel: 'whatsapp',
+      otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+    };
   });
 
   // ---- AUTH: Verify OTP ----
@@ -94,7 +114,25 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
 
     const phoneNumber = normalizeVenezuelanPhone(rawPhone);
 
-    const valid = await verifyOTP(phoneNumber, otp);
+    // Channel-aware verification. SMS path checks via Twilio; WhatsApp path
+    // uses our in-house OTP store. We try BOTH so a session that started
+    // on one channel can still verify after the admin flips mid-flow.
+    const channel = await getAuthChannel();
+    let valid = false;
+    if (channel === 'sms' && isTwilioConfigured()) {
+      valid = await checkTwilioSmsVerification(phoneNumber, otp);
+      if (!valid) {
+        // Try our local store too — handles the case where the admin
+        // flipped the toggle between request and verify.
+        valid = await verifyOTP(phoneNumber, otp);
+      }
+    } else {
+      valid = await verifyOTP(phoneNumber, otp);
+      if (!valid && isTwilioConfigured()) {
+        // Same idea on the other side: code may have come from SMS.
+        valid = await checkTwilioSmsVerification(phoneNumber, otp);
+      }
+    }
     if (!valid) return reply.status(401).send({ error: 'Invalid or expired OTP' });
 
     if (tenantSlug) {

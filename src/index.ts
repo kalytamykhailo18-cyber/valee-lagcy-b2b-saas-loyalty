@@ -89,7 +89,16 @@ async function start() {
     catch (err) { done(err as Error, undefined); }
   });
 
-  await app.register(cors, { origin: true, credentials: true });
+  await app.register(cors, {
+    origin: true,
+    credentials: true,
+    // Eric 2026-05-04 (Notion "Codigo otp via Sms"): the default
+    // fastify-cors method allowlist is GET/HEAD/POST only, which
+    // silently broke every PUT/PATCH/DELETE preflight from the
+    // production frontend (admin/auth-channel, merchant/customers
+    // PATCH, etc). Allow the methods we actually use.
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
   await app.register(cookie);
   // Eric 2026-05-04 (Notion image upload friction): a 10 MB ceiling was
   // rejecting straight-off-the-camera phone photos. Bump to 50 MB so the

@@ -447,4 +447,8 @@ export const api = {
     request(`/api/admin/tenants/${tenantId}/deactivate`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
   reactivateTenant: (tenantId: string, reason: string) =>
     request(`/api/admin/tenants/${tenantId}/reactivate`, { method: 'PATCH', body: JSON.stringify({ reason }) }),
+  getAuthChannel: () =>
+    request('/api/admin/auth-channel'),
+  setAuthChannel: (channel: 'whatsapp' | 'sms') =>
+    request('/api/admin/auth-channel', { method: 'PUT', body: JSON.stringify({ channel }) }),
 };

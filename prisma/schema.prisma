@@ -887,3 +887,15 @@ model PlatformRevenue {
   @@index([tenantId, source])
   @@map("platform_revenue")
 }
+
+// Single-row global config the admin can flip at runtime. First use case
+// (Eric 2026-05-04): auth_channel = "whatsapp" | "sms" to switch the
+// consumer OTP delivery between WhatsApp and Twilio Verify SMS.
+model SystemSetting {
+  key       String   @id @db.VarChar(64)
+  value     Json
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("system_settings")
+}
