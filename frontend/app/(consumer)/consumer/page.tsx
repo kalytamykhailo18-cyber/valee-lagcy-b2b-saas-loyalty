@@ -672,21 +672,29 @@ function ConsumerApp() {
         </div>
       )}
 
-      {/* Balance hero — tap to expand history */}
+      {/* Balance hero — tap to expand history.
+          Eric 2026-05-05 (Notion "F (genesis)"): swap the morado for a
+          gris mate oscuro background with rosado/salmon metalizado
+          accents on the number, caption and decorative glow. */}
       <section
-        className="aa-rise mx-4 mt-5 bg-gradient-to-br from-indigo-600 via-indigo-700 to-indigo-900 rounded-3xl p-6 sm:p-7 text-white overflow-hidden relative"
-        style={{ animationDelay: '60ms', boxShadow: '0 1px 2px rgba(15,23,42,0.08), 0 20px 40px -16px rgba(79,70,229,0.35)' }}
+        className="aa-rise mx-4 mt-5 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 rounded-3xl p-6 sm:p-7 text-white overflow-hidden relative"
+        style={{ animationDelay: '60ms', boxShadow: '0 1px 2px rgba(15,23,42,0.10), 0 20px 40px -16px rgba(244,114,182,0.30)' }}
       >
-        {/* Subtle decorative glow */}
-        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/10 rounded-full blur-3xl" />
+        {/* Salmon-metalizado decorative glow */}
+        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-rose-400/25 rounded-full blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-pink-300/15 rounded-full blur-3xl" />
         <div className="relative">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-indigo-200 font-semibold mb-1.5">Tu saldo</p>
-              <p key={displayBalance} className="text-[56px] sm:text-6xl font-bold tracking-tight tabular-nums leading-none break-all aa-count">
+              <p className="text-[10px] uppercase tracking-[0.14em] text-rose-200/80 font-semibold mb-1.5">Tu saldo</p>
+              <p
+                key={displayBalance}
+                className="text-[56px] sm:text-6xl font-bold tracking-tight tabular-nums leading-none break-all aa-count text-transparent bg-clip-text bg-gradient-to-br from-rose-200 via-pink-200 to-rose-400"
+                style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.25))' }}
+              >
                 {displayBalance}
               </p>
-              <p className="text-indigo-200 text-sm mt-2.5">{unitLabel}</p>
+              <p className="text-rose-200/80 text-sm mt-2.5">{unitLabel}</p>
             </div>
             {account?.levelName && (
               <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 border border-white/20 flex-shrink-0">
@@ -711,7 +719,7 @@ function ConsumerApp() {
               renders only when the user taps the pill. New copy: short
               and reassuring instead of the previous detail dump. */}
           {showVerificationDetail && parseFloat(provisionalBalance) > 0 && (
-            <p className="mt-1.5 text-[11px] text-indigo-100/80 leading-snug">
+            <p className="mt-1.5 text-[11px] text-rose-100/80 leading-snug">
               Confirmando tu transaccion. En Valee tus recompensas son seguras.
             </p>
           )}
@@ -736,7 +744,7 @@ function ConsumerApp() {
           <div className="mt-5 flex justify-end">
             <button
               onClick={() => setShowHistory(!showHistory)}
-              className="text-xs font-semibold text-indigo-100 hover:text-white inline-flex items-center gap-1 transition-colors"
+              className="text-xs font-semibold text-rose-100/90 hover:text-white inline-flex items-center gap-1 transition-colors"
             >
               {showHistory ? 'Ocultar historial' : 'Ver historial'}
               <MdChevronRight className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
@@ -828,7 +836,10 @@ function ConsumerApp() {
                   onClick={levelLocked ? (e) => e.preventDefault() : undefined}
                   className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${dimmed ? 'opacity-50 grayscale' : ''}`}
                 >
-                  <div className="w-full aspect-square bg-slate-100 rounded-2xl overflow-hidden" style={{ boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 20px -10px rgba(15,23,42,0.12)' }}>
+                  {/* Eric 2026-05-05 (Notion "F (genesis)"): canje icons
+                      en forma circular — los regalos 100% pts ahora viven
+                      en un disco, no en cuadro redondeado. */}
+                  <div className="w-full aspect-square bg-slate-100 rounded-full overflow-hidden" style={{ boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 20px -10px rgba(15,23,42,0.12)' }}>
                     {p.photoUrl ? (
                       <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                     ) : (
@@ -896,7 +907,7 @@ function ConsumerApp() {
                 onClick={levelLocked ? (e) => e.preventDefault() : undefined}
                 className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${levelLocked ? 'opacity-50 grayscale' : ''}`}
               >
-                <div className="w-full aspect-square bg-gradient-to-b from-amber-50 to-white rounded-2xl overflow-hidden border border-amber-100" style={{ boxShadow: '0 1px 2px rgba(245,158,11,0.08), 0 8px 20px -10px rgba(245,158,11,0.20)' }}>
+                <div className="w-full aspect-square bg-gradient-to-b from-amber-50 to-white rounded-full overflow-hidden border border-amber-100" style={{ boxShadow: '0 1px 2px rgba(245,158,11,0.08), 0 8px 20px -10px rgba(245,158,11,0.20)' }}>
                   {p.photoUrl ? (
                     <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                   ) : (
