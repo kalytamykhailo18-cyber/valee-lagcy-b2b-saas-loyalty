@@ -322,8 +322,17 @@ export default function MerchantDashboard() {
             // points alone don't make cashback intuitive — surface the $
             // equivalent so the merchant grasps the math at a glance.
             // 1000 pts = $1, so $-back = points / 1000.
-            const dollarsBack = (rate: number, spend: number) =>
-              ((rate * spend) / 1000).toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            // Eric 2026-05-04 (Notion "Texto merchant"): drop trailing zeros
+            // when the dollar amount is a whole number ("$2" instead of
+            // "$2,00"), but keep two decimals for fractional amounts.
+            const dollarsBack = (rate: number, spend: number) => {
+              const v = (rate * spend) / 1000
+              const isWhole = Number.isInteger(v)
+              return v.toLocaleString('es-VE', {
+                minimumFractionDigits: isWhole ? 0 : 2,
+                maximumFractionDigits: 2,
+              })
+            }
             const presets: Array<{ value: string; label: string }> = [
               { value: '50',  label: '5%' },
               { value: '100', label: '10%' },
@@ -407,11 +416,14 @@ export default function MerchantDashboard() {
                 )}
                 {/* Live preview: make the math obvious so the owner can pick
                     the scale that reads cleanly to their customers. */}
+                {/* Eric 2026-05-04 (Notion "Texto merchant"): drop the
+                    trailing "(N% cashback)" — already shown in the headline
+                    subline above. Bold the puntos count so the merchant's
+                    eye lands on the headline number. */}
                 <div className="mt-3 bg-emerald-50 border border-emerald-100 rounded-lg px-3 py-2 text-xs text-emerald-800">
                   Ejemplo: si un cliente gasta <span className="font-semibold">${sample}</span>, recibe{' '}
                   <span className="font-semibold">${dollarsBack(previewRate, sample)}</span> en puntos
-                  <span className="text-emerald-600/80"> ({Math.round(sample * previewRate).toLocaleString('es-VE')} pts)</span>
-                  <span className="text-emerald-700"> ({pct(previewRate)} cashback)</span>
+                  <span className="text-emerald-700"> (<span className="font-semibold">{Math.round(sample * previewRate).toLocaleString('es-VE')} pts</span>)</span>
                   {newMultiplier && previewRate !== rateNow && (
                     <span className="text-emerald-700/70"> (con el nuevo {labelX(previewRate)})</span>
                   )}.
