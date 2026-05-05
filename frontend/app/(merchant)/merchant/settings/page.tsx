@@ -210,6 +210,28 @@ export default function SettingsPage() {
     }
   }
 
+  // Eric 2026-05-04 (Notion "Configuracion de puntos de bienvenida y de
+  // referidos"): merchants flipped these ON/OFF toggles and walked away
+  // without scrolling to the Guardar button at the bottom of the form.
+  // Auto-save the toggle on click — the rest of the form fields still
+  // wait for the explicit Guardar.
+  async function autoSaveBonusToggle(field: 'welcomeBonusActive' | 'referralBonusActive', next: boolean) {
+    const prev = field === 'welcomeBonusActive' ? welcomeActive : referralActive
+    if (field === 'welcomeBonusActive') setWelcomeActive(next)
+    else setReferralActive(next)
+    setMessage('')
+    try {
+      await api.updateMerchantSettings({ [field]: next } as any)
+      setMessage(next ? 'Bono activado' : 'Bono desactivado')
+      setTimeout(() => setMessage(''), 2500)
+    } catch (e: any) {
+      // Revert on failure so the visible state matches reality.
+      if (field === 'welcomeBonusActive') setWelcomeActive(prev)
+      else setReferralActive(prev)
+      setMessage('Error: ' + (e?.error || 'no se pudo guardar'))
+    }
+  }
+
   async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
@@ -357,7 +379,7 @@ export default function SettingsPage() {
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono de bienvenida</label>
                     <button
                       type="button"
-                      onClick={() => setWelcomeActive(!welcomeActive)}
+                      onClick={() => autoSaveBonusToggle('welcomeBonusActive', !welcomeActive)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${welcomeActive ? 'bg-emerald-600' : 'bg-slate-300'}`}
                       aria-label="Activar/desactivar bono de bienvenida"
                     >
@@ -387,7 +409,7 @@ export default function SettingsPage() {
                     <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Bono por referido</label>
                     <button
                       type="button"
-                      onClick={() => setReferralActive(!referralActive)}
+                      onClick={() => autoSaveBonusToggle('referralBonusActive', !referralActive)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${referralActive ? 'bg-emerald-600' : 'bg-slate-300'}`}
                       aria-label="Activar/desactivar bono por referido"
                     >

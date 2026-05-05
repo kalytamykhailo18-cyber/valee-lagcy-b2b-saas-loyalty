@@ -92,6 +92,27 @@ export default function WelcomeBonusPage() {
     }
   }
 
+  // Eric 2026-05-04 (Notion "Configuracion de puntos de bienvenida y de
+  // referidos"): merchants flipped the ON/OFF expecting it to save and
+  // walked away without clicking Guardar. Auto-save the toggle on click,
+  // keeping the Guardar button only for the puntos + cupo fields.
+  async function toggleActiveAutoSave(next: boolean) {
+    const prev = activeDraft
+    setActiveDraft(next)
+    setSaving(true)
+    setMsg('')
+    try {
+      await api.updateMerchantSettings({ welcomeBonusActive: next })
+      setMsg(next ? 'Bono activado' : 'Bono desactivado')
+      setTimeout(() => setMsg(''), 2500)
+    } catch (e: any) {
+      setActiveDraft(prev) // revert on failure
+      setMsg('Error: ' + (e?.error || 'no se pudo guardar'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -131,8 +152,10 @@ export default function WelcomeBonusPage() {
           </div>
           <button
             type="button"
-            onClick={() => setActiveDraft(!activeDraft)}
-            className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${activeDraft ? 'bg-emerald-600' : 'bg-slate-300'}`}
+            onClick={() => toggleActiveAutoSave(!activeDraft)}
+            disabled={saving}
+            className={`relative inline-flex h-7 w-12 items-center rounded-full transition ${activeDraft ? 'bg-emerald-600' : 'bg-slate-300'} disabled:opacity-50`}
+            aria-label="Activar/desactivar bono de bienvenida"
           >
             <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${activeDraft ? 'translate-x-6' : 'translate-x-1'}`} />
           </button>
