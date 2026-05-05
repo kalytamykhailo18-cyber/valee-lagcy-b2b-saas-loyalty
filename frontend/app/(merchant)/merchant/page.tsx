@@ -212,6 +212,15 @@ export default function MerchantDashboard() {
     try { setMultiplier(await api.getMultiplier()) } catch {}
   }
 
+  // Eric 2026-05-05 (Notion "multiplicador de puntos" correccion): if the
+  // merchant's currently applied rate is already in the Super Valee range,
+  // open the Super Valee panel automatically so they can see which super
+  // preset is highlighted without an extra click.
+  useEffect(() => {
+    const r = parseFloat(multiplier?.currentRate || '0')
+    if (r >= 250) setShowSuperValee(true)
+  }, [multiplier?.currentRate])
+
   async function handleSetMultiplier() {
     if (!newMultiplier || !multiplier?.assetTypeId) return
     setMultiplierMsg('')
@@ -381,14 +390,33 @@ export default function MerchantDashboard() {
                         <span className={`text-[10px] ${newMultiplier === p.value ? 'text-emerald-100' : 'text-emerald-600/70'}`}>{p.label}</span>
                       </button>
                     ))}
-                    <button
-                      onClick={() => setShowSuperValee(s => !s)}
-                      className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight border ${showSuperValee ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
-                      title="Cashback alto (25-50%)"
-                    >
-                      <span>Super Valee</span>
-                      <span className={`text-[10px] ${showSuperValee ? 'text-amber-100' : 'text-amber-600/80'}`}>{showSuperValee ? 'Ocultar' : '25–50%'}</span>
-                    </button>
+                    {(() => {
+                      // Eric 2026-05-05 (Notion "multiplicador de puntos"
+                      // correccion): drop the "Ocultar" sublabel. The chip's
+                      // subline should mirror whatever the merchant actually
+                      // has selected — the chosen super value (e.g. "5.000x ·
+                      // 50%") when one is active, or fall back to the generic
+                      // "25–50%" range hint when the merchant is on a standard
+                      // preset. Prefer the draft (newMultiplier) so the chip
+                      // updates immediately on click; otherwise reflect the
+                      // currently applied rate.
+                      const draft = newMultiplier ? parseFloat(newMultiplier) : null;
+                      const effective = draft != null ? draft : rateNow;
+                      const isSuper = effective >= 250;
+                      const sub = isSuper
+                        ? `${labelX(effective)} · ${pct(effective)}`
+                        : '25–50%';
+                      return (
+                        <button
+                          onClick={() => setShowSuperValee(s => !s)}
+                          className={`px-3 py-2 rounded-lg text-sm font-medium transition flex flex-col items-center leading-tight border ${(showSuperValee || isSuper) ? 'bg-amber-500 text-white border-amber-500' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
+                          title="Cashback alto (25-50%)"
+                        >
+                          <span>Super Valee</span>
+                          <span className={`text-[10px] ${(showSuperValee || isSuper) ? 'text-amber-100' : 'text-amber-600/80'}`}>{sub}</span>
+                        </button>
+                      );
+                    })()}
                     {newMultiplier && (
                       <button onClick={handleSetMultiplier} className="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-emerald-700">
                         Aplicar
