@@ -684,13 +684,20 @@ export default function MerchantDashboard() {
               <div className="space-y-2">
                 {transactions.map(tx => {
                   const hasItems = Array.isArray(tx.items) && tx.items.length > 0
+                  // Eric 2026-05-04 (Notion "Panel Clientes" PRIORIDAD 1):
+                  // every Factura validada row must respond to a click —
+                  // even when the OCR'd invoice has no line items, the
+                  // merchant should get visible feedback (a "sin desglose"
+                  // line) instead of a dead row.
+                  const isInvoiceClaim = tx.eventType === 'INVOICE_CLAIMED'
+                  const expandable = hasItems || isInvoiceClaim
                   const isOpen = expandedTxId === tx.id
                   return (
                   <div key={tx.id} className="aa-card bg-white rounded-xl p-3 shadow-sm">
                     <button
                       type="button"
-                      onClick={() => hasItems && setExpandedTxId(isOpen ? null : tx.id)}
-                      className={`w-full text-left flex items-start justify-between gap-3 ${hasItems ? 'cursor-pointer' : 'cursor-default'}`}
+                      onClick={() => expandable && setExpandedTxId(isOpen ? null : tx.id)}
+                      className={`w-full text-left flex items-start justify-between gap-3 ${expandable ? 'cursor-pointer' : 'cursor-default'}`}
                     >
                       <div className="flex items-start gap-3 min-w-0 flex-1">
                         {tx.productPhotoUrl && (
@@ -740,9 +747,11 @@ export default function MerchantDashboard() {
                                 Sin sucursal
                               </span>
                             )}
-                            {hasItems && (
+                            {hasItems ? (
                               <span className="text-[10px] text-indigo-500">{isOpen ? 'Ocultar items' : `${tx.items!.length} item${tx.items!.length === 1 ? '' : 's'}`}</span>
-                            )}
+                            ) : isInvoiceClaim ? (
+                              <span className="text-[10px] text-indigo-400">{isOpen ? 'Ocultar' : 'Ver detalle'}</span>
+                            ) : null}
                           </div>
                         </div>
                       </div>
@@ -769,6 +778,12 @@ export default function MerchantDashboard() {
                             )}
                           </div>
                         ))}
+                      </div>
+                    )}
+                    {isOpen && !hasItems && isInvoiceClaim && (
+                      <div className="mt-2 ml-1 border-l-2 border-slate-100 pl-3 text-xs text-slate-500">
+                        Esta factura no tiene desglose de items disponible.
+                        {tx.invoiceNumber && <> Factura <span className="font-mono">#{tx.invoiceNumber}</span>.</>}
                       </div>
                     )}
                   </div>

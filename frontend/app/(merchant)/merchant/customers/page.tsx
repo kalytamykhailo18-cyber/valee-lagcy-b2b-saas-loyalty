@@ -240,10 +240,22 @@ export default function CustomersPage() {
               <div key={selected.account.id} className="space-y-4 sticky top-4 aa-rise">
                 {/* Account Card */}
                 <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+                  {/* Eric 2026-05-04 (Notion "Panel Clientes" PRIORIDAD 1):
+                      promote displayName to the headline line so the
+                      merchant sees the name + phone together at the top
+                      of the card, not just the phone with name buried
+                      below as a "Nombre: X" line. */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
                       <p className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Cliente</p>
-                      <p className="text-lg font-bold text-slate-800 mt-1 truncate">{selected.account.phoneNumber}</p>
+                      {selected.account.displayName ? (
+                        <>
+                          <p className="text-lg font-bold text-slate-800 mt-1 truncate">{selected.account.displayName}</p>
+                          <p className="text-sm text-slate-500 truncate">{selected.account.phoneNumber}</p>
+                        </>
+                      ) : (
+                        <p className="text-lg font-bold text-slate-800 mt-1 truncate">{selected.account.phoneNumber}</p>
+                      )}
                     </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold flex-shrink-0 ml-2 ${
                       selected.account.accountType === 'verified' ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-600'
@@ -289,9 +301,6 @@ export default function CustomersPage() {
                     </div>
                   ) : (
                     <>
-                      {selected.account.displayName && (
-                        <p className="text-sm text-slate-600">Nombre: {selected.account.displayName}</p>
-                      )}
                       {selected.account.cedula && (
                         <p className="text-sm text-slate-600">Cedula: {selected.account.cedula}</p>
                       )}

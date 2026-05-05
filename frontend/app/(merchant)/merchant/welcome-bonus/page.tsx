@@ -243,13 +243,28 @@ export default function WelcomeBonusPage() {
             Aun no se han entregado bonos de bienvenida.
           </p>
         ) : (
+          // Eric 2026-05-04 (Notion "Panel Clientes" PRIORIDAD 1): show
+          // the full phone + WhatsApp display name. The previous masked
+          // "***3100" hid identity from the merchant — they need to
+          // know exactly who received the bono.
           <div className="divide-y divide-slate-100">
             {recent.map(r => (
               <div key={r.id} className="px-5 py-3 flex items-center justify-between gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-800 truncate">
-                    {r.consumer.displayName || fmtPhone(r.consumer.phoneNumber)}
-                  </p>
+                  {r.consumer.displayName ? (
+                    <>
+                      <p className="text-sm font-medium text-slate-800 truncate">
+                        {r.consumer.displayName}
+                      </p>
+                      <p className="text-xs text-slate-500 truncate">
+                        {r.consumer.phoneNumber || '—'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm font-medium text-slate-800 truncate">
+                      {r.consumer.phoneNumber || '—'}
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-0.5">
                     <span>{fmtDate(r.createdAt)}</span>
                     {r.branchName && <span>{r.branchName}</span>}
