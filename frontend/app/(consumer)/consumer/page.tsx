@@ -941,7 +941,11 @@ function ConsumerApp() {
         </Link>
       )}
 
-      {/* Invite friends — viral growth entry point */}
+      {/* Invite friends — viral growth entry point. Hidden when the
+          merchant has turned off the referral bonus (Eric 2026-05-04
+          Notion "Puntos por referidos"): the CTA promises a bonus the
+          comercio has refused to pay, so we just don't surface it. */}
+      {account?.referralBonusActive !== false && (
       <Link
         href="/invite"
         className="block mx-4 mt-3 mb-24 bg-gradient-to-br from-indigo-600 to-indigo-800 text-white rounded-2xl p-4 hover:from-indigo-700 hover:to-indigo-900 transition shadow-sm"
@@ -954,6 +958,7 @@ function ConsumerApp() {
           <MdChevronRight className="w-6 h-6 text-indigo-200 flex-shrink-0" />
         </div>
       </Link>
+      )}
 
       {/* Bottom Fixed Actions — the consumer layout wraps the whole PWA in
           a lg:max-w-md card centered on the page, so the action bar must

@@ -17,8 +17,18 @@ export async function registerReferralsRoutes(app: FastifyInstance): Promise<voi
     const { generateReferralQR } = await import('../../../services/merchant-qr.js');
 
     const slug = await ensureReferralSlug(accountId);
-    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, name: true, referralBonusAmount: true } });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId }, select: { slug: true, name: true, referralBonusAmount: true, referralBonusActive: true } });
     if (!tenant) return reply.status(404).send({ error: 'tenant not found' });
+    // Eric 2026-05-04 (Notion "Puntos por referidos"): if the merchant has
+    // turned off the referral bonus, refuse to serve the QR. The PWA hides
+    // the CTA on the home page; this guards the direct /invite URL too so
+    // a savvy user can't bypass the merchant's setting.
+    if (tenant.referralBonusActive === false) {
+      return reply.status(403).send({
+        error: 'El programa de referidos esta pausado por el comercio.',
+        referralBonusActive: false,
+      });
+    }
 
     const qr = await generateReferralQR({
       merchantSlug: tenant.slug,

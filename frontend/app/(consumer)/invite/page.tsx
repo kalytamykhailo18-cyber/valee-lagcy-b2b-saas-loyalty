@@ -46,7 +46,11 @@ export default function InvitePage() {
       } catch (e: any) {
         if (e?.status === 409 && e?.requiresMerchantSelection) {
           setError('Selecciona un comercio primero para invitar amigos.')
-        } else if (e?.status === 401 || e?.status === 403) {
+        } else if (e?.status === 403 && e?.referralBonusActive === false) {
+          // Eric 2026-05-04: tenant turned off the referral bonus.
+          // Friendly message instead of a redirect.
+          setError(e?.error || 'El programa de referidos esta pausado por el comercio.')
+        } else if (e?.status === 401) {
           window.location.href = '/'
         } else {
           setError('No pudimos cargar tu QR de referidos. Intenta de nuevo.')

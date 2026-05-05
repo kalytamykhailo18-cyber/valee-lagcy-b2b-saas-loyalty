@@ -337,6 +337,11 @@ export async function registerAccountRoutes(app: FastifyInstance): Promise<void>
       merchantName: tenant?.name,
       merchantSlug: tenant?.slug,
       merchantLogo: tenant?.logoUrl || null,
+      // Eric 2026-05-04 (Notion "Puntos por referidos"): the consumer
+      // PWA hides the "Invita amigos, gana puntos" CTA when this is
+      // false — promising a bonus the merchant has refused to pay
+      // would be a broken contract.
+      referralBonusActive: tenant?.referralBonusActive !== false,
     };
   });
 
