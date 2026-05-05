@@ -37,7 +37,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es" className={`${geistSans.variable} ${geistMono.variable}`}>
-      <body className="min-h-screen bg-slate-50 antialiased font-sans">
+      <body className="min-h-screen bg-gray-50 antialiased font-sans">
         {children}
       </body>
     </html>
