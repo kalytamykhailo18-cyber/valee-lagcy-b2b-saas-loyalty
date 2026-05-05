@@ -90,6 +90,10 @@ function ConsumerApp() {
   const [account, setAccount] = useState<any>(null)
   const [products, setProducts] = useState<any[]>([])
   const [showWelcome, setShowWelcome] = useState(false)
+  // Eric 2026-05-04 (Notion "Cambio de texto"): the "N en verificacion"
+  // pill expands its descriptor only when the user taps it. Default
+  // collapsed so the saldo card stays tidy.
+  const [showVerificationDetail, setShowVerificationDetail] = useState(false)
   const [attendedBy, setAttendedBy] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
@@ -693,14 +697,22 @@ function ConsumerApp() {
           </div>
 
           {parseFloat(provisionalBalance) > 0 && (
-            <div className="mt-4 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
+            <button
+              type="button"
+              onClick={() => setShowVerificationDetail(s => !s)}
+              className="mt-4 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15 hover:bg-white/20 transition cursor-pointer"
+              aria-expanded={showVerificationDetail}
+            >
               <MdLock className="w-3.5 h-3.5" />
               <span>{formatPoints(provisionalBalance)} en verificacion</span>
-            </div>
+            </button>
           )}
-          {parseFloat(cashProvisionalBalance) > 0 && (
+          {/* Eric 2026-05-04 (Notion "Cambio de texto"): descriptor
+              renders only when the user taps the pill. New copy: short
+              and reassuring instead of the previous detail dump. */}
+          {showVerificationDetail && parseFloat(provisionalBalance) > 0 && (
             <p className="mt-1.5 text-[11px] text-indigo-100/80 leading-snug">
-              Incluye {formatPoints(cashProvisionalBalance)} de pagos en efectivo aun no validados con el comercio. No estan disponibles para canjeo hasta la conciliacion.
+              Confirmando tu transaccion. En Valee tus recompensas son seguras.
             </p>
           )}
 
