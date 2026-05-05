@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
+import { MdStorefront } from 'react-icons/md'
 import { api } from '@/lib/api'
 import { ImageLightbox } from '@/components/ImageLightbox'
 
@@ -475,6 +477,24 @@ export default function SettingsPage() {
                       </p>
                     </div>
                   </label>
+                </div>
+
+                {/* Eric 2026-05-05 (Notion "Modificaciones en logica
+                    unisucursal"): unisucursal merchants no longer see the
+                    Sucursales item in the sidebar. This shortcut keeps a
+                    discoverable path back to /merchant/branches without
+                    requiring them to type the URL. */}
+                <div className="pt-2 border-t border-slate-100">
+                  <Link
+                    href="/merchant/branches"
+                    className="flex items-center gap-3 px-3 py-2.5 -mx-3 rounded-lg text-sm font-medium text-emerald-700 hover:bg-emerald-50 transition"
+                  >
+                    <MdStorefront className="w-5 h-5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold">Gestionar sucursales</p>
+                      <p className="text-xs text-slate-500 mt-0.5">Si manejas mas de un local, agrega o edita sucursales aqui.</p>
+                    </div>
+                  </Link>
                 </div>
               </div>
             </section>

@@ -50,6 +50,12 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
   // unauthenticated user for the tick between mount and the redirect firing.
   const [authChecked, setAuthChecked] = useState(false)
   const [authorized, setAuthorized] = useState(false)
+  // Eric 2026-05-05 (Notion "Modificaciones en logica unisucursal"): when
+  // the merchant onboarded as unisucursal (zero branches), hide the
+  // Sucursales nav item entirely. The route still works if visited
+  // directly, and /merchant/settings exposes a "Activar multi-sucursal"
+  // shortcut so they can flip back if they change their mind.
+  const [activeBranchCount, setActiveBranchCount] = useState<number | null>(null)
 
   const PUBLIC_ROUTES = ['/merchant/login', '/merchant/signup', '/merchant/forgot-password', '/merchant/reset-password']
 
@@ -129,6 +135,23 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
     })()
   }, [mounted, role, tenantName, tenantLogoUrl])
 
+  // Branch count drives whether the Sucursales nav item is visible. Owners
+  // only — cashiers don't see /merchant/branches anyway (ownerOnly flag).
+  useEffect(() => {
+    if (!mounted || role !== 'owner') return
+    ;(async () => {
+      try {
+        const { api } = await import('@/lib/api')
+        const list: any = await api.getBranches()
+        const arr: any[] = Array.isArray(list) ? list : (list?.branches || [])
+        const active = arr.filter(b => b?.active !== false).length
+        setActiveBranchCount(active)
+      } catch {
+        setActiveBranchCount(0)
+      }
+    })()
+  }, [mounted, role, pathname])
+
   // /merchant/scanner deliberately NOT bare — cashiers need the nav
   // drawer to jump between sections (Genesis QA item 7).
   const bareRoutes = ['/merchant/login', '/merchant/signup', '/merchant/forgot-password', '/merchant/reset-password']
@@ -164,6 +187,20 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
 
   const visibleNav = NAV_ITEMS.filter(item => {
     if (item.ownerOnly && role !== 'owner') return false
+    // Eric 2026-05-05 (Notion "Modificaciones en logica unisucursal"):
+    // hide Sucursales when the merchant has zero active branches
+    // (unisucursal). They can re-enable from /merchant/settings, and the
+    // /merchant/branches route still works directly. We keep the link
+    // visible whenever the user is currently *on* /merchant/branches so
+    // they don't get stranded with the active route highlighted off-nav.
+    if (item.href === '/merchant/branches'
+        && activeBranchCount !== null
+        && activeBranchCount === 0
+        && !pathname.startsWith('/merchant/branches')) return false
+    // Eric 2026-05-05 (same Notion card): hide Disputas from the nav for
+    // now. The route + code stays — it's just removed from the sidebar
+    // until the dispute flow is finished. Eric will re-enable later.
+    if (item.href === '/merchant/disputes') return false
     return true
   })
 
@@ -257,34 +294,39 @@ export default function MerchantLayout({ children }: { children: ReactNode }) {
         </>
       )}
 
-      {mounted && authorized && !drawerOpen && (
-        <button
-          onClick={() => setDrawerOpen(true)}
-          className="lg:hidden fixed bottom-6 left-6 z-30 w-14 h-14 rounded-full bg-emerald-600 text-white shadow-xl flex items-center justify-center hover:bg-emerald-700 active:scale-95 transition"
-          aria-label="Abrir menu"
-        >
-          <MdMenu className="w-7 h-7" />
-        </button>
-      )}
-
       <main className="lg:pl-64 min-h-screen">
-        {/* Mobile top bar with back arrow — only on sub-pages, not dashboard */}
-        {mounted && authorized && pathname !== '/merchant' && !PUBLIC_ROUTES.includes(pathname) && (
-          <div className="lg:hidden bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-20">
-            <button
-              onClick={() => {
-                // Use browser back so the dashboard restores the scroll position
-                // the user was at before entering this sub-page. Falls back to
-                // /merchant if there's no history (direct URL entry).
-                if (window.history.length > 1) router.back()
-                else window.location.href = '/merchant'
-              }}
-              className="text-emerald-700 hover:-translate-x-0.5 transition-transform"
-            >
-              <MdArrowBack className="w-6 h-6" />
-            </button>
-            <span className="text-sm font-semibold text-slate-700 truncate">
-              {visibleNav.find(n => pathname.startsWith(n.href) && n.href !== '/merchant')?.label || 'Valee'}
+        {/* Eric 2026-05-05 (Notion "Modificaciones en logica unisucursal"):
+            the floating bottom-left burger overlapped dashboard cards on
+            mobile. Replaced with a sticky top header that always shows on
+            mobile. The hamburger lives on the LEFT next to the title; on
+            sub-pages the back arrow takes its place. Desktop nav is the
+            sidebar so this strip is hidden on lg+. */}
+        {mounted && authorized && !PUBLIC_ROUTES.includes(pathname) && (
+          <div className="lg:hidden bg-white border-b border-slate-200 px-3 py-3 flex items-center gap-3 sticky top-0 z-20">
+            {pathname === '/merchant' ? (
+              <button
+                onClick={() => setDrawerOpen(true)}
+                className="text-emerald-700 active:scale-95 transition p-1 -ml-1"
+                aria-label="Abrir menu"
+              >
+                <MdMenu className="w-7 h-7" />
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (window.history.length > 1) router.back()
+                  else window.location.href = '/merchant'
+                }}
+                className="text-emerald-700 hover:-translate-x-0.5 transition-transform p-1 -ml-1"
+                aria-label="Volver"
+              >
+                <MdArrowBack className="w-6 h-6" />
+              </button>
+            )}
+            <span className="text-sm font-semibold text-slate-700 truncate flex-1">
+              {pathname === '/merchant'
+                ? (tenantName || 'Valee')
+                : (visibleNav.find(n => pathname.startsWith(n.href) && n.href !== '/merchant')?.label || 'Valee')}
             </span>
           </div>
         )}
