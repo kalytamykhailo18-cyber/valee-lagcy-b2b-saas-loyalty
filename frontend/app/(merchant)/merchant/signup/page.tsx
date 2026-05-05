@@ -148,10 +148,6 @@ export default function MerchantSignup() {
           <h1 className="text-2xl font-bold text-slate-800 tracking-tight">Registra tu comercio</h1>
           <p className="text-sm text-slate-500">Completa los datos basicos para empezar a usar Valee. Despues podras configurar mas opciones desde tu panel.</p>
 
-          {topError && (
-            <div className="aa-pop bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{topError}</div>
-          )}
-
           <section className="space-y-4">
             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wide pt-2 border-t border-slate-100">Datos del comercio</h2>
             <div>
@@ -217,6 +213,15 @@ export default function MerchantSignup() {
             {field('password', 'Contrasena', 'password', 'Minimo 8 caracteres', true)}
             {field('confirmPassword', 'Confirmar contrasena', 'password', 'Repite la contrasena', true)}
           </section>
+
+          {/* Eric 2026-05-04 (Notion "Registro de comercio desde el PWA"):
+              the "Corrige los campos marcados en rojo" banner used to live
+              at the top of the form, so a merchant who tried to submit
+              from the bottom never saw it unless they scrolled back up.
+              Render it right above the submit button instead. */}
+          {topError && (
+            <div className="aa-pop bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-700">{topError}</div>
+          )}
 
           <button
             type="submit"
