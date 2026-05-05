@@ -90,6 +90,12 @@ export default function DualScanPage() {
   const [multiplier, setMultiplier] = useState<MultiplierInfo | null>(null)
   const [confirmed, setConfirmed] = useState<ConfirmedPayment | null>(null)
   const confirmedRef = useRef(false)
+  // Eric 2026-05-04 (Notion "Escaner de pagos en efectivo"): when the
+  // tenant has 2+ branches, force the cashier to pick the sucursal
+  // before generating a cash-payment QR. Same gate already applied to
+  // the redemption scanner — keeps trazabilidad por sucursal honest.
+  const [branches, setBranches] = useState<Array<{ id: string; name: string; active: boolean }>>([])
+  const [branchId, setBranchId] = useState('')
 
   // Load multiplier + exchange rate so the merchant can preview how many
   // points a given Bs amount will generate, BEFORE committing the QR.
@@ -98,6 +104,14 @@ export default function DualScanPage() {
       try {
         const m = await api.getMultiplier()
         setMultiplier(m)
+      } catch {}
+      try {
+        const data: any = await api.getBranches()
+        const active = (data.branches || []).filter((b: any) => b.active)
+        setBranches(active)
+        // 0 or 1 active branch → free, no selector needed. Auto-pick
+        // the only one so the request still carries branchId.
+        if (active.length === 1) setBranchId(active[0].id)
       } catch {}
     })()
   }, [])
@@ -180,9 +194,13 @@ export default function DualScanPage() {
       setError('Ingresa un monto valido')
       return
     }
+    if (branches.length >= 2 && !branchId) {
+      setError('Elegi la sucursal antes de generar el QR')
+      return
+    }
     setGenerating(true)
     try {
-      const res = await api.initiateDualScan(amount)
+      const res = await api.initiateDualScan(amount, branchId || undefined)
       const exp = Number(res.expiresAt)
       // Sanity check: server-supplied expiresAt must be in the future. If client
       // clock is wildly off, treat the value as "now + 60s" so the timer at
@@ -259,7 +277,34 @@ export default function DualScanPage() {
               </button>
             </div>
           ) : !token ? (
-            <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5 aa-rise" style={{ animationDelay: '80ms' }}>
+            <>
+              {/* Sucursal selector — mirrors the redemption scanner's PASO 1
+                  gate. Only renders when the tenant has 2+ active branches;
+                  with 0 or 1 branch the selector is unnecessary and the
+                  cash-payment QR can be generated freely. Eric 2026-05-04. */}
+              {branches.length >= 2 && (
+                <div className={`rounded-xl p-3 mb-4 shadow-sm aa-rise-sm border-2 ${!branchId ? 'bg-amber-50 border-amber-400' : 'bg-white border-transparent'}`}>
+                  <label className={`text-xs font-semibold uppercase tracking-wide ${!branchId ? 'text-amber-800' : 'text-slate-500'}`}>
+                    {!branchId ? 'Paso 1: Elige la sucursal' : 'Sucursal del pago'}
+                  </label>
+                  <select
+                    value={branchId}
+                    onChange={e => setBranchId(e.target.value)}
+                    className={`aa-field aa-field-emerald w-full mt-1 px-3 py-2.5 rounded-lg border text-sm bg-white ${!branchId ? 'border-amber-400 ring-2 ring-amber-200' : 'border-slate-200'}`}
+                  >
+                    <option value="">Seleccionar sucursal...</option>
+                    {branches.map(b => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                  {!branchId && (
+                    <p className="text-xs text-amber-800 mt-2 font-medium">
+                      Tenes que elegir la sucursal antes de generar el QR. Asi cada punto emitido queda atribuido a la sucursal correcta.
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className={`bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 space-y-5 aa-rise ${branches.length >= 2 && !branchId ? 'opacity-60 pointer-events-none' : ''}`} style={{ animationDelay: '80ms' }}>
               <div>
                 <label className="text-xs text-slate-500 font-semibold uppercase tracking-wide">Monto de la transaccion ({currencySymbol})</label>
                 <div className="relative mt-2">
@@ -293,12 +338,13 @@ export default function DualScanPage() {
 
               <button
                 onClick={generate}
-                disabled={generating || !amount}
+                disabled={generating || !amount || (branches.length >= 2 && !branchId)}
                 className="aa-btn aa-btn-emerald w-full bg-emerald-600 text-white py-4 rounded-xl font-semibold text-base disabled:opacity-50 hover:bg-emerald-700 flex items-center justify-center"
               >
                 {generating && <span className="aa-spinner" />}<span className="relative z-10">{generating ? 'Generando...' : 'Generar QR'}</span>
               </button>
             </div>
+            </>
           ) : (
             <div className="bg-white rounded-2xl p-6 lg:p-8 shadow-sm border border-slate-100 text-center space-y-5 aa-pop">
               <div>
