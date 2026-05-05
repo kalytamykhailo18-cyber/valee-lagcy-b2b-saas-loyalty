@@ -24,10 +24,24 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       accountType: { in: ['shadow', 'verified'] },
     };
     if (search) {
-      where.OR = [
+      // Eric 2026-05-05 (Notion "Buscador panel clientes"): two bugs
+      //   1. nombre no procesaba — falta el clause sobre displayName
+      //   2. tipear "0424..." (formato local VE) no encontraba al cliente
+      //      porque la DB guarda "+58424..." canonico. Normalizamos a
+      //      tail-digits (sin 0 inicial) y buscamos tambien por ese
+      //      sufijo, asi "0424", "424", y "+58424" matchean la misma
+      //      cuenta.
+      const digits = search.replace(/\D/g, '');
+      const tail = digits.startsWith('0') ? digits.slice(1) : digits;
+      const orClauses: any[] = [
         { phoneNumber: { contains: search } },
-        { cedula: { contains: search } },
+        { cedula: { contains: search, mode: 'insensitive' } },
+        { displayName: { contains: search, mode: 'insensitive' } },
       ];
+      if (tail && tail.length >= 3 && tail !== search) {
+        orClauses.push({ phoneNumber: { contains: tail } });
+      }
+      where.OR = orClauses;
     }
 
     const [accounts, total] = await Promise.all([
