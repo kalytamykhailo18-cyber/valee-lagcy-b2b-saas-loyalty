@@ -81,6 +81,9 @@ function ConsumerApp() {
   const [provisionalBalance, setProvisionalBalance] = useState('0')
   const [cashProvisionalBalance, setCashProvisionalBalance] = useState('0')
   const [spendableBalance, setSpendableBalance] = useState('0')
+  // Toast banner shown when a pending canje QR expires and returns the
+  // points (Eric 2026-05-04 Notion "Trazabilidad de puntos").
+  const [returnedPointsToast, setReturnedPointsToast] = useState<string | null>(null)
   const [unitLabel, setUnitLabel] = useState('points')
   const [assetTypeId, setAssetTypeId] = useState('')
   const [history, setHistory] = useState<HistoryEntry[]>([])
@@ -245,6 +248,25 @@ function ConsumerApp() {
 
     if (balR.status === 'fulfilled') {
       const balData = balR.value
+      // Eric 2026-05-04 (Notion "Trazabilidad de puntos"): surface a
+      // toast when reservados drops AND balance grows by the same
+      // amount — that's the signature of a canje QR that expired and
+      // returned the points to the consumer. Without this the user
+      // sees the chip disappear and assumes the points were lost.
+      const prevReserved = parseFloat(reservedBalance || '0')
+      const prevBalance = parseFloat(balance || '0')
+      const newReserved = parseFloat(balData.reserved || '0')
+      const newBalance = parseFloat(balData.balance || '0')
+      const delta = Math.round(newBalance - prevBalance)
+      if (
+        prevReserved > 0 &&
+        newReserved < prevReserved &&
+        delta > 0 &&
+        delta === Math.round(prevReserved - newReserved)
+      ) {
+        setReturnedPointsToast(`Canje cancelado: ${formatPoints(String(delta))} puntos devueltos`)
+        setTimeout(() => setReturnedPointsToast(null), 6000)
+      }
       setBalance(balData.balance)
       setConfirmedBalance(balData.confirmed || balData.balance)
       setProvisionalBalance(balData.provisional || '0')
@@ -497,9 +519,16 @@ function ConsumerApp() {
   }
 
   // ---- SINGLE-MERCHANT MAIN SCREEN ----
-  // Display total = spendable + reserved so a pending canje QR doesn't
-  // look like missing points (Genesis M4). Offline pending still subtracts.
-  const displayBalance = formatPoints(parseFloat(balance) + parseFloat(reservedBalance) - getLocalPendingBalance())
+  // Eric 2026-05-04 (Notion "Trazabilidad de puntos"): the headline used
+  // to show balance + reserved so the saldo didn't drop when a canje QR
+  // was generated (Genesis M4). But that hid the inverse motion too —
+  // when the QR expired and the reservation released, the headline
+  // didn't move either, making Eric think the points were lost. Switch
+  // to showing the spendable bucket on the headline; the "X reservados
+  // para canje pendiente" chip below carries the held-back amount, so
+  // the user sees both pieces clearly: what they can spend now, and
+  // what is parked in an active QR.
+  const displayBalance = formatPoints(parseFloat(balance) - getLocalPendingBalance())
   // Greet with the name the merchant linked in "Buscar cliente". If no name is
   // on file we deliberately skip the phone fallback — showing the number feels
   // robotic and clutters the hero.
@@ -679,6 +708,12 @@ function ConsumerApp() {
             <div className="mt-2 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
               <MdLock className="w-3.5 h-3.5" />
               <span>{formatPoints(reservedBalance)} reservados para canje pendiente</span>
+            </div>
+          )}
+
+          {returnedPointsToast && (
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-emerald-500/90 backdrop-blur rounded-full px-3 py-1.5 text-xs font-semibold border border-emerald-300/50">
+              <span>{returnedPointsToast}</span>
             </div>
           )}
 
@@ -1121,10 +1156,11 @@ function MultiMerchantHub() {
                               {(() => {
                                 // Responsive sizing: prevent 7+ digit saldos
                                 // from wrapping to 3 lines inside the card.
-                                // Display total = spendable + reserved so a
-                                // pending canje QR doesn't look like missing
-                                // points (Genesis M4).
-                                const displayBal = Number(m.balance) + Number(m.reserved || 0)
+                                // Eric 2026-05-04 (Notion "Trazabilidad de
+                                // puntos"): show the raw spendable balance,
+                                // not balance+reserved. The "N reservados"
+                                // chip below carries the held-back amount.
+                                const displayBal = Number(m.balance)
                                 const digits = String(displayBal).replace(/\D/g, '').length
                                 const cls = digits >= 9 ? 'text-2xl sm:text-3xl'
                                   : digits >= 7 ? 'text-3xl sm:text-4xl'
