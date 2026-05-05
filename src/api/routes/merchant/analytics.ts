@@ -344,19 +344,35 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
       if (num) invoiceNumbersInPage.add(num);
     }
     const invoiceItemsByNumber = new Map<string, Array<{ name: string; quantity: number; unitPrice: number }>>();
+    const invoiceCustomerNameByNumber = new Map<string, string>();
     if (invoiceNumbersInPage.size > 0) {
       const invs = await prisma.invoice.findMany({
         where: { tenantId, invoiceNumber: { in: Array.from(invoiceNumbersInPage) } },
-        select: { invoiceNumber: true, orderDetails: true },
+        select: { invoiceNumber: true, orderDetails: true, extractedData: true },
       });
       for (const i of invs) {
+        // Eric 2026-05-05: prefer order_details (canonical), fall back to
+        // extracted_data.order_items so provisional rows submitted before
+        // the createPendingValidation fix still surface items in the panel.
         const od: any = i.orderDetails || null;
-        if (od && Array.isArray(od.items)) {
-          invoiceItemsByNumber.set(i.invoiceNumber, od.items.map((it: any) => ({
+        const ed: any = i.extractedData || null;
+        let items: any[] | null = null;
+        if (od && Array.isArray(od.items)) items = od.items;
+        else if (ed && Array.isArray(ed.order_items)) items = ed.order_items;
+        if (items && items.length > 0) {
+          invoiceItemsByNumber.set(i.invoiceNumber, items.map((it: any) => ({
             name: String(it?.name || ''),
             quantity: Number(it?.quantity ?? 1),
             unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
           })));
+        }
+        // Eric 2026-05-05: receipt OCR captured customer_name but the
+        // account already existed without a displayName, so a.display_name
+        // is null and the row shows just the phone. Surface the receipt's
+        // customer_name as a fallback so the merchant sees the name on
+        // already-submitted provisional rows without waiting for a re-submit.
+        if (ed && typeof ed.customer_name === 'string' && ed.customer_name.trim()) {
+          invoiceCustomerNameByNumber.set(i.invoiceNumber, ed.customer_name.trim());
         }
       }
     }
@@ -438,7 +454,8 @@ export async function registerAnalyticsRoutes(app: FastifyInstance): Promise<voi
             branchId: effectiveBranchId,
             branchName: effectiveBranchName,
             accountPhone: e.account_phone,
-            accountName: e.account_name || null,
+            accountName: e.account_name
+              || (invoiceNumber ? (invoiceCustomerNameByNumber.get(invoiceNumber) || null) : null),
             // Product info stamped at write time survives token cleanup; also
             // pull invoice number when the event is an invoice claim so the
             // merchant row shows "which invoice" without clicking in. Fallback

@@ -709,6 +709,7 @@ export async function validateInvoice(params: {
       imageHash: imageHash || undefined,
       branchId: effectiveBranchForPending,
       staffId: preStageStaffId,
+      customerName: extracted.customer_name || null,
     });
     return provisional;
   }
@@ -753,7 +754,7 @@ export async function validateInvoice(params: {
   const amountDiff = Math.abs(Number(invoice.amount) - extracted.total_amount);
   if (amountDiff > tolerance * extracted.total_amount) {
     // Credit provisionally with the merchant's recorded amount, route to manual review
-    const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
+    const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone, extracted.customer_name || null);
     const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
     if (!poolAccount) throw new Error('issued_value_pool not found');
     const loyaltyValue = await convertToLoyaltyValue(
@@ -816,7 +817,12 @@ export async function validateInvoice(params: {
   }
 
   // STAGE D: Value assignment
-  const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
+  // Pass the receipt's customer_name so PWA-only users (no WhatsApp profile)
+  // get a displayName from the receipt itself. The merchant transactions
+  // panel and customer detail panel both render this — Eric 2026-05-05
+  // (Notion "Panel Clientes" correccion): without it the row shows "+584...
+  // 4183100" with no name even when the receipt clearly has one.
+  const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone, extracted.customer_name || null);
 
   // Auto-upgrade shadow to verified if cedula was extracted from the invoice
   if (extracted.customer_cedula && consumerAccount.accountType === 'shadow' && !consumerAccount.cedula) {
@@ -1090,6 +1096,7 @@ export async function createPendingValidation(params: {
   imageHash?: string;
   branchId?: string | null;
   staffId?: string | null;
+  customerName?: string | null;
 }): Promise<ValidationResult> {
   const { tenantId, senderPhone, invoiceNumber, totalAmount, assetTypeId } = params;
 
@@ -1147,7 +1154,11 @@ export async function createPendingValidation(params: {
     };
   }
 
-  const { account: consumerAccount } = await findOrCreateConsumerAccount(tenantId, senderPhone);
+  const { account: consumerAccount } = await findOrCreateConsumerAccount(
+    tenantId,
+    senderPhone,
+    params.customerName || params.extractedData?.customer_name || null,
+  );
   const poolAccount = await getSystemAccount(tenantId, 'issued_value_pool');
   if (!poolAccount) throw new Error('issued_value_pool not found');
 
@@ -1247,12 +1258,33 @@ export async function createPendingValidation(params: {
     if (!isNaN(parsed.getTime())) pendingTxDate = parsed;
   }
 
+  // Eric 2026-05-05 (Notion "Panel Clientes" correccion): provisional rows
+  // were saved with extracted_data.order_items but order_details stayed
+  // null, so the merchant transactions panel rendered "no items disponible"
+  // even when the receipt OCR clearly extracted line items. Stamp
+  // order_details from the same source the confirmed path uses (image
+  // extraction), so the panel can expand the row immediately at submission.
+  let pendingOrderDetails: string | null = null;
+  if (
+    params.extractedData?.order_items
+    && Array.isArray(params.extractedData.order_items)
+    && params.extractedData.order_items.length > 0
+    && params.extractedData.document_type !== 'voucher'
+    && params.extractedData.document_type !== 'mobile_payment'
+  ) {
+    pendingOrderDetails = JSON.stringify({
+      items: params.extractedData.order_items,
+      source: 'image_extraction',
+      extractedAt: new Date().toISOString(),
+    });
+  }
+
   await prisma.$executeRawUnsafe(
     `INSERT INTO invoices (id, tenant_id, invoice_number, amount, transaction_date, customer_phone, status, source,
-      consumer_account_id, ledger_entry_id, ocr_raw_text, extracted_data,
+      consumer_account_id, ledger_entry_id, ocr_raw_text, extracted_data, order_details,
       submitted_latitude, submitted_longitude, branch_id, created_at, updated_at)
     VALUES (gen_random_uuid(), $1::uuid, $2, $3, $4::timestamptz, $5, 'pending_validation', $6::"InvoiceSource",
-      $7::uuid, $8::uuid, $9, $10::jsonb, $11::decimal, $12::decimal, $13::uuid, now(), now())
+      $7::uuid, $8::uuid, $9, $10::jsonb, $11::jsonb, $12::decimal, $13::decimal, $14::uuid, now(), now())
     ON CONFLICT (tenant_id, invoice_number) DO NOTHING`,
     tenantId,
     invoiceNumber,
@@ -1264,6 +1296,7 @@ export async function createPendingValidation(params: {
     ledgerResult.credit.id,
     params.ocrRawText || null,
     params.extractedData ? JSON.stringify(params.extractedData) : null,
+    pendingOrderDetails,
     params.latitude || null,
     params.longitude || null,
     params.branchId || null,

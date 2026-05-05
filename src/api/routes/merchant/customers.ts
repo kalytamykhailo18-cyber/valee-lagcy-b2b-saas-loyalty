@@ -60,8 +60,23 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       const lastInvoice = await prisma.invoice.findFirst({
         where: invoiceWhere,
         orderBy: { createdAt: 'desc' },
-        select: { createdAt: true, invoiceNumber: true, amount: true, status: true },
+        select: { createdAt: true, invoiceNumber: true, amount: true, status: true, extractedData: true },
       });
+
+      // Eric 2026-05-05 (Notion "Panel Clientes" correccion): when the
+      // account has no displayName but the receipt OCR captured a
+      // customer_name, surface it as a fallback so PWA-only consumers
+      // submitted before the displayName-from-receipt fix still show a
+      // name in the list. The merchant flow (verify, edit) keeps writing
+      // to acc.displayName, so this is just a soft fallback for legacy
+      // rows.
+      let effectiveDisplayName: string | null = acc.displayName || null;
+      if (!effectiveDisplayName && lastInvoice?.extractedData) {
+        const ed: any = lastInvoice.extractedData;
+        if (typeof ed.customer_name === 'string' && ed.customer_name.trim()) {
+          effectiveDisplayName = ed.customer_name.trim();
+        }
+      }
 
       return {
         id: acc.id,
@@ -69,7 +84,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
         // Eric 2026-05-04 (Notion "Panel de clientes Nota 1"): the
         // WhatsApp profile name is captured at first contact. Surface
         // it on the list row so the comercio doesn't only see phones.
-        displayName: acc.displayName,
+        displayName: effectiveDisplayName,
         accountType: acc.accountType,
         cedula: acc.cedula,
         level: acc.level,
@@ -149,11 +164,18 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       }
       // Eric 2026-05-04: clicking an invoice row should reveal the
       // OCR'd line items (name, quantity, unit_price). Persisted on
-      // invoice.orderDetails.items by invoice-validation.ts:1048.
+      // invoice.orderDetails.items by invoice-validation.ts.
+      // Eric 2026-05-05: fall back to extracted_data.order_items when
+      // order_details is null (provisional rows submitted before the
+      // createPendingValidation fix saved items in only extractedData).
       const orderDetails: any = (i as any).orderDetails || null;
+      const extractedData: any = (i as any).extractedData || null;
+      let rawItems: any[] | null = null;
+      if (orderDetails && Array.isArray(orderDetails.items)) rawItems = orderDetails.items;
+      else if (extractedData && Array.isArray(extractedData.order_items)) rawItems = extractedData.order_items;
       const items: Array<{ name: string; quantity: number; unitPrice: number }> | null =
-        orderDetails && Array.isArray(orderDetails.items)
-          ? orderDetails.items.map((it: any) => ({
+        rawItems && rawItems.length > 0
+          ? rawItems.map((it: any) => ({
               name: String(it?.name || ''),
               quantity: Number(it?.quantity ?? 1),
               unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
@@ -257,11 +279,11 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
       const num = meta.invoiceNumber || invoiceNumberFromRef(e.referenceId);
       if (num) historyInvoiceNumbers.add(num);
     }
-    const invoicesByNumber = new Map<string, { amount: string; transactionDate: Date | null; createdAt: Date; orderDetails: any }>();
+    const invoicesByNumber = new Map<string, { amount: string; transactionDate: Date | null; createdAt: Date; orderDetails: any; extractedData: any }>();
     if (historyInvoiceNumbers.size > 0) {
       const invs = await prisma.invoice.findMany({
         where: { tenantId, invoiceNumber: { in: Array.from(historyInvoiceNumbers) } },
-        select: { invoiceNumber: true, amount: true, transactionDate: true, createdAt: true, orderDetails: true },
+        select: { invoiceNumber: true, amount: true, transactionDate: true, createdAt: true, orderDetails: true, extractedData: true },
       });
       for (const i of invs) {
         invoicesByNumber.set(i.invoiceNumber, {
@@ -269,6 +291,7 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
           transactionDate: i.transactionDate,
           createdAt: i.createdAt,
           orderDetails: i.orderDetails,
+          extractedData: i.extractedData,
         });
       }
     }
@@ -379,8 +402,15 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
             invoiceAmountInReference = (Number(inv.amount) / rate.rateBs).toFixed(2);
           }
         }
-        if (inv?.orderDetails && Array.isArray(inv.orderDetails.items)) {
-          items = inv.orderDetails.items.map((it: any) => ({
+        // Eric 2026-05-05: order_details is the canonical source but
+        // provisional rows submitted before the createPendingValidation
+        // fix only have extracted_data.order_items — fall back so the
+        // panel still reveals items for those rows.
+        let rawItems: any[] | null = null;
+        if (inv?.orderDetails && Array.isArray(inv.orderDetails.items)) rawItems = inv.orderDetails.items;
+        else if (inv?.extractedData && Array.isArray((inv.extractedData as any).order_items)) rawItems = (inv.extractedData as any).order_items;
+        if (rawItems && rawItems.length > 0) {
+          items = rawItems.map((it: any) => ({
             name: String(it?.name || ''),
             quantity: Number(it?.quantity ?? 1),
             unitPrice: Number(it?.unit_price ?? it?.unitPrice ?? 0),
@@ -439,11 +469,25 @@ export async function registerCustomersRoutes(app: FastifyInstance): Promise<voi
     }));
 
 
+    // Eric 2026-05-05 (Notion "Panel Clientes" correccion): if the account
+    // has no displayName but a recent invoice has customer_name from OCR,
+    // surface it as a soft fallback in the detail header.
+    let effectiveDisplayName: string | null = account.displayName || null;
+    if (!effectiveDisplayName) {
+      const invWithName = invoices.find(i => {
+        const ed: any = (i as any).extractedData || null;
+        return ed && typeof ed.customer_name === 'string' && ed.customer_name.trim();
+      });
+      if (invWithName) {
+        effectiveDisplayName = String(((invWithName as any).extractedData as any).customer_name).trim();
+      }
+    }
+
     return {
       account: {
         id: account.id,
         phoneNumber: account.phoneNumber,
-        displayName: account.displayName,
+        displayName: effectiveDisplayName,
         accountType: account.accountType,
         cedula: account.cedula,
         level: account.level,
