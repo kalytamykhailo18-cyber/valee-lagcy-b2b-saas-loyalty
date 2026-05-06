@@ -703,32 +703,40 @@ function ConsumerApp() {
       )}
 
       {/* Balance hero — tap to expand history.
-          Eric 2026-05-05 (Notion "F (genesis)"): swap the morado for a
-          gris mate oscuro background with rosado/salmon metalizado
-          accents on the number, caption and decorative glow. */}
+          Eric 2026-05-06 (overview/image.png): repaint to salmon
+          metalizado as the dominant background. Numbers, caption and
+          glow now contrast against a peach/coral gradient instead of
+          dark slate. Multi-stop gradient + diagonal sheen + soft inner
+          highlight gives the "metalizado" feel; numbers go to a deeper
+          rose for legibility on the lighter base. */}
       <section
-        className="aa-rise mx-4 mt-5 bg-gradient-to-br from-slate-800 via-slate-900 to-slate-950 rounded-3xl p-6 sm:p-7 text-white overflow-hidden relative"
-        style={{ animationDelay: '60ms', boxShadow: '0 1px 2px rgba(15,23,42,0.10), 0 20px 40px -16px rgba(244,114,182,0.30)' }}
+        className="aa-rise mx-4 mt-5 rounded-3xl p-6 sm:p-7 overflow-hidden relative"
+        style={{
+          animationDelay: '60ms',
+          background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 30%, #F88A6E 60%, #E76F58 100%)',
+          boxShadow: '0 1px 2px rgba(190,60,40,0.18), 0 24px 48px -18px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,255,255,0.45)',
+        }}
       >
-        {/* Salmon-metalizado decorative glow */}
-        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-rose-400/25 rounded-full blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-pink-300/15 rounded-full blur-3xl" />
-        <div className="relative">
+        {/* Diagonal metalizado sheen */}
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(115deg, rgba(255,255,255,0.0) 35%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0.0) 65%)', mixBlendMode: 'overlay' }} />
+        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/35 rounded-full blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-rose-200/30 rounded-full blur-3xl" />
+        <div className="relative text-rose-950">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-[10px] uppercase tracking-[0.14em] text-rose-200/80 font-semibold mb-1.5">Tu saldo</p>
+              <p className="text-[10px] uppercase tracking-[0.14em] text-rose-950/70 font-semibold mb-1.5">Tu saldo</p>
               <p
                 key={displayBalance}
-                className="text-[56px] sm:text-6xl font-bold tracking-tight tabular-nums leading-none break-all aa-count text-transparent bg-clip-text bg-gradient-to-br from-rose-200 via-pink-200 to-rose-400"
-                style={{ filter: 'drop-shadow(0 1px 1px rgba(0,0,0,0.25))' }}
+                className="text-[56px] sm:text-6xl font-bold tracking-tight tabular-nums leading-none break-all aa-count text-transparent bg-clip-text bg-gradient-to-br from-rose-900 via-rose-800 to-rose-950"
+                style={{ filter: 'drop-shadow(0 1px 1px rgba(255,255,255,0.4)) drop-shadow(0 2px 3px rgba(120,30,15,0.2))' }}
               >
                 {displayBalance}
               </p>
-              <p className="text-rose-200/80 text-sm mt-2.5">{unitLabel}</p>
+              <p className="text-rose-950/70 text-sm mt-2.5 font-medium">{unitLabel}</p>
             </div>
             {account?.levelName && (
-              <div className="flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 border border-white/20 flex-shrink-0">
-                <MdStarRate className="w-4 h-4 text-amber-300" />
+              <div className="flex items-center gap-1.5 bg-white/40 backdrop-blur rounded-full px-3 py-1.5 border border-white/50 flex-shrink-0 text-rose-950">
+                <MdStarRate className="w-4 h-4 text-amber-600" />
                 <span className="text-xs font-bold tracking-tight">{account.levelName}</span>
               </div>
             )}
@@ -738,7 +746,7 @@ function ConsumerApp() {
             <button
               type="button"
               onClick={() => setShowVerificationDetail(s => !s)}
-              className="mt-4 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15 hover:bg-white/20 transition cursor-pointer"
+              className="mt-4 inline-flex items-center gap-1.5 bg-white/40 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/50 hover:bg-white/55 transition cursor-pointer text-rose-950 font-semibold"
               aria-expanded={showVerificationDetail}
             >
               <MdLock className="w-3.5 h-3.5" />
@@ -749,20 +757,20 @@ function ConsumerApp() {
               renders only when the user taps the pill. New copy: short
               and reassuring instead of the previous detail dump. */}
           {showVerificationDetail && parseFloat(provisionalBalance) > 0 && (
-            <p className="mt-1.5 text-[11px] text-rose-100/80 leading-snug">
+            <p className="mt-1.5 text-[11px] text-rose-950/75 leading-snug font-medium">
               Confirmando tu transaccion. En Valee tus recompensas son seguras.
             </p>
           )}
 
           {parseFloat(reservedBalance) > 0 && (
-            <div className="mt-2 inline-flex items-center gap-1.5 bg-white/15 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/15">
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-white/40 backdrop-blur rounded-full px-3 py-1.5 text-xs border border-white/50 text-rose-950 font-semibold">
               <MdLock className="w-3.5 h-3.5" />
               <span>{formatPoints(reservedBalance)} reservados para canje pendiente</span>
             </div>
           )}
 
           {returnedPointsToast && (
-            <div className="mt-2 inline-flex items-center gap-1.5 bg-emerald-500/90 backdrop-blur rounded-full px-3 py-1.5 text-xs font-semibold border border-emerald-300/50">
+            <div className="mt-2 inline-flex items-center gap-1.5 bg-emerald-500 backdrop-blur rounded-full px-3 py-1.5 text-xs font-semibold border border-emerald-300 text-white">
               <span>{returnedPointsToast}</span>
             </div>
           )}
@@ -774,7 +782,7 @@ function ConsumerApp() {
           <div className="mt-5 flex justify-end">
             <button
               onClick={() => setShowHistory(!showHistory)}
-              className="text-xs font-semibold text-rose-100/90 hover:text-white inline-flex items-center gap-1 transition-colors"
+              className="text-xs font-bold text-rose-950 hover:text-rose-900 inline-flex items-center gap-1 transition-colors"
             >
               {showHistory ? 'Ocultar historial' : 'Ver historial'}
               <MdChevronRight className={`w-4 h-4 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
@@ -867,14 +875,21 @@ function ConsumerApp() {
                   className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${dimmed ? 'opacity-50 grayscale' : ''}`}
                 >
                   {/* Eric 2026-05-05 (Notion "F (genesis)"): canje icons
-                      en forma circular — los regalos 100% pts ahora viven
-                      en un disco, no en cuadro redondeado. */}
-                  <div className="w-full aspect-square bg-slate-100 rounded-full overflow-hidden" style={{ boxShadow: '0 1px 2px rgba(15,23,42,0.04), 0 8px 20px -10px rgba(15,23,42,0.12)' }}>
+                      en forma circular. Eric 2026-05-06: fondo del disco
+                      pasa a salmon metalizado para que las miniaturas
+                      hagan juego con la tarjeta de saldo. */}
+                  <div
+                    className="w-full aspect-square rounded-full overflow-hidden relative"
+                    style={{
+                      background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 50%, #F88A6E 100%)',
+                      boxShadow: '0 1px 2px rgba(190,60,40,0.15), 0 8px 20px -10px rgba(231,111,88,0.40), inset 0 1px 0 rgba(255,255,255,0.50)',
+                    }}
+                  >
                     {p.photoUrl ? (
                       <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <MdCardGiftcard className="w-12 h-12 text-slate-300" />
+                        <MdCardGiftcard className="w-12 h-12 text-rose-700/70" />
                       </div>
                     )}
                   </div>
@@ -937,12 +952,18 @@ function ConsumerApp() {
                 onClick={levelLocked ? (e) => e.preventDefault() : undefined}
                 className={`flex-shrink-0 w-40 sm:w-44 snap-start active:scale-95 transition-transform ${levelLocked ? 'opacity-50 grayscale' : ''}`}
               >
-                <div className="w-full aspect-square bg-gradient-to-b from-amber-50 to-white rounded-full overflow-hidden border border-amber-100" style={{ boxShadow: '0 1px 2px rgba(245,158,11,0.08), 0 8px 20px -10px rgba(245,158,11,0.20)' }}>
+                <div
+                  className="w-full aspect-square rounded-full overflow-hidden relative"
+                  style={{
+                    background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 50%, #F88A6E 100%)',
+                    boxShadow: '0 1px 2px rgba(190,60,40,0.15), 0 8px 20px -10px rgba(231,111,88,0.40), inset 0 1px 0 rgba(255,255,255,0.50)',
+                  }}
+                >
                   {p.photoUrl ? (
                     <img src={p.photoUrl} alt={p.name} className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
-                      <MdLocalOffer className="w-12 h-12 text-amber-300" />
+                      <MdLocalOffer className="w-12 h-12 text-rose-700/70" />
                     </div>
                   )}
                 </div>
@@ -1036,7 +1057,11 @@ function ConsumerApp() {
           </Link>
           <Link
             href="/catalog"
-            className="aa-btn aa-btn-emerald flex-1 bg-emerald-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-emerald-700"
+            className="aa-btn flex-1 py-3.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2 transition relative overflow-hidden text-rose-950"
+            style={{
+              background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 35%, #F88A6E 70%, #E76F58 100%)',
+              boxShadow: '0 1px 2px rgba(190,60,40,0.20), 0 10px 24px -10px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,255,255,0.55)',
+            }}
           >
             <MdCardGiftcard className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Canjear premios</span>
