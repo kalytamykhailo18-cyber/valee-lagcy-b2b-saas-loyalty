@@ -582,7 +582,10 @@ function ConsumerApp() {
   const userBalance = parseFloat(spendableBalance || balance) - getLocalPendingBalance()
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-32">
+    <div
+      className="min-h-screen pb-32"
+      style={{ background: 'radial-gradient(ellipse at 30% -10%, #1F1318 0%, #0B0709 55%, #050304 100%)' }}
+    >
       {/* Welcome Card — first visit only. Eric 2026-04-24: render a row of
           real product photos from this merchant so the "how it works" copy
           feels tangible and the user immediately sees what they can earn
@@ -629,36 +632,36 @@ function ConsumerApp() {
       {/* Header: back to hub + merchant label + logout
           "Mis comercios" goes back to the multi-merchant hub at /consumer
           without dropping the session (that's what "Salir" is for). */}
-      <div className="bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between gap-3">
+      <div className="bg-zinc-900/60 backdrop-blur border-b border-zinc-800 px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3 min-w-0">
           <Link
             href="/consumer"
-            className="flex items-center gap-1.5 text-xs font-semibold text-indigo-600 hover:text-indigo-800 transition-colors whitespace-nowrap"
+            className="flex items-center gap-1.5 text-xs font-semibold text-rose-300 hover:text-rose-200 transition-colors whitespace-nowrap"
           >
             <MdChevronRight className="w-4 h-4 rotate-180" />
             Mis comercios
           </Link>
           {account?.merchantName && (
             <>
-              <span className="text-slate-300">|</span>
-              <span className="text-sm font-semibold text-slate-600 truncate">{account.merchantName}</span>
+              <span className="text-zinc-600">|</span>
+              <span className="text-sm font-semibold text-zinc-200 truncate">{account.merchantName}</span>
             </>
           )}
         </div>
-        <button onClick={logout} className="text-xs font-medium text-slate-400 hover:text-slate-600 transition whitespace-nowrap">Salir</button>
+        <button onClick={logout} className="text-xs font-medium text-zinc-400 hover:text-zinc-200 transition whitespace-nowrap">Salir</button>
       </div>
 
       {/* Active-session banner — always visible so the user can't miss
           which account they're looking at. Clicking "cambiar" drops the
           session and lands them on the login screen. */}
       {sessionPhoneLabel && (
-        <div className="bg-indigo-50 border-b border-indigo-100 px-4 py-2 text-xs flex items-center justify-between gap-2">
-          <span className="text-indigo-800 truncate">
-            Sesion activa: <span className="font-semibold font-mono">{sessionPhoneLabel}</span>
+        <div className="bg-zinc-900/50 backdrop-blur border-b border-zinc-800 px-4 py-2 text-xs flex items-center justify-between gap-2">
+          <span className="text-zinc-300 truncate">
+            Sesion activa: <span className="font-semibold font-mono text-rose-300">{sessionPhoneLabel}</span>
           </span>
           <button
             onClick={logout}
-            className="text-indigo-700 underline hover:text-indigo-900 font-semibold whitespace-nowrap"
+            className="text-rose-300 underline hover:text-rose-200 font-semibold whitespace-nowrap"
           >
             No soy yo
           </button>
@@ -677,7 +680,7 @@ function ConsumerApp() {
 
       {/* Greeting + logo pair (Valee + merchant logo) */}
       <div className="px-4 pt-5 aa-rise-sm flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold text-slate-800 tracking-tight truncate">{greeting}</h1>
+        <h1 className="text-2xl font-bold text-zinc-100 tracking-tight truncate">{greeting}</h1>
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Valee badge — small lightning bolt on an indigo chip */}
           <div className="w-9 h-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-sm" aria-label="Valee" title="Valee">
@@ -713,14 +716,20 @@ function ConsumerApp() {
         className="aa-rise mx-4 mt-5 rounded-3xl p-6 sm:p-7 overflow-hidden relative"
         style={{
           animationDelay: '60ms',
-          background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 30%, #F88A6E 60%, #E76F58 100%)',
-          boxShadow: '0 1px 2px rgba(190,60,40,0.18), 0 24px 48px -18px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,255,255,0.45)',
+          // Polished metal: alternating light/dark stops along a single
+          // diagonal axis create the brushed-metal sheen Eric pointed to
+          // (overview/image.png 2026-05-06). Multi-stop gradient with
+          // sharp transitions reads as polished, not flat.
+          background: 'linear-gradient(160deg, #4A1A0E 0%, #8C3621 8%, #C9523A 18%, #F08868 30%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #E76F58 72%, #B0432D 84%, #6B2818 92%, #2A0E08 100%)',
+          boxShadow: '0 1px 2px rgba(40,10,5,0.45), 0 30px 60px -20px rgba(231,111,88,0.65), inset 0 1px 0 rgba(255,220,205,0.65), inset 0 -1px 0 rgba(40,10,5,0.45)',
         }}
       >
-        {/* Diagonal metalizado sheen */}
-        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(115deg, rgba(255,255,255,0.0) 35%, rgba(255,255,255,0.32) 50%, rgba(255,255,255,0.0) 65%)', mixBlendMode: 'overlay' }} />
-        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/35 rounded-full blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-rose-200/30 rounded-full blur-3xl" />
+        {/* Sharp metallic sheen — narrow bright band sweeping across */}
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(255,255,255,0.0) 38%, rgba(255,255,255,0.55) 49%, rgba(255,255,255,0.18) 53%, rgba(255,255,255,0.0) 62%)', mixBlendMode: 'overlay' }} />
+        {/* Secondary darker band for the contrasted "metal" feel */}
+        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(0,0,0,0.0) 70%, rgba(40,10,5,0.30) 82%, rgba(0,0,0,0.0) 95%)', mixBlendMode: 'multiply' }} />
+        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/30 rounded-full blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-rose-300/25 rounded-full blur-3xl" />
         <div className="relative text-rose-950">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -793,25 +802,26 @@ function ConsumerApp() {
 
       {/* Level progress — slim bar BELOW the balance card (not inside it) */}
       {account?.nextLevelName && account?.pointsToNextLevel > 0 ? (
-        <div className="mx-4 mt-3 bg-white rounded-xl border border-slate-100 px-4 py-3 shadow-sm">
+        <div className="mx-4 mt-3 bg-zinc-900/60 backdrop-blur rounded-xl border border-zinc-800 px-4 py-3 shadow-sm">
           <div className="flex items-center justify-between text-[11px] mb-1.5">
-            <span className="font-semibold text-slate-700">{account.levelName}</span>
-            <span className="tabular-nums text-slate-500">{formatPoints(account.pointsToNextLevel)} para {account.nextLevelName}</span>
+            <span className="font-semibold text-zinc-200">{account.levelName}</span>
+            <span className="tabular-nums text-zinc-400">{formatPoints(account.pointsToNextLevel)} para {account.nextLevelName}</span>
           </div>
-          <div className="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+          <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
             <div
-              className="bg-gradient-to-r from-indigo-500 to-indigo-700 h-1.5 rounded-full transition-all"
+              className="h-1.5 rounded-full transition-all"
               style={{
-                width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`
+                width: `${Math.min(100, Math.max(5, ((account.nextLevelMin - account.pointsToNextLevel) / account.nextLevelMin) * 100))}%`,
+                background: 'linear-gradient(90deg, #C9523A 0%, #F88A6E 50%, #E76F58 100%)',
               }}
             />
           </div>
         </div>
       ) : account?.levelName ? (
-        <div className="mx-4 mt-3 bg-white rounded-xl border border-slate-100 px-4 py-2.5 shadow-sm flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Nivel</span>
-          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700">
-            <MdStarRate className="w-4 h-4 text-amber-500" />
+        <div className="mx-4 mt-3 bg-zinc-900/60 backdrop-blur rounded-xl border border-zinc-800 px-4 py-2.5 shadow-sm flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wide">Nivel</span>
+          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-300">
+            <MdStarRate className="w-4 h-4 text-amber-400" />
             {account.levelName} · Maximo
           </span>
         </div>
@@ -859,8 +869,8 @@ function ConsumerApp() {
       {regularProducts.length > 0 && (
         <div className="mt-8 aa-rise" style={{ animationDelay: '180ms' }}>
           <div className="px-4 flex items-end justify-between mb-4">
-            <h2 className="font-bold text-slate-900 text-xl tracking-tight">Canjea tus puntos</h2>
-            <Link href="/catalog" className="text-indigo-600 text-sm font-semibold hover:text-indigo-800">Ver todo</Link>
+            <h2 className="font-bold text-zinc-100 text-xl tracking-tight">Canjea tus puntos</h2>
+            <Link href="/catalog" className="text-rose-300 text-sm font-semibold hover:text-rose-200">Ver todo</Link>
           </div>
           <div className="flex gap-4 overflow-x-auto px-4 pb-3 snap-x snap-mandatory scrollbar-hide">
             {regularProducts.map((p: any) => {
@@ -881,8 +891,11 @@ function ConsumerApp() {
                   <div
                     className="w-full aspect-square rounded-full overflow-hidden relative"
                     style={{
-                      background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 50%, #F88A6E 100%)',
-                      boxShadow: '0 1px 2px rgba(190,60,40,0.15), 0 8px 20px -10px rgba(231,111,88,0.40), inset 0 1px 0 rgba(255,255,255,0.50)',
+                      // Polished metallic salmon — same multi-stop scheme
+                      // as the saldo card so the canje miniatures hagan
+                      // juego con la tarjeta de saldo.
+                      background: 'linear-gradient(160deg, #4A1A0E 0%, #C9523A 18%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #B0432D 84%, #2A0E08 100%)',
+                      boxShadow: '0 1px 2px rgba(40,10,5,0.40), 0 8px 20px -10px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,220,205,0.55), inset 0 -1px 0 rgba(40,10,5,0.40)',
                     }}
                   >
                     {p.photoUrl ? (
@@ -894,16 +907,16 @@ function ConsumerApp() {
                     )}
                   </div>
                   <div className="mt-3">
-                    <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
-                    <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                    <p className="text-sm font-semibold text-zinc-100 line-clamp-1 tracking-tight">{p.name}</p>
+                    <p className="text-sm text-rose-300 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
                     {/* Eric 2026-04-25: misma info que el catalogo full —
                         stock + sucursal — asi el cliente sabe a primera vista
                         si lo puede canjear y donde sin tener que abrir "Ver todo". */}
                     {typeof p.stock === 'number' && (
-                      <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                      <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">{p.stock} disponibles</p>
                     )}
                     {levelLocked && (
-                      <p className="text-[11px] text-slate-600 mt-0.5 font-semibold">
+                      <p className="text-[11px] text-zinc-300 mt-0.5 font-semibold">
                         Solo Socios nivel {p.minLevel}
                       </p>
                     )}
@@ -911,14 +924,14 @@ function ConsumerApp() {
                       const names = p.branchNames || []
                       if (p.branchScope === 'branch' && p.branchName) {
                         return (
-                          <p className="text-[11px] text-emerald-700 mt-0.5 truncate" title={p.branchName}>
+                          <p className="text-[11px] text-emerald-400 mt-0.5 truncate" title={p.branchName}>
                             Solo en {p.branchName}
                           </p>
                         )
                       }
                       if (p.branchScope === 'tenant' && names.length > 0) {
                         return (
-                          <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={names.join(', ')}>
+                          <p className="text-[11px] text-zinc-400 mt-0.5 truncate" title={names.join(', ')}>
                             Todas las sucursales{names.length <= 3 ? `: ${names.join(', ')}` : ` (${names.length})`}
                           </p>
                         )
@@ -937,8 +950,8 @@ function ConsumerApp() {
       {hybridProducts.length > 0 && (
         <div className="mt-8 aa-rise" style={{ animationDelay: '240ms' }}>
           <div className="px-4 flex items-end justify-between mb-4">
-            <h2 className="font-bold text-slate-900 text-xl tracking-tight flex items-center gap-2">
-              <MdLocalOffer className="w-5 h-5 text-amber-500" />
+            <h2 className="font-bold text-zinc-100 text-xl tracking-tight flex items-center gap-2">
+              <MdLocalOffer className="w-5 h-5 text-amber-400" />
               Puntos + Efectivo
             </h2>
           </div>
@@ -955,8 +968,8 @@ function ConsumerApp() {
                 <div
                   className="w-full aspect-square rounded-full overflow-hidden relative"
                   style={{
-                    background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 50%, #F88A6E 100%)',
-                    boxShadow: '0 1px 2px rgba(190,60,40,0.15), 0 8px 20px -10px rgba(231,111,88,0.40), inset 0 1px 0 rgba(255,255,255,0.50)',
+                    background: 'linear-gradient(160deg, #4A1A0E 0%, #C9523A 18%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #B0432D 84%, #2A0E08 100%)',
+                    boxShadow: '0 1px 2px rgba(40,10,5,0.40), 0 8px 20px -10px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,220,205,0.55), inset 0 -1px 0 rgba(40,10,5,0.40)',
                   }}
                 >
                   {p.photoUrl ? (
@@ -968,14 +981,14 @@ function ConsumerApp() {
                   )}
                 </div>
                 <div className="mt-3">
-                  <p className="text-sm font-semibold text-slate-900 line-clamp-1 tracking-tight">{p.name}</p>
-                  <p className="text-sm text-indigo-600 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
-                  <p className="text-xs text-amber-600 font-bold mt-0.5">+ ${formatCash(p.cashPrice)}</p>
+                  <p className="text-sm font-semibold text-zinc-100 line-clamp-1 tracking-tight">{p.name}</p>
+                  <p className="text-sm text-rose-300 font-bold mt-0.5 tabular-nums">{formatPoints(p.redemptionCost)} pts</p>
+                  <p className="text-xs text-amber-400 font-bold mt-0.5">+ ${formatCash(p.cashPrice)}</p>
                   {typeof p.stock === 'number' && (
-                    <p className="text-xs text-slate-400 mt-0.5 tabular-nums">{p.stock} disponibles</p>
+                    <p className="text-xs text-zinc-500 mt-0.5 tabular-nums">{p.stock} disponibles</p>
                   )}
                   {levelLocked && (
-                    <p className="text-[11px] text-slate-600 mt-0.5 font-semibold">
+                    <p className="text-[11px] text-zinc-300 mt-0.5 font-semibold">
                       Solo Socios nivel {p.minLevel}
                     </p>
                   )}
@@ -983,14 +996,14 @@ function ConsumerApp() {
                     const names = p.branchNames || []
                     if (p.branchScope === 'branch' && p.branchName) {
                       return (
-                        <p className="text-[11px] text-emerald-700 mt-0.5 truncate" title={p.branchName}>
+                        <p className="text-[11px] text-emerald-400 mt-0.5 truncate" title={p.branchName}>
                           Solo en {p.branchName}
                         </p>
                       )
                     }
                     if (p.branchScope === 'tenant' && names.length > 0) {
                       return (
-                        <p className="text-[11px] text-slate-500 mt-0.5 truncate" title={names.join(', ')}>
+                        <p className="text-[11px] text-zinc-400 mt-0.5 truncate" title={names.join(', ')}>
                           Todas las sucursales{names.length <= 3 ? `: ${names.join(', ')}` : ` (${names.length})`}
                         </p>
                       )
@@ -1047,7 +1060,7 @@ function ConsumerApp() {
           the narrow content column). The outer wrapper keeps the positioning
           at the bottom of the viewport; the inner bar is capped + centered. */}
       <div className="fixed bottom-0 inset-x-0 z-10 pointer-events-none">
-        <div className="lg:max-w-md lg:mx-auto pointer-events-auto bg-white border-t border-slate-200 p-4 flex gap-3 shadow-lg aa-rise-sm">
+        <div className="lg:max-w-md lg:mx-auto pointer-events-auto bg-zinc-900/90 backdrop-blur border-t border-zinc-800 p-4 flex gap-3 shadow-lg aa-rise-sm">
           <Link
             href="/scan"
             className="aa-btn aa-btn-primary flex-1 bg-indigo-600 text-white py-3.5 rounded-xl font-semibold text-sm text-center flex items-center justify-center gap-2 hover:bg-indigo-700"
@@ -1059,10 +1072,12 @@ function ConsumerApp() {
             href="/catalog"
             className="aa-btn flex-1 py-3.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2 transition relative overflow-hidden text-rose-950"
             style={{
-              background: 'linear-gradient(135deg, #FFD3C4 0%, #FFB39A 35%, #F88A6E 70%, #E76F58 100%)',
-              boxShadow: '0 1px 2px rgba(190,60,40,0.20), 0 10px 24px -10px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,255,255,0.55)',
+              background: 'linear-gradient(160deg, #4A1A0E 0%, #C9523A 18%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #B0432D 84%, #2A0E08 100%)',
+              boxShadow: '0 1px 2px rgba(40,10,5,0.40), 0 10px 24px -10px rgba(231,111,88,0.60), inset 0 1px 0 rgba(255,220,205,0.55), inset 0 -1px 0 rgba(40,10,5,0.40)',
             }}
           >
+            {/* Sheen sweep */}
+            <span className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(255,255,255,0.0) 40%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0.0) 60%)', mixBlendMode: 'overlay' }} />
             <MdCardGiftcard className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Canjear premios</span>
           </Link>
