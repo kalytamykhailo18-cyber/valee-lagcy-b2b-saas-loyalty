@@ -16,6 +16,9 @@ export default function AuthChannelPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
+  const [testPhone, setTestPhone] = useState('')
+  const [testing, setTesting] = useState(false)
+  const [testMsg, setTestMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null)
 
   async function load() {
     setLoading(true)
@@ -135,6 +138,55 @@ export default function AuthChannelPage() {
         <p className="pt-2 text-[11px] text-slate-400 leading-relaxed">
           El cambio se aplica al instante a las nuevas peticiones de codigo. Las sesiones que ya estaban verificando un codigo previo se mantienen — el flujo de verificacion intenta ambos canales hasta encontrar el codigo valido, asi que un cambio mid-flow no deja al usuario afuera.
         </p>
+      </div>
+
+      {/* Eric 2026-05-06: dry-run de Twilio. Sirve para confirmar que el
+          SMS llega antes de switchear el canal en produccion. No toca
+          la configuracion del canal — solo manda un OTP de Twilio al
+          telefono indicado. */}
+      <div className="mt-6 p-5 rounded-2xl bg-white border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-2 mb-1">
+          <MdSms className="w-5 h-5 text-indigo-600" />
+          <h2 className="font-bold text-slate-800">Probar Twilio Verify</h2>
+        </div>
+        <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+          Manda un codigo OTP por SMS via Twilio al numero que escribas. Util para confirmar que el canal funciona antes de switchear produccion. No cambia la configuracion del canal activo.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-2">
+          <input
+            type="tel"
+            value={testPhone}
+            onChange={e => setTestPhone(e.target.value)}
+            placeholder="+58 414 1234567"
+            className="flex-1 px-3 py-2.5 rounded-lg border border-slate-200 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            disabled={testing || !state.smsAvailable}
+          />
+          <button
+            onClick={async () => {
+              if (!testPhone.trim()) return
+              setTesting(true)
+              setTestMsg(null)
+              try {
+                const res: any = await api.testSmsOtp(testPhone.trim())
+                setTestMsg({ tone: 'ok', text: `SMS enviado a ${res.phoneNumber}. Revisa el telefono — el codigo expira en ~10 min.` })
+              } catch (e: any) {
+                setTestMsg({ tone: 'err', text: e?.error || 'Twilio rechazo el envio' })
+              }
+              setTesting(false)
+            }}
+            disabled={testing || !state.smsAvailable || !testPhone.trim()}
+            className="px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-semibold hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {testing ? 'Enviando...' : 'Enviar test'}
+          </button>
+        </div>
+        {testMsg && (
+          <div className={`mt-3 p-3 rounded-lg text-sm ${
+            testMsg.tone === 'ok' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-rose-50 text-rose-800 border border-rose-200'
+          }`}>
+            {testMsg.text}
+          </div>
+        )}
       </div>
     </div>
   )

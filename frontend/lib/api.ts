@@ -452,4 +452,6 @@ export const api = {
     request('/api/admin/auth-channel'),
   setAuthChannel: (channel: 'whatsapp' | 'sms') =>
     request('/api/admin/auth-channel', { method: 'PUT', body: JSON.stringify({ channel }) }),
+  testSmsOtp: (phoneNumber: string) =>
+    request('/api/admin/test-sms-otp', { method: 'POST', body: JSON.stringify({ phoneNumber }) }),
 };
