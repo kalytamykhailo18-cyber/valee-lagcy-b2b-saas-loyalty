@@ -584,7 +584,7 @@ function ConsumerApp() {
   return (
     <div
       className="min-h-screen pb-32"
-      style={{ background: 'radial-gradient(ellipse at 30% -10%, #1F1318 0%, #0B0709 55%, #050304 100%)' }}
+      style={{ background: '#211E1D' }}
     >
       {/* Welcome Card — first visit only. Eric 2026-04-24: render a row of
           real product photos from this merchant so the "how it works" copy
@@ -716,20 +716,31 @@ function ConsumerApp() {
         className="aa-rise mx-4 mt-5 rounded-3xl p-6 sm:p-7 overflow-hidden relative"
         style={{
           animationDelay: '60ms',
-          // Polished metal: alternating light/dark stops along a single
-          // diagonal axis create the brushed-metal sheen Eric pointed to
-          // (overview/image.png 2026-05-06). Multi-stop gradient with
-          // sharp transitions reads as polished, not flat.
-          background: 'linear-gradient(160deg, #4A1A0E 0%, #8C3621 8%, #C9523A 18%, #F08868 30%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #E76F58 72%, #B0432D 84%, #6B2818 92%, #2A0E08 100%)',
-          boxShadow: '0 1px 2px rgba(40,10,5,0.45), 0 30px 60px -20px rgba(231,111,88,0.65), inset 0 1px 0 rgba(255,220,205,0.65), inset 0 -1px 0 rgba(40,10,5,0.45)',
+          // Eric 2026-05-06 (overview/2.png): textura mas plana, brushed
+          // rose-gold uniforme, sin tantos destellos. Una sola banda de
+          // highlight suave + estriado vertical fino para el efecto
+          // brushed metal en lugar del polished metal anterior.
+          background: 'linear-gradient(180deg, #E5AB9E 0%, #D88E7E 50%, #B96856 100%)',
+          boxShadow: '0 1px 2px rgba(40,10,5,0.30), 0 24px 48px -22px rgba(185,104,86,0.50), inset 0 1px 0 rgba(255,220,205,0.45)',
         }}
       >
-        {/* Sharp metallic sheen — narrow bright band sweeping across */}
-        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(255,255,255,0.0) 38%, rgba(255,255,255,0.55) 49%, rgba(255,255,255,0.18) 53%, rgba(255,255,255,0.0) 62%)', mixBlendMode: 'overlay' }} />
-        {/* Secondary darker band for the contrasted "metal" feel */}
-        <div className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(0,0,0,0.0) 70%, rgba(40,10,5,0.30) 82%, rgba(0,0,0,0.0) 95%)', mixBlendMode: 'multiply' }} />
-        <div className="pointer-events-none absolute -top-16 -right-16 w-56 h-56 bg-white/30 rounded-full blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 -left-12 w-48 h-48 bg-rose-300/25 rounded-full blur-3xl" />
+        {/* Brushed-metal vertical striations — fine and low-alpha so it
+            reads as texture, not pattern. */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 3px)',
+            mixBlendMode: 'overlay',
+          }}
+        />
+        {/* Single soft highlight band along the top — emulates the one
+            sheen in the reference image, not the multi-band sharp pop. */}
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 h-1/2"
+          style={{
+            background: 'radial-gradient(ellipse at 50% 0%, rgba(255,220,205,0.40) 0%, rgba(255,220,205,0.0) 70%)',
+          }}
+        />
         <div className="relative text-rose-950">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
@@ -891,11 +902,11 @@ function ConsumerApp() {
                   <div
                     className="w-full aspect-square rounded-full overflow-hidden relative"
                     style={{
-                      // Polished metallic salmon — same multi-stop scheme
-                      // as the saldo card so the canje miniatures hagan
-                      // juego con la tarjeta de saldo.
-                      background: 'linear-gradient(160deg, #4A1A0E 0%, #C9523A 18%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #B0432D 84%, #2A0E08 100%)',
-                      boxShadow: '0 1px 2px rgba(40,10,5,0.40), 0 8px 20px -10px rgba(231,111,88,0.55), inset 0 1px 0 rgba(255,220,205,0.55), inset 0 -1px 0 rgba(40,10,5,0.40)',
+                      // Eric 2026-05-06 (overview/2.png): brushed
+                      // rose-gold flat, mismo recipe que la tarjeta de
+                      // saldo para que el set haga juego.
+                      background: 'linear-gradient(180deg, #E5AB9E 0%, #D88E7E 50%, #B96856 100%)',
+                      boxShadow: '0 1px 2px rgba(40,10,5,0.25), 0 8px 20px -10px rgba(185,104,86,0.45), inset 0 1px 0 rgba(255,220,205,0.40)',
                     }}
                   >
                     {p.photoUrl ? (
@@ -1072,12 +1083,18 @@ function ConsumerApp() {
             href="/catalog"
             className="aa-btn flex-1 py-3.5 rounded-xl font-bold text-sm text-center flex items-center justify-center gap-2 transition relative overflow-hidden text-rose-950"
             style={{
-              background: 'linear-gradient(160deg, #4A1A0E 0%, #C9523A 18%, #FFC2A6 42%, #FFE0CF 50%, #FFA383 60%, #B0432D 84%, #2A0E08 100%)',
-              boxShadow: '0 1px 2px rgba(40,10,5,0.40), 0 10px 24px -10px rgba(231,111,88,0.60), inset 0 1px 0 rgba(255,220,205,0.55), inset 0 -1px 0 rgba(40,10,5,0.40)',
+              // Brushed rose-gold flat — match the saldo card material.
+              background: 'linear-gradient(180deg, #E5AB9E 0%, #D88E7E 50%, #B96856 100%)',
+              boxShadow: '0 1px 2px rgba(40,10,5,0.30), 0 10px 24px -10px rgba(185,104,86,0.55), inset 0 1px 0 rgba(255,220,205,0.45)',
             }}
           >
-            {/* Sheen sweep */}
-            <span className="pointer-events-none absolute inset-0" style={{ background: 'linear-gradient(110deg, rgba(255,255,255,0.0) 40%, rgba(255,255,255,0.5) 50%, rgba(255,255,255,0.0) 60%)', mixBlendMode: 'overlay' }} />
+            <span
+              className="pointer-events-none absolute inset-0"
+              style={{
+                background: 'repeating-linear-gradient(90deg, rgba(255,255,255,0.05) 0px, rgba(255,255,255,0.05) 1px, transparent 1px, transparent 3px)',
+                mixBlendMode: 'overlay',
+              }}
+            />
             <MdCardGiftcard className="w-5 h-5 relative z-10" />
             <span className="relative z-10">Canjear premios</span>
           </Link>
