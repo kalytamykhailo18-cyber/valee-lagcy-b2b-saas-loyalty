@@ -57,6 +57,16 @@ function ConsumerApp() {
     // Accept both ?merchant= and ?tenant= for backwards compat with the home page
     // and external links/QRs that use either name.
     const merchantSlugFromUrl = searchParams.get('merchant') || searchParams.get('tenant') || ''
+    // Cajero slug comes from the WhatsApp greeting "Accede a tu cuenta" link
+    // when the user scanned a cashier QR. We record a StaffScanSession so the
+    // invoice they upload from the PWA still carries the attribution.
+    // Accepts both ?cajero= (legacy WhatsApp greeting) and ?cjr= (current
+    // PWA-direct cashier QR — see merchant-qr.ts generateStaffQR).
+    const cashierSlugFromUrl = searchParams.get('cajero') || searchParams.get('cjr') || ''
+    // Referral slug from the PWA-direct referral QR (?ref2u=). Persisted by
+    // /consumer/<slug>/page.tsx; we record the pending referral here so the
+    // referrer gets credited on this referee's first validated transaction.
+    const referralSlugFromUrl = searchParams.get('ref2u') || ''
 
     // Always start with 'loading' to avoid login page flash during SSR hydration.
     // The useEffect below checks localStorage and sets the real screen.
@@ -167,6 +177,49 @@ function ConsumerApp() {
         purgeExpiredActions()
         setPendingCount(getPendingCount())
     }, [merchantSlugFromUrl])
+
+    // One-shot: register the cashier attribution on this consumer's phone
+    // when the URL carries ?cajero= or ?cjr=. We wait until `screen === 'main'`
+    // so the tenant context is already selected and the JWT has the phone.
+    // We also remove the param from the URL afterwards so a browser
+    // refresh doesn't keep re-recording the session forever.
+    useEffect(() => {
+        if (screen !== 'main') return
+        if (!cashierSlugFromUrl) return
+        const flagKey = `cajeroRecorded:${cashierSlugFromUrl}`
+        if (sessionStorage.getItem(flagKey)) return
+        ;(async () => {
+            try {
+                await api.recordStaffAttribution(cashierSlugFromUrl)
+                sessionStorage.setItem(flagKey, '1')
+                const u = new URL(window.location.href)
+                u.searchParams.delete('cajero')
+                u.searchParams.delete('cjr')
+                window.history.replaceState({}, '', u.pathname + (u.search ? `?${u.searchParams.toString()}` : ''))
+            } catch {}
+        })()
+    }, [screen, cashierSlugFromUrl])
+
+    // One-shot: record the pending referral when the URL carries ?ref2u=.
+    // Mirrors the WhatsApp webhook path that handles `Ref2U:<slug>` in the
+    // inbound message text. recordPendingReferral is idempotent (guards on
+    // existing referral / prior activity) so a refresh that retriggers this
+    // is harmless, but we still strip the param to keep URLs tidy.
+    useEffect(() => {
+        if (screen !== 'main') return
+        if (!referralSlugFromUrl) return
+        const flagKey = `ref2uRecorded:${referralSlugFromUrl}`
+        if (sessionStorage.getItem(flagKey)) return
+        ;(async () => {
+            try {
+                await api.recordReferralAttribution(referralSlugFromUrl)
+                sessionStorage.setItem(flagKey, '1')
+                const u = new URL(window.location.href)
+                u.searchParams.delete('ref2u')
+                window.history.replaceState({}, '', u.pathname + (u.search ? `?${u.searchParams.toString()}` : ''))
+            } catch {}
+        })()
+    }, [screen, referralSlugFromUrl])
 
     async function loadData() {
         // Use allSettled so one failing call (e.g. /balance when the token is

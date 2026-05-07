@@ -66,4 +66,38 @@ export async function registerReferralsRoutes(app: FastifyInstance): Promise<voi
         .toFixed(8),
     };
   });
+
+  // ---- REFERRAL ATTRIBUTION via PWA ----
+  // When a consumer arrives at /consumer/<slug>?ref2u=<refSlug>, the slug
+  // page persists the marker and the /consumer page calls this endpoint
+  // post-login to record the pending referral. Mirrors the WhatsApp webhook
+  // path that does the same on `Ref2U:<slug>` markers in the inbound text.
+  app.post('/api/consumer/referral-attribution', { preHandler: [requireConsumerAuth] }, async (request, reply) => {
+    const { tenantId, accountId } = request.consumer!;
+    if (!tenantId || !accountId) {
+      return reply.status(409).send({ error: 'requires merchant selection', requiresMerchantSelection: true });
+    }
+    const { referralSlug } = (request.body || {}) as { referralSlug?: string };
+    if (!referralSlug || typeof referralSlug !== 'string') {
+      return reply.status(400).send({ error: 'referralSlug required' });
+    }
+    const clean = referralSlug.trim().toLowerCase();
+    if (!/^[a-z0-9]{4,16}$/.test(clean)) {
+      return reply.status(400).send({ error: 'invalid referralSlug' });
+    }
+    const referrer = await prisma.account.findUnique({
+      where: { referralSlug: clean },
+      select: { id: true },
+    });
+    if (!referrer) {
+      return { recorded: false, reason: 'unknown_referrer' };
+    }
+    const { recordPendingReferral } = await import('../../../services/referrals.js');
+    const result = await recordPendingReferral({
+      tenantId,
+      referrerAccountId: referrer.id,
+      refereeAccountId: accountId,
+    });
+    return result;
+  });
 }

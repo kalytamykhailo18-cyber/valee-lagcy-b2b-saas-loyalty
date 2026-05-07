@@ -1,8 +1,30 @@
 'use client'
 
 import { useParams, useSearchParams } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { MdChat, MdRocketLaunch } from 'react-icons/md'
+
+// Splice the QR-encoded markers (branchId, cashier slug, referral slug) into
+// the wa.me link's `text` param so the webhook parsers see them on the
+// inbound message. Without this, the merchant-entry API returns a link with
+// only "Ref: <slug>" and the cashier/branch/referral attribution is lost on
+// the WhatsApp path.
+function enrichWhatsAppLink(rawLink: string | null, params: { branch?: string | null; cjr?: string | null; ref2u?: string | null }): string | null {
+  if (!rawLink) return null
+  try {
+    const u = new URL(rawLink)
+    let text = u.searchParams.get('text') || ''
+    if (params.branch) {
+      text = text.replace(/(Ref:\s*[a-z0-9][a-z0-9-]*)/i, `$1/${params.branch}`)
+    }
+    if (params.cjr)   text += ` Cjr:${params.cjr}`
+    if (params.ref2u) text += ` Ref2U:${params.ref2u}`
+    u.searchParams.set('text', text)
+    return u.toString()
+  } catch {
+    return rawLink
+  }
+}
 
 interface MerchantEntry {
   name: string
@@ -62,6 +84,12 @@ export default function MerchantConsumerPage() {
     window.location.href = `/consumer?${qs.toString()}`
   }
 
+  const enrichedWhatsAppLink = useMemo(() => enrichWhatsAppLink(entry?.whatsappLink ?? null, {
+    branch: search?.get('branch'),
+    cjr:    search?.get('cjr'),
+    ref2u:  search?.get('ref2u'),
+  }), [entry?.whatsappLink, search])
+
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
@@ -97,9 +125,9 @@ export default function MerchantConsumerPage() {
           <span className="relative z-10">Continuar aqui</span>
         </button>
 
-        {entry.whatsappLink && (
+        {enrichedWhatsAppLink && (
           <a
-            href={entry.whatsappLink}
+            href={enrichedWhatsAppLink}
             target="_blank"
             rel="noopener noreferrer"
             className="block w-full bg-white border-2 border-emerald-200 text-emerald-700 py-3 rounded-xl font-semibold hover:bg-emerald-50 transition text-center"

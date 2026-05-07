@@ -294,6 +294,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ cashierSlug }),
     }),
+  recordReferralAttribution: (referralSlug: string) =>
+    request('/api/consumer/referral-attribution', {
+      method: 'POST',
+      body: JSON.stringify({ referralSlug }),
+    }),
   getAffiliatedMerchants: () => request('/api/consumer/affiliated-merchants'),
   initiateDualScan: (amount: string, branchId?: string) =>
     request('/api/merchant/dual-scan/initiate', { method: 'POST', body: JSON.stringify({ amount, branchId }) }),
