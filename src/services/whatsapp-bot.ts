@@ -89,6 +89,7 @@ export function getStateGreeting(
   merchantSlug?: string,
   branchName?: string | null,
   cashierSlug?: string | null,
+  branchId?: string | null,
 ): string[] {
   // Prefer the real tenant slug when available; the old fallback slugified
   // merchantName with spaces→dashes, which usually worked for "Valee Demo" but
@@ -96,14 +97,16 @@ export function getStateGreeting(
   // slug (e.g. "Café Juan Valdez" vs cafe-juan).
   const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
   const slug = (merchantSlug || merchantName.toLowerCase().replace(/\s+/g, '-')).toLowerCase();
-  // Carry the cajero slug in the PWA link when the incoming QR identified a
-  // cashier. Genesis 2026-04-24: without it the user clicking the link from
-  // WhatsApp lands on the plain tenant view and the invoice they upload
-  // from the PWA loses the staff attribution. The PWA reads `cajero=` and
-  // registers a StaffScanSession so the attribution window carries across.
-  const pwaLink = cashierSlug
-    ? `${base}/consumer?tenant=${encodeURIComponent(slug)}&cajero=${encodeURIComponent(cashierSlug)}`
-    : `${base}/consumer?tenant=${encodeURIComponent(slug)}`;
+  // Carry the cajero slug AND branch id in the PWA link so the user clicking
+  // through from WhatsApp keeps both attribution dimensions. Without these the
+  // /consumer page lands on the plain tenant view and (a) the invoice loses
+  // the staff scan-session, (b) the multisucursal context the user just
+  // scanned (Eric 2026-05-08) is dropped — every link looked identical
+  // regardless of which sucursal QR was scanned.
+  const params = new URLSearchParams({ tenant: slug });
+  if (cashierSlug) params.set('cajero', cashierSlug);
+  if (branchId)   params.set('branch', branchId);
+  const pwaLink = `${base}/consumer?${params.toString()}`;
   // Combine the merchant name with the branch the user just scanned so the
   // bot reply reflects where they actually are (Genesis L4: 'Acabas de
   // visitar Luxor Fitness' should say 'Luxor Fitness - Luxor Valencia').
@@ -477,7 +480,7 @@ export async function handleIncomingMessage(params: {
     const bonusAmt = welcomeBonusGranted
       ? (tenant?.welcomeBonusAmount?.toString() || process.env.WELCOME_BONUS_AMOUNT || '50')
       : '';
-    return [...referralPrefix, ...getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName, cashierSlug)];
+    return [...referralPrefix, ...getStateGreeting('first_time', merchantName, bonusAmt, phoneNumber, bonusAmt, merchantSlug, branchName, cashierSlug, params.branchId || null)];
   }
 
   // If it's the first message or a greeting, send state-based greeting
@@ -493,12 +496,12 @@ export async function handleIncomingMessage(params: {
     const isQrRescan = /\b(?:ref|cjr|ref2u):\s*[a-z0-9\-\/]+/i.test(lower)
       || /merchant:[a-z0-9\-]+/i.test(lower);
     if (isQrRescan) {
-      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug)];
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug, params.branchId || null)];
     }
 
     // Check if it's a greeting
     if (/^(hola|hi|hello|hey|buenos|buenas|buen día|saludos|qué tal|que tal)/.test(lower)) {
-      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug)];
+      return [...referralPrefix, ...getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug, params.branchId || null)];
     }
 
     // Check support intents
@@ -559,10 +562,17 @@ export async function handleIncomingMessage(params: {
     if (result.success) {
       // PWA deep link — lets the user jump from WhatsApp straight to their
       // balance/catalog for this merchant without re-selecting the tenant.
+      // Carry the branch id when the original QR scan identified one so the
+      // multisucursal context survives the click-through (Eric 2026-05-08).
       const base = (process.env.CONSUMER_APP_URL || 'https://valee.app').replace(/\/+$/, '');
-      const pwaLink = merchantSlug
-        ? `${base}/consumer?tenant=${encodeURIComponent(merchantSlug)}`
-        : `${base}/consumer`;
+      let pwaLink: string;
+      if (merchantSlug) {
+        const linkParams = new URLSearchParams({ tenant: merchantSlug });
+        if (params.branchId) linkParams.set('branch', params.branchId);
+        pwaLink = `${base}/consumer?${linkParams.toString()}`;
+      } else {
+        pwaLink = `${base}/consumer`;
+      }
 
       const isPending = result.stage === 'pending';
       if (isPending) {
@@ -594,5 +604,5 @@ export async function handleIncomingMessage(params: {
   }
 
   // Default: state greeting
-  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug);
+  return getStateGreeting(state, merchantName, balance, phoneNumber, undefined, merchantSlug, branchName, cashierSlug, params.branchId || null);
 }
