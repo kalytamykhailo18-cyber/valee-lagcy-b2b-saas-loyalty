@@ -208,14 +208,15 @@ export async function confirmDualScan(params: {
   const poolAccount = await getSystemAccount(payload.tenantId, 'issued_value_pool');
   if (!poolAccount) return { success: false, message: 'Cuenta del comercio no configurada' };
 
-  // Write the PRESENCE_VALIDATED double-entry as PROVISIONAL. Eric 2026-04-27:
-  // cash payments must mirror the invoice flow — points credit immediately so
-  // the customer's balance reflects them, but the entry stays provisional
-  // until validated against the merchant's CSV upload (or POS integration
-  // when that lands). Provisional credits already count toward the
-  // spendable balance via getAccountBalance, so the customer can use the
-  // points; the "(provisional)" label only changes how the entry is
-  // labeled in the consumer history and merchant transactions panel.
+  // Write the PRESENCE_VALIDATED double-entry as CONFIRMED. Eric 2026-05-08:
+  // the original 2026-04-27 design wrote this as 'provisional' with the intent
+  // that the merchant's CSV upload would later validate the cash entry. But
+  // cash payments don't carry an invoice number, so the reconciliation worker
+  // (which matches CSV rows by invoice_number) has no path to ever clear the
+  // provisional flag — the label was a dead-end. Cashier-entered amounts come
+  // from a verified staff member with audit-logged identity, which is the
+  // same trust model we apply to invoice-based PRESENCE_VALIDATED. Confirm
+  // at write time and remove the misleading "en verificacion" UI state.
   await writeDoubleEntry({
     tenantId: payload.tenantId,
     eventType: 'PRESENCE_VALIDATED',
@@ -225,7 +226,7 @@ export async function confirmDualScan(params: {
     assetTypeId: payload.assetTypeId,
     referenceId,
     referenceType: 'invoice',
-    status: 'provisional',
+    status: 'confirmed',
     branchId: payload.branchId,
     metadata: {
       source: 'dual_scan',
@@ -247,7 +248,7 @@ export async function confirmDualScan(params: {
 
   return {
     success: true,
-    message: `Recibimos tu visita. Ganaste ${parseFloat(loyaltyValue).toLocaleString('es-VE')} puntos (en verificacion). Tu saldo: ${parseFloat(newBalance).toLocaleString('es-VE')} puntos. Te confirmamos cuando se valide.`,
+    message: `Recibimos tu visita. Ganaste ${parseFloat(loyaltyValue).toLocaleString('es-VE')} puntos. Tu saldo: ${parseFloat(newBalance).toLocaleString('es-VE')} puntos.`,
     valueAssigned: loyaltyValue,
     newBalance,
     branchId: payload.branchId,
